@@ -1,0 +1,3 @@
+[submodule "ola/common"]
+	path = ola/common
+	url = ssh://git@viphost.go.ro:2222/ola/ola-common.git

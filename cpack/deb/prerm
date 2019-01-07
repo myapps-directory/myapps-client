@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+
+# unregister memgrow service
+systemctl stop memgrow.service
+systemctl disable memgrow.service
+rm "/lib/systemd/system/memgrow.service"
+systemctl daemon-reload

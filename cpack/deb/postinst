@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+
+MEMGROW_INSTALL_DIR="/opt/yalos/memgrow"
+MEMGROW_WORK_DIR="/var/opt/yalos/memgrow"
+MEMGROW_USER="memgrow"
+
+useradd -M $MEMGROW_USER
+usermod -L $MEMGROW_USER
+
+# create symlink to libmemgrow.so for easy access from applications
+ln -s "$MEMGROW_INSTALL_DIR/lib/libmemgrow.so" "/usr/lib"
+
+# create log folder
+mkdir -p "$MEMGROW_WORK_DIR/log"
+
+# create configuration
+if [ ! -d "$MEMGROW_WORK_DIR/config" ]; then
+    mkdir -p "$MEMGROW_WORK_DIR/config"
+fi
+
+CONFIGURATION_OUT="$MEMGROW_WORK_DIR/config/memgrow.config"
+CONFIGURATION_SUM=true
+if [ -e $CONFIGURATION_OUT ]; then
+    CONFIGURATION_SUM=false
+fi
+
+chown -R $MEMGROW_USER:$MEMGROW_USER "$MEMGROW_WORK_DIR"
+
+# generate configuration
+"$MEMGROW_INSTALL_DIR/bin/memgrow_service" --log-output "$MEMGROW_WORK_DIR/log/memgrow_service" --log-module ew  --log-module ".*:view" --generate-config "$CONFIGURATION_OUT"
+
+if [ $CONFIGURATION_SUM = true ]; then
+    md5sum "$CONFIGURATION_OUT" > "${CONFIGURATION_OUT}.sum"
+    chmod -w "${CONFIGURATION_OUT}.sum"
+fi
+
+# register the memgrow systemctl service
+cp  "$MEMGROW_INSTALL_DIR/systemd/memgrow.service" "/lib/systemd/system/"
+
+systemctl daemon-reload
+systemctl start memgrow
+systemctl enable memgrow

@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+
+
+CONFIG_SUM=`md5sum /var/opt/yalos/memgrow/config/memgrow.config`
+SAVED_SUM=`cat /var/opt/yalos/memgrow/config/memgrow.config.sum`
+
+if [ "$CONFIG_SUM" = "$SAVED_SUM" ]; then
+    rm "/var/opt/yalos/memgrow/config/memgrow.config"
+fi
+
+rm -f "/var/opt/yalos/memgrow/config/memgrow.config.in"
+rm -f "/var/opt/yalos/memgrow/config/memgrow.config.sum"
+rm -d "/var/opt/yalos/memgrow/config"
+rm -d "/var/opt/yalos/memgrow/log"
+rm -d "/var/opt/yalos/memgrow"
+rm -d "/var/opt/yalos"
+
+echo "Remove /usr/lib/libmemgrow.so symlink..."
+rm "/usr/lib/libmemgrow.so"
+
+echo "Delete <memgrow> user..." 
+userdel -r memgrow

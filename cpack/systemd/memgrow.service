@@ -1,0 +1,15 @@
+[Unit]
+Description=Memgrow Service
+After=network.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=forking
+GuessMainPID=true
+Restart=always
+RestartSec=1
+User=memgrow
+ExecStart=/opt/yalos/memgrow/bin/memgrow_service --background -c "/var/opt/yalos/memgrow/config/memgrow.config"
+
+[Install]
+WantedBy=multi-user.target

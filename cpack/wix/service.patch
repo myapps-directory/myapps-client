@@ -1,0 +1,64 @@
+<CPackWiXPatch>
+  <CPackWiXFragment Id="#PRODUCT">
+    <Property Id="ALLUSERS">1</Property>
+    <Property Id="MSIRESTARTMANAGERCONTROL">Disable</Property>
+    <Property Id='NOTEPAD'>Notepad.exe</Property>
+
+    <UI>
+        <Publish Dialog="ExitDialog" 
+            Control="Finish" 
+            Event="DoAction" 
+            Value="LaunchReadMe">WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 and NOT Installed</Publish>
+    </UI>
+
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="Show Readme.txt" />
+    <CustomAction Id='LaunchReadMe' Property='NOTEPAD' ExeCommand='[ARPINSTALLLOCATION]readme.txt' Return='asyncNoWait' />
+
+    <!-- Install service: https://github.com/rstropek/Samples/blob/master/WiXSamples/WindowsService/ServiceInstaller/Product.wxs
+			<ServiceInstall Id="InstallELS"
+							Name="WiXEventLoggingService"
+							Description="WiX EventLoggingService Sample"
+							Start="auto"
+							ErrorControl="normal"
+							Type="ownProcess"/>
+    -->
+    <DirectoryRef Id="INSTALL_ROOT">
+      <Directory Id="ConfigFolder" Name="config" />
+    </DirectoryRef>
+
+    <Component Id="CreateConfigFolder"  Directory="ConfigFolder" Guid="48E389E1-5822-422D-A254-313A38D5E669" KeyPath="yes">
+      <CreateFolder/>
+    </Component>
+    
+    <FeatureRef Id="ProductFeature" IgnoreParent="yes">
+          <ComponentRef Id="CreateConfigFolder"/>
+    </FeatureRef>
+ 
+    <InstallExecuteSequence>
+      <Custom Action='ServiceConfigure' After='InstallFiles'>(NOT Installed) AND (NOT REMOVE)</Custom>
+      <Custom Action='ServiceInstall' After='ServiceConfigure'>(NOT Installed) AND (NOT REMOVE)</Custom>
+      <Custom Action='ServiceUninstall' After='ProcessComponents'>Installed</Custom>
+
+       <!-- <ScheduleReboot After='InstallFinalize' /> -->
+    </InstallExecuteSequence>
+
+    <CustomAction Id="ServiceConfigure" Directory='INSTALL_ROOT'
+              Execute="commit" Impersonate="no" Return="asyncWait"
+              ExeCommand='[CM_DP_bin]memgrow_service.exe --log-output "[INSTALL_ROOT]log\memgrow_service" --log-module ew  --log-module ".*:view" --generate-config "[ConfigFolder]memgrow.config'/>
+
+    <CustomAction Id="ServiceInstall" Directory='INSTALL_ROOT'
+              Execute="commit" Impersonate="no" Return="ignore"
+              ExeCommand='[CM_DP_bin]memgrow_service.exe --service-install'/>
+
+    <CustomAction Id="ServiceUninstall" Directory='INSTALL_ROOT'
+              Execute="deferred" Impersonate="no" Return="asyncWait"
+              ExeCommand='[CM_DP_bin]memgrow_service.exe --service-uninstall'/>
+
+    <!-- https://www.firegiant.com/wix/tutorial/events-and-actions/extra-actions/
+    <InstallExecuteSequence>
+      <Custom Action='LaunchReadMe' After='InstallFinalize'>NOT Installed</Custom>
+       <ScheduleReboot After='InstallFinalize' />
+    </InstallExecuteSequence>
+    -->
+  </CPackWiXFragment>
+</CPackWiXPatch>

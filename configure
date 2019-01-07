@@ -1,0 +1,238 @@
+#!/usr/bin/env bash
+
+make_cmake_list(){
+    if [ -e CMakeLists.txt ]; then
+        rm CMakeLists.txt
+    fi
+    if [ $1 = "*" ]; then
+        echo "No child folder found!"
+        echo "# Automaticaly created" >> CMakeLists.txt
+    else
+        echo "# Automaticaly created" >> CMakeLists.txt
+        for name in $*
+            do
+            if [ $name = "CMakeLists.txt" ]; then
+                echo "Skip CMakeLists.txt"
+            else
+                echo "Adding dir: " $name
+                echo -ne "add_subdirectory("$name")\r\n" >> CMakeLists.txt
+            fi
+            done
+    fi
+}
+
+
+print_usage(){
+    echo "Usage:"
+    echo -ne "\n./configure [-g|--generator GeneratorName] [-f|--folder FolderName] [-b|--build BuildType]"
+    echo -ne " [-e|--external-path ExternalPath] [-P|--cmake-param]"
+    echo
+    echo -ne "Options:\n"
+    echo "[-b|--build BuildType]: The cmake build type release/debug/nolog/maintain - default release"
+    echo "[-e|--external-path ExternalPath]: path to external libraries"
+    echo "[-f|--folder-name FolderName]: Specify the build folder name - default is the generator name or the build type if the generator was not specified"
+    echo "[--prefix] Install path prefix"
+    echo 
+    echo "[-g|--generator GeneratorName]: Specify the cmake generator - default cmake's default"
+    echo "[-p|--param ParamName]: Extra compilation flags. E.g. -p \"-DUINDEX64 -DUSERVICEBITS=3\""
+    echo "[-P|--cmake-param]: Parameters given to cmake. E.g. -P \"-DSolidFrame_DIR=~/work/solidframe/build/release\""
+    echo
+    echo "Examples:"
+    echo
+    echo "1) create simple make release build:"
+    echo "$ ./configure -e ~/work/external"
+    echo "$ cd build/release"
+    echo "$ make"
+    echo "$ sudo make install"
+    echo
+    echo "2) create debug build:"
+    echo "$ ./configure -b debug -e ~/work/external --prefix ~/work/external"
+    echo "$ cd build/debug"
+    echo "$ make install"
+    echo
+    echo "3) create a maintain build locate in \"./build/mnt\" with instalation prefix:"
+    echo "$ ./configure -f mnt -e ~/work/external -b maintain --prefix ~/work/install -P \"-DSolidFrame_DIR=~/work/solidframe/build/release\""
+    echo "$ cd build/mnt"
+    echo "$ make install"
+    echo
+    exit
+}
+
+# First define and initilaize the variables
+
+GENERATOR=
+DOCUMENTATION=
+BUILD_TYPE=
+FOLDER_NAME=
+FOLDER_PATH=
+HELP="no"
+PARAM=
+EXTERNAL_DIR=
+ENABLE_TESTING=
+TEST_NAME=
+TEST_SITE=
+CREATE_LISTS=
+INSTALL_PREFIX=
+
+pass_arg_count=0
+while [ $# -gt $pass_arg_count ]
+do
+    CURRENT_OPT="$1"
+    UNKNOWN_ARG=no
+    case "$1" in
+    -g|--generator)
+        shift
+        GENERATOR=$1
+        ;;
+    -f|--folder-name)
+        shift
+        FOLDER_NAME=$1
+        ;;
+    -F|--folder-path)
+        shift
+        FOLDER_PATH=$1
+        ;;
+    -b|--build)
+        shift
+        BUILD_TYPE=$1
+        ;;
+    -d|--documentation)
+        if [ -z "$2" ] || echo "$2" | grep '^-' >/dev/null 2>&1; then
+            DOCUMENTATION="fast"
+        else
+            shift;
+            DOCUMENTATION=$1
+        fi
+        ;;
+    -p|--param)
+        shift
+        PARAM=$PARAM"$1 "
+        ;;
+    --prefix)
+        shift
+        INSTALL_PREFIX="$1"
+        ;;
+    -P|--cmake-param)
+        shift
+        #CMAKE_PARAM=($CMAKE_PARAM "$1")
+        arg="$1"
+        set -- "$@" "$arg"
+        pass_arg_count=`expr $pass_arg_count + 1`
+        ;;
+    -e|--external-path)
+        shift;
+        EXTERNAL_DIR=$1
+        ;;
+    -c|--create-lists)
+        CREATE_LISTS="yes"
+        ;;
+    -h|--help)
+        HELP="yes"
+        ;;
+    -t|--enable-testing)
+        ENABLE_TESTING="yes"
+        ;;
+    --test-name)
+        shift
+        TEST_NAME="$1"
+        ;;
+    --test-site)
+        shift
+        TEST_SITE="$1"
+        ;;
+    *)
+        HELP="yes"
+        ;;
+    esac
+    shift
+done
+
+
+if [ "$HELP" = "yes" ]; then
+    print_usage
+    exit
+fi
+
+if [ ! -z $EXTERNAL_DIR ]; then
+
+    if [ ! -d $EXTERNAL_DIR ]; then
+        echo "Invalid prerequisites path: $EXTERNAL_DIR"
+        exit
+    fi
+
+    cd $EXTERNAL_DIR
+    EXTERNAL_DIR=`pwd`
+    cd -
+fi
+
+echo "Using extern prerequisites from: $EXTERNAL_DIR"
+
+if [ "$DOCUMENTATION" = "full" ]; then
+    echo "Building full documentation ..."
+    rm -rf documentation/html/
+    rm -rf  documentation/latex/
+    doxygen documentation/Doxyfile
+    tar -cjf documentation/full.tar.bz2 documentation/html/ documentation/index.html
+    echo "Done building full documentation"
+    exit
+fi
+
+if [ "$DOCUMENTATION" = "fast" ]; then
+    echo "Building documentation..."
+    rm -rf documentation/html/
+    doxygen documentation/Doxyfile.fast
+    tar -cjf documentation/fast.tar.bz2 documentation/html/ documentation/index.html
+    echo "Done building documentation"
+    exit
+fi
+
+if [ "$BUILD_TYPE" = "" ]; then
+    BUILD_TYPE="release"
+fi
+
+if [ "$FOLDER_NAME" = "" ]; then
+    if [ "$GENERATOR" = "" ]; then
+        FOLDER_NAME=$BUILD_TYPE
+    else
+        FOLDER_NAME=$GENERATOR
+    fi
+fi
+
+SRC_PATH="`pwd`"
+
+if [ "$FOLDER_PATH" = "" ]; then
+    if [ ! -d build ]; then
+        mkdir build
+    fi
+    mkdir "build/$FOLDER_NAME"
+    cd "build/$FOLDER_NAME"
+else
+    echo "$FOLDER_PATH"
+    mkdir "$FOLDER_PATH"
+    cd "$FOLDER_PATH"
+fi
+echo $GENERATOR
+
+echo "The list of parameters forwarded to cmake:"
+for param in "$@"; do
+echo "$param"
+done
+echo
+
+echo -ne "./configure -f $FOLDER_NAME -F \"$FOLDER_PATH\" -b \"$BUILD_TYPE\" -g \"$GENERATOR\" -p \"$PARAM\" -e \"$EXTERNAL_DIR\"  \"$@\" \"$SRC_PATH\"\r\n" > configure.txt
+
+if [ "$GENERATOR" = "" ]; then
+    echo "Using cmake's default generator:"
+    echo ""
+    
+    exec cmake -DCMAKE_BUILD_TYPE=$BUILD_TYPE -DEXTRA_DEFINITIONS:STRING="$PARAM" -DEXTERNAL_DIR:STRING="$EXTERNAL_DIR" -DCMAKE_INSTALL_PREFIX="$INSTALL_PREFIX" "$@" "$SRC_PATH"
+    echo "Done!"
+else
+    echo "Using cmake's $GENERATOR"
+    echo ""
+    
+    exec cmake -G "$GENERATOR" -DCMAKE_BUILD_TYPE=$BUILD_TYPE -DEXTRA_DEFINITIONS:STRING="$PARAM" -DEXTERNAL_DIR:STRING="$EXTERNAL_DIR"  -DCMAKE_INSTALL_PREFIX="$INSTALL_PREFIX" "$@" "$SRC_PATH"
+fi
+
+exit
+

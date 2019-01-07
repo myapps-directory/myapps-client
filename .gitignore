@@ -1,4 +1,12 @@
-# ---> C++
+# Build
+.kdev4/
+build/
+*.kdev4
+.vs/
+
+# Prerequisites
+*.d
+
 # Compiled Object files
 *.slo
 *.lo
@@ -16,6 +24,7 @@
 
 # Fortran module files
 *.mod
+*.smod
 
 # Compiled Static libraries
 *.lai
@@ -27,4 +36,3 @@
 *.exe
 *.out
 *.app
-
