@@ -20,10 +20,14 @@
 #include "boost/program_options.hpp"
 #include <future>
 #include <iostream>
+#include <mutex>
+#include <queue>
+#include <thread>
 
 using namespace std;
 using namespace solid;
 using namespace ola;
+using namespace ola::front;
 
 namespace {
 
@@ -51,11 +55,63 @@ struct Parameters {
 
 //-----------------------------------------------------------------------------
 
-bool parseArguments(Parameters& _par, int argc, char* argv[]);
+using RecipientQueueT = std::queue<frame::mprpc::RecipientId>;
 
-string getCommand(const string& _line);
+struct Engine {
+    frame::mprpc::ServiceT& rrpc_service_;
+    const Parameters&       rparams_;
+    thread                  auth_thread_;
+    RecipientQueueT         auth_recipient_q_;
+    atomic<bool>            running_;
+    mutex                   mutex_;
+    string                  auth_token_;
 
-void configure_service(frame::mprpc::ServiceT& _rsvc, AioSchedulerT& _rsch, frame::aio::Resolver& _rres, const Parameters& _par);
+    Engine(
+        frame::mprpc::ServiceT& _rrpc_service,
+        const Parameters&       _rparams)
+        : rrpc_service_(_rrpc_service)
+        , rparams_(_rparams)
+        , running_(true)
+    {
+    }
+
+    frame::mprpc::ServiceT& rpcService() const
+    {
+        return rrpc_service_;
+    }
+
+    const Parameters& params() const
+    {
+        return rparams_;
+    }
+
+    const string& serverEndpoint() const
+    {
+        return params().front_endpoint;
+    }
+
+    void onConnectionStart(frame::mprpc::ConnectionContext& _ctx);
+    void authRun();
+    void onAuthResponse(frame::mprpc::ConnectionContext& _ctx, AuthResponse& _rresponse);
+
+    void stop()
+    {
+        running_ = false;
+        if (auth_thread_.joinable()) {
+            auth_thread_.join();
+        }
+    }
+};
+
+//-----------------------------------------------------------------------------
+
+bool parse_arguments(Parameters& _par, int argc, char* argv[]);
+
+string get_command(const string& _line);
+
+void configure_service(Engine& _reng, AioSchedulerT& _rsch, frame::aio::Resolver& _rres);
+
+void handle_list(istream& _ris, Engine& _reng);
 
 } //namespace
 
@@ -63,7 +119,7 @@ int main(int argc, char* argv[])
 {
     Parameters params;
 
-    if (parseArguments(params, argc, argv))
+    if (parse_arguments(params, argc, argv))
         return 0;
 
     signal(SIGPIPE, SIG_IGN);
@@ -90,6 +146,7 @@ int main(int argc, char* argv[])
     FunctionWorkPool       fwp{WorkPoolConfiguration()};
     frame::aio::Resolver   resolver(fwp);
     frame::mprpc::ServiceT rpc_service(manager);
+    Engine                 engine(rpc_service, params);
     ErrorConditionT        err;
 
     err = scheduler.start(1);
@@ -99,7 +156,7 @@ int main(int argc, char* argv[])
         return 0;
     }
 
-    configure_service(rpc_service, scheduler, resolver, params);
+    configure_service(engine, scheduler, resolver);
 
     string line;
 
@@ -114,13 +171,19 @@ int main(int argc, char* argv[])
         istringstream iss(line);
         string        cmd;
         iss >> cmd;
+
+        if (cmd == "list") {
+            handle_list(iss, engine);
+        }
     }
+    engine.stop();
+    rpc_service.stop(); //need this because rpc_service uses the engine
     return 0;
 }
 
 namespace {
 //-----------------------------------------------------------------------------
-bool parseArguments(Parameters& _par, int argc, char* argv[])
+bool parse_arguments(Parameters& _par, int argc, char* argv[])
 {
     using namespace boost::program_options;
     try {
@@ -162,7 +225,7 @@ void complete_message(
     solid_check(false); //this method should not be called
 }
 //-----------------------------------------------------------------------------
-string getCommand(const string &_line){
+string get_command(const string &_line){
     size_t offset = _line.find(' ');
     if (offset != string::npos) {
         return _line.substr(0, offset);
@@ -181,8 +244,7 @@ struct FrontSetup {
     }
 };
 
-
-void configure_service(frame::mprpc::ServiceT &_rsvc, AioSchedulerT &_rsch, frame::aio::Resolver &_rres, const Parameters& _par){
+void configure_service(Engine &_reng, AioSchedulerT &_rsch, frame::aio::Resolver &_rres){
     auto                        proto = front::ProtocolT::create();
     frame::mprpc::Configuration cfg(_rsch, proto);
 
@@ -192,7 +254,18 @@ void configure_service(frame::mprpc::ServiceT &_rsvc, AioSchedulerT &_rsch, fram
 
     cfg.client.connection_start_state = frame::mprpc::ConnectionState::Passive;
     
-    if (_par.secure) {
+    {
+//         auto connection_stop_lambda = [&_rctx](frame::mpipc::ConnectionContext &_ctx){
+//             engine_ptr->onConnectionStop(_ctx);
+//         };
+        auto connection_start_lambda = [&_reng](frame::mprpc::ConnectionContext &_ctx){
+            _reng.onConnectionStart(_ctx);
+        };
+        //cfg.connection_stop_fnc = std::move(connection_stop_lambda);
+        cfg.client.connection_start_fnc = std::move(connection_start_lambda);
+    }
+
+    if (_reng.params().secure) {
         frame::mprpc::openssl::setup_client(
             cfg,
             [](frame::aio::openssl::Context& _rctx) -> ErrorCodeT {
@@ -203,14 +276,220 @@ void configure_service(frame::mprpc::ServiceT &_rsvc, AioSchedulerT &_rsch, fram
             },
             frame::mprpc::openssl::NameCheckSecureStart{"ola-front-server"});
     }
+    
+    if(_reng.params().compress){
+        frame::mprpc::snappy::setup(cfg);
+    }
 
-    frame::mprpc::snappy::setup(cfg);
-
-    ErrorConditionT err = _rsvc.reconfigure(std::move(cfg));
+    ErrorConditionT err = _reng.rpcService().reconfigure(std::move(cfg));
 
     if (err) {
         cout << "Error starting ipcservice: " << err.message() << endl;
         exit(0);
+    }
+}
+
+//-----------------------------------------------------------------------------
+// Command handlers
+//-----------------------------------------------------------------------------
+
+void handle_list_oses(istream& _ris, Engine &_reng){
+    auto req_ptr = make_shared<ListOSesRequest>();
+    
+    promise<void> prom;
+    
+    auto lambda = [&prom](
+        frame::mprpc::ConnectionContext&        _rctx,
+        std::shared_ptr<ListOSesRequest>&  _rsent_msg_ptr,
+        std::shared_ptr<ListOSesResponse>& _rrecv_msg_ptr,
+        ErrorConditionT const&                  _rerror
+    ){
+        if(_rrecv_msg_ptr){
+            cout<<"{\n";
+            for(const auto & os: _rrecv_msg_ptr->osvec_){
+                cout<<os<<'\n';
+            }
+            cout<<'}'<<endl;
+        }else{
+            cout<<"Error - no response: "<<_rerror.message()<<endl;
+        }
+        prom.set_value();
+    };
+    _reng.rpcService().sendRequest(_reng.serverEndpoint().c_str(), req_ptr, lambda);
+    
+    solid_check(prom.get_future().wait_for(chrono::seconds(100)) == future_status::ready, "Taking too long - waited 100 secs");
+}
+
+void handle_list(istream& _ris, Engine &_reng){
+    string what;
+    _ris>>what;
+    
+    if(what == "oses"){
+        handle_list_oses(_ris, _reng);
+    }
+}
+
+//-----------------------------------------------------------------------------
+// Engine
+//-----------------------------------------------------------------------------
+
+void Engine::authRun(){
+    
+    shared_ptr<AuthRequest> req_ptr;
+    
+    while(running_){
+        
+        if(!req_ptr){
+            req_ptr = std::make_shared<AuthRequest>();
+            cout<<"User: "<<flush;cin>>req_ptr->auth_;
+            cout<<"Pass: "<<flush;cin>>req_ptr->pass_;
+        
+            req_ptr->pass_ = ola::utility::sha256(req_ptr->pass_);
+        }
+        
+        promise<int> prom;
+        
+        auto lambda = [this, &prom, &req_ptr](
+            frame::mprpc::ConnectionContext&        _rctx,
+            std::shared_ptr<AuthRequest>&  _rsent_msg_ptr,
+            std::shared_ptr<AuthResponse>& _rrecv_msg_ptr,
+            ErrorConditionT const&                  _rerror
+        ){
+            if(_rrecv_msg_ptr){
+                solid_log(logger, Info, "received authentication response: "<<_rrecv_msg_ptr->error_<<" "<<_rrecv_msg_ptr->message_);
+                if(_rrecv_msg_ptr->error_ == 0){
+                    //authentication success
+                    {
+                        std::lock_guard<mutex> lock(mutex_);
+                        auth_token_ = _rrecv_msg_ptr->message_;
+                        
+                        solid_check(!auth_recipient_q_.empty());
+                        
+                        rrpc_service_.connectionNotifyEnterActiveState(auth_recipient_q_.front());
+                        auth_recipient_q_.pop();
+                    }
+                    prom.set_value(0);
+                }else{
+                    //authentication fail
+                    req_ptr.reset();
+                    cout<<"Fail: "<<_rrecv_msg_ptr->message_<<endl;
+                    prom.set_value(-1);
+                }
+            }else{
+                prom.set_value(-1);
+            }
+        };
+        
+        {
+            lock_guard<mutex> lock(mutex_);
+            solid_check(!auth_recipient_q_.empty());
+    
+            while(!auth_recipient_q_.empty()){
+                auto err = rpcService().sendRequest(auth_recipient_q_.front(), req_ptr, lambda);
+                if(err){
+                    if(auth_recipient_q_.size() == 1){
+                        err = rpcService().sendRequest(serverEndpoint().c_str(), req_ptr, lambda, auth_recipient_q_.front());
+                        if(err){
+                            auth_recipient_q_.pop();
+                            prom.set_value(-1);
+                            break;
+                        }else{
+                            //success
+                            break;
+                        }
+                    }else{
+                        auth_recipient_q_.pop();
+                    }
+                }else{
+                    //success
+                    break;
+                }
+            }
+        }
+        
+        auto fut = prom.get_future();
+        
+        solid_check(fut.wait_for(chrono::seconds(100)) == future_status::ready, "Taking too long - waited 100 secs");
+        
+        if(fut.get() == 0){
+            lock_guard<mutex> lock(mutex_);
+            auto lambda = [this](
+                frame::mprpc::ConnectionContext&        _rctx,
+                std::shared_ptr<AuthRequest>&  _rsent_msg_ptr,
+                std::shared_ptr<AuthResponse>& _rrecv_msg_ptr,
+                ErrorConditionT const&                  _rerror
+            ){
+                if(_rrecv_msg_ptr){
+                    onAuthResponse(_rctx, *_rrecv_msg_ptr);
+                }
+            };
+            
+            while(!auth_recipient_q_.empty()){
+                rpcService().sendRequest(auth_recipient_q_.front(), std::make_shared<AuthRequest>(auth_token_), lambda);
+                auth_recipient_q_.pop();
+            }
+            break;
+        }
+    }
+}
+
+void Engine::onConnectionStart(frame::mprpc::ConnectionContext &_ctx){
+    string auth_token;
+    {
+        std::lock_guard<mutex> lock(mutex_);
+        if(!auth_token_.empty()){
+            auth_token = auth_token_;
+        }else if(auth_recipient_q_.empty()){
+            auth_recipient_q_.emplace(_ctx.recipientId());
+        }else if(_ctx.recipientId() == auth_recipient_q_.front()){
+            return;
+        }else{
+            auth_recipient_q_.emplace(_ctx.recipientId());
+        }
+    }
+    if(!auth_token.empty()){
+        auto req_ptr = std::make_shared<AuthRequest>(auth_token);
+        auto lambda = [this](
+            frame::mprpc::ConnectionContext&        _rctx,
+            std::shared_ptr<AuthRequest>&  _rsent_msg_ptr,
+            std::shared_ptr<AuthResponse>& _rrecv_msg_ptr,
+            ErrorConditionT const&                  _rerror
+        ){
+            if(_rrecv_msg_ptr){
+                onAuthResponse(_rctx, *_rrecv_msg_ptr);
+            }
+        };
+        
+        rpcService().sendRequest(_ctx.recipientId(), req_ptr, lambda);
+    }else{
+        if(auth_thread_.joinable()){
+            auth_thread_.join();
+        }
+        auth_thread_ = std::thread(&Engine::authRun, this);
+    }
+}
+
+void Engine::onAuthResponse(frame::mprpc::ConnectionContext &_ctx, AuthResponse &_rresponse){
+    if(_rresponse.error_ == 0){
+        {
+            std::lock_guard<mutex> lock(mutex_);
+            auth_token_ = _rresponse.message_;
+        }
+        rrpc_service_.connectionNotifyEnterActiveState(_ctx.recipientId());
+    }else{
+        bool   start_auth_thread = false;
+        {
+            std::lock_guard<mutex> lock(mutex_);
+            auth_recipient_q_.emplace(_ctx.recipientId());
+            
+            if(auth_recipient_q_.size() != 1){
+                return;
+            }
+        }
+        if(auth_thread_.joinable()){
+            auth_thread_.join();
+        }
+        auth_thread_ = std::thread(&Engine::authRun, this);
     }
 }
 
