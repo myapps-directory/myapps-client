@@ -2,6 +2,7 @@
 #include "solid/frame/manager.hpp"
 #include "solid/frame/scheduler.hpp"
 #include "solid/frame/service.hpp"
+#include "solid/system/directory.hpp"
 #include "solid/system/log.hpp"
 
 #include "solid/frame/aio/aioresolver.hpp"
@@ -18,6 +19,7 @@
 #include <signal.h>
 
 #include "boost/program_options.hpp"
+#include <fstream>
 #include <future>
 #include <iostream>
 #include <mutex>
@@ -34,6 +36,9 @@ namespace {
 const solid::LoggerT logger("cli");
 
 using AioSchedulerT = frame::Scheduler<frame::aio::Reactor>;
+
+string get_home_env();
+bool   read(string& _rs, istream& _ris, size_t _sz);
 
 //-----------------------------------------------------------------------------
 //      Parameters
@@ -60,11 +65,12 @@ using RecipientQueueT = std::queue<frame::mprpc::RecipientId>;
 struct Engine {
     frame::mprpc::ServiceT& rrpc_service_;
     const Parameters&       rparams_;
-    thread                  auth_thread_;
-    RecipientQueueT         auth_recipient_q_;
     atomic<bool>            running_;
     mutex                   mutex_;
     string                  auth_token_;
+    thread                  auth_thread_;
+    RecipientQueueT         auth_recipient_q_;
+    string                  path_prefix_;
 
     Engine(
         frame::mprpc::ServiceT& _rrpc_service,
@@ -73,6 +79,20 @@ struct Engine {
         , rparams_(_rparams)
         , running_(true)
     {
+    }
+
+    void start()
+    {
+        ifstream ifs(authTokenStorePath());
+
+        if (ifs) {
+            read(auth_token_, ifs, -1);
+        }
+    }
+
+    string authTokenStorePath() const
+    {
+        return path_prefix_ + "/auth.data";
     }
 
     frame::mprpc::ServiceT& rpcService() const
@@ -99,6 +119,12 @@ struct Engine {
         running_ = false;
         if (auth_thread_.joinable()) {
             auth_thread_.join();
+        }
+        if (!auth_token_.empty()) {
+            Directory::create_all(path_prefix_.c_str());
+            ofstream ofs(authTokenStorePath());
+            ofs << auth_token_;
+            ofs.flush();
         }
     }
 };
@@ -156,6 +182,17 @@ int main(int argc, char* argv[])
         return 0;
     }
 
+    {
+        string home = get_home_env();
+        if (home.empty()) {
+            home = '.';
+        }
+        home += "/.ola";
+        engine.path_prefix_ = std::move(home);
+    }
+
+    engine.start();
+
     configure_service(engine, scheduler, resolver);
 
     string line;
@@ -163,7 +200,9 @@ int main(int argc, char* argv[])
     while (true) {
         cout << '>' << flush;
         line.clear();
-        getline(cin, line);
+        do {
+            getline(cin, line);
+        } while (line.empty());
 
         if (line == "q" || line == "Q" || line == "quit") {
             break;
@@ -492,6 +531,35 @@ void Engine::onAuthResponse(frame::mprpc::ConnectionContext &_ctx, AuthResponse 
         auth_thread_ = std::thread(&Engine::authRun, this);
     }
 }
+
+//-----------------------------------------------------------------------------
+// Utilities
+//-----------------------------------------------------------------------------
+
+string get_home_env()
+{
+    const char* pname = getenv("HOME");
+
+    return pname == nullptr ? "" : pname;
+}
+
+bool read(string& _rs, istream& _ris, size_t _sz)
+{
+    static constexpr size_t bufcp = 1024 * 2;
+    char                    buf[bufcp];
+    while (!_ris.eof() && _sz != 0) {
+        size_t toread = bufcp;
+        if (toread > _sz) {
+            toread = _sz;
+        }
+
+        _ris.read(buf, toread);
+        _rs.append(buf, toread);
+        _sz -= toread;
+    }
+    return _sz == 0;
+}
+
 
 }//namespace
 
