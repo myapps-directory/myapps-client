@@ -19,6 +19,9 @@
 #include <signal.h>
 
 #include "boost/program_options.hpp"
+
+#include "libconfig.h++"
+
 #include <fstream>
 #include <future>
 #include <iostream>
@@ -138,6 +141,8 @@ string get_command(const string& _line);
 void configure_service(Engine& _reng, AioSchedulerT& _rsch, frame::aio::Resolver& _rres);
 
 void handle_list(istream& _ris, Engine& _reng);
+void handle_create(istream& _ris, Engine& _reng);
+void handle_generate(istream& _ris, Engine& _reng);
 
 } //namespace
 
@@ -213,6 +218,10 @@ int main(int argc, char* argv[])
 
         if (cmd == "list") {
             handle_list(iss, engine);
+        } else if (cmd == "create") {
+            handle_create(iss, engine);
+        } else if (cmd == "generate") {
+            handle_generate(iss, engine);
         }
     }
     engine.stop();
@@ -368,6 +377,71 @@ void handle_list(istream& _ris, Engine &_reng){
     }
 }
 
+bool load_app_config(ola::utility::AppConfig &_app_cfg, const string &_path);
+bool store_app_config(const ola::utility::AppConfig &_app_cfg, const string &_path);
+
+void handle_create_app(istream& _ris, Engine &_reng){
+    string config_path;
+    _ris>>config_path;
+    
+    auto req_ptr = make_shared<CreateAppRequest>();
+    
+    if(!load_app_config(req_ptr->config_, config_path)){
+        return;
+    }
+    
+    promise<void> prom;
+    
+    auto lambda = [&prom](
+        frame::mprpc::ConnectionContext&        _rctx,
+        std::shared_ptr<CreateAppRequest>&  _rsent_msg_ptr,
+        std::shared_ptr<Response>& _rrecv_msg_ptr,
+        ErrorConditionT const&                  _rerror
+    ){
+        if(_rrecv_msg_ptr){
+            cout<<"{\n";
+            cout<<"\terror = "<<_rrecv_msg_ptr->error_<<endl;
+            cout<<"\tmessage = "<<_rrecv_msg_ptr->message_<<endl;
+            cout<<'}'<<endl;
+        }else{
+            cout<<"Error - no response: "<<_rerror.message()<<endl;
+        }
+        prom.set_value();
+    };
+    _reng.rpcService().sendRequest(_reng.serverEndpoint().c_str(), req_ptr, lambda);
+    
+    solid_check(prom.get_future().wait_for(chrono::seconds(100)) == future_status::ready, "Taking too long - waited 100 secs");
+}
+
+void handle_create(istream& _ris, Engine &_reng){
+    string what;
+    _ris>>what;
+    
+    if(what == "app"){
+        handle_create_app(_ris, _reng);
+    }
+}
+
+void handle_generate_app(istream& _ris, Engine &_reng){
+    string config_path;
+    _ris>>config_path;
+    
+    ola::utility::AppConfig cfg;
+    cfg.name_ = "generic_name";
+    cfg.description_ = "multi-line app description";
+    cfg.short_description_ = "short single line app description";
+    cfg.name_vec_.emplace_back(make_pair("name_en", "generic_name"));
+    store_app_config(cfg, config_path);
+}
+
+void handle_generate(istream& _ris, Engine &_reng){
+    string what;
+    _ris>>what;
+    
+    if(what == "app"){
+        handle_generate_app(_ris, _reng);
+    }
+}
 //-----------------------------------------------------------------------------
 // Engine
 //-----------------------------------------------------------------------------
@@ -560,6 +634,88 @@ bool read(string& _rs, istream& _ris, size_t _sz)
     return _sz == 0;
 }
 
+bool load_app_config(ola::utility::AppConfig &_app_cfg, const string &_path){
+    using namespace libconfig;
+    Config cfg;
+    cfg.setOptions(Config::OptionFsync
+                 | Config::OptionSemicolonSeparators
+                 | Config::OptionColonAssignmentForGroups
+                 | Config::OptionOpenBraceOnSeparateLine);
+    try
+    {
+        cfg.readFile(_path.c_str());
+    }
+    catch(const FileIOException &fioex)
+    {
+        std::cerr << "I/O error while reading file." << std::endl;
+        return false;
+    }
+    catch(const ParseException &pex)
+    {
+        std::cerr << "Parse error at " << pex.getFile() << ":" << pex.getLine()
+                << " - " << pex.getError() << std::endl;
+        return false;
+    }
+    
+    Setting &root = cfg.getRoot();
+    
+    if(!root.lookupValue("name", _app_cfg.name_)){
+        cout<<"Error: app name not found in configuration"<<endl;
+        return false;
+    }
+    if(!root.lookupValue("description", _app_cfg.description_)){
+        cout<<"Error: app description not found in configuration"<<endl;
+        return false;
+    }
+    if(!root.lookupValue("short_description", _app_cfg.short_description_)){
+        cout<<"Error: app short_description not found in configuration"<<endl;
+        return false;
+    }
+    
+    if(root.exists("names")){
+        Setting &names = root.lookup("names");
+        
+        for(auto it = names.begin(); it != names.end(); ++it){
+            _app_cfg.name_vec_.emplace_back(it->getName(), *it);
+        }
+    }
+
+    return true;
+}
+
+bool store_app_config(const ola::utility::AppConfig &_app_cfg, const string &_path){
+    using namespace libconfig;
+    Config cfg;
+    
+    cfg.setOptions(Config::OptionFsync
+                 | Config::OptionSemicolonSeparators
+                 | Config::OptionColonAssignmentForGroups
+                 | Config::OptionOpenBraceOnSeparateLine);
+    
+    Setting &root = cfg.getRoot();
+    
+    root.add("name", Setting::TypeString) = _app_cfg.name_;
+    root.add("description", Setting::TypeString) = _app_cfg.description_;
+    root.add("short_description", Setting::TypeString) = _app_cfg.short_description_;
+    
+    Setting &names = root.add("names", Setting::TypeGroup);
+    
+    for(auto v: _app_cfg.name_vec_){
+        names.add(v.first, Setting::TypeString) = v.second;
+    }
+    
+    try
+    {
+        cfg.writeFile(_path.c_str());
+        cerr << "Updated configuration successfully written to: " << _path << endl;
+    }
+    catch(const FileIOException &fioex)
+    {
+        cerr << "I/O error while writing file: " << _path << endl;
+        return false;
+    }
+    return true;
+}
 
 }//namespace
 

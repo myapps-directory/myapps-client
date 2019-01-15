@@ -16,7 +16,7 @@ message("project version: ${PROJECT_VERSION} - ${PROJECT_VERSION_MAJOR}.${PROJEC
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-set (CMAKE_CXX_STANDARD 11)
+set (CMAKE_CXX_STANDARD 14)
 
 set(EXTRA_DEFINITIONS "${EXTRA_DEFINITIONS}" CACHE STRING "Extra compiler definitions")
 add_definitions(${EXTRA_DEFINITIONS})
@@ -50,6 +50,8 @@ include(cmake/find-solidframe.cmake)
 include(cmake/build-cereal.cmake)
 
 include(cmake/build-snappy.cmake)
+
+include(cmake/build-config.cmake)
 
 set(SYSTEM_BASIC_LIBRARIES pthread rt)
     
