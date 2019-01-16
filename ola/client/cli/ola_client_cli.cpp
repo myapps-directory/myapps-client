@@ -368,12 +368,77 @@ void handle_list_oses(istream& _ris, Engine &_reng){
     solid_check(prom.get_future().wait_for(chrono::seconds(100)) == future_status::ready, "Taking too long - waited 100 secs");
 }
 
+void handle_list_apps(istream& _ris, Engine &_reng){
+    auto req_ptr = make_shared<ListAppsRequest>();
+    //o - owned applications
+    //a - aquired applications
+    //A - all applications
+    _ris>>req_ptr->choice_;
+    //i - id
+    //n - name
+    //s - short description
+    //d - description
+    _ris>>req_ptr->static_fields_;
+    while(!_ris.eof()){
+        string f;
+        _ris>>f;
+        
+        if(!f.empty()){
+            req_ptr->field_vec_.emplace_back(f);
+        }else{
+            break;
+        }
+    }
+    
+    promise<void> prom;
+    
+    auto lambda = [&prom](
+        frame::mprpc::ConnectionContext&        _rctx,
+        std::shared_ptr<ListAppsRequest>&  _rsent_msg_ptr,
+        std::shared_ptr<ListAppsResponse>& _rrecv_msg_ptr,
+        ErrorConditionT const&                  _rerror
+    ){
+        if(_rrecv_msg_ptr){
+            cout<<"{\n";
+            auto lambda = [](const char _static_field, const string &_field, const string &_v, const bool _is_first, const bool _is_last){
+                if(_is_first){
+                    cout<<"\t{\n";
+                }
+                
+                switch(_static_field){
+                    case 'i': cout<<"\tID:\t"<<ola::utility::base64_encode(_v)<<"\n";break;
+                    case 'n': cout<<"\tName:\t"<<_v<<"\n";break;
+                    case 's': cout<<"\tShort:\t"<<_v<<"\n";break;
+                    case 'd': cout<<"\tDesc:\t"<<_v<<"\n";break;
+                    default:
+                        cout<<'\t'<<_field<<":\t"<<_v<<"\n";break;
+                }
+                
+                if(_is_last){
+                    cout<<"\t}\n";
+                }
+            };
+            _rrecv_msg_ptr->visit(lambda, _rsent_msg_ptr->static_fields_, _rsent_msg_ptr->field_vec_);
+            cout<<"}"<<endl;
+        }else{
+            cout<<"Error - no response: "<<_rerror.message()<<endl;
+        }
+        prom.set_value();
+    };
+    _reng.rpcService().sendRequest(_reng.serverEndpoint().c_str(), req_ptr, lambda);
+    
+    solid_check(prom.get_future().wait_for(chrono::seconds(100)) == future_status::ready, "Taking too long - waited 100 secs");
+    
+}
+
 void handle_list(istream& _ris, Engine &_reng){
     string what;
     _ris>>what;
     
     if(what == "oses"){
         handle_list_oses(_ris, _reng);
+    }else if(what == "apps"){
+        handle_list_apps(_ris, _reng);
     }
 }
 
