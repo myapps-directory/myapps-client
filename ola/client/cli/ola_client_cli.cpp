@@ -466,7 +466,11 @@ void handle_create_app(istream& _ris, Engine &_reng){
         if(_rrecv_msg_ptr){
             cout<<"{\n";
             cout<<"\terror = "<<_rrecv_msg_ptr->error_<<endl;
-            cout<<"\tmessage = "<<_rrecv_msg_ptr->message_<<endl;
+            if(_rrecv_msg_ptr->error_ == ola::utility::error_exist.value() || _rrecv_msg_ptr->error_ == 0){
+                cout<<"\tmessage = "<<ola::utility::base64_encode(_rrecv_msg_ptr->message_)<<endl;
+            }else{
+                cout<<"\tmessage = "<<_rrecv_msg_ptr->message_<<endl;
+            }
             cout<<'}'<<endl;
         }else{
             cout<<"Error - no response: "<<_rerror.message()<<endl;
