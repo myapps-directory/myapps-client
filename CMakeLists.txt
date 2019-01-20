@@ -53,6 +53,8 @@ include(cmake/build-snappy.cmake)
 
 include(cmake/build-config.cmake)
 
+include(cmake/build-libzip.cmake)
+
 set(SYSTEM_BASIC_LIBRARIES pthread rt)
     
 find_library(ATOMIC_LIBRARY NAMES atomic atomic.so.1 libatomic.so.1)
