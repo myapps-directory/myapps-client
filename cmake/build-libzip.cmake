@@ -28,5 +28,5 @@ ExternalProject_Add(
 )
 
 set(LIBZIP_FOUND TRUE)
-set(LIBZIP_LIBRARIES libzip)
+set(LIBZIP_LIBRARIES zip z)
 

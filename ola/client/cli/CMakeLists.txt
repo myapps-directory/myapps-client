@@ -8,10 +8,12 @@ target_link_libraries (ola_client_cli
     ${OPENSSL_LIBRARIES}
     ${Boost_PROGRAM_OPTIONS_LIBRARY}
     ${Boost_SYSTEM_LIBRARY}
+    ${Boost_FILESYSTEM_LIBRARY}
     ${SNAPPY_LIB}
     ${SYSTEM_BASIC_LIBRARIES}
     ${SYSTEM_DYNAMIC_LOAD_LIBRARY}
     ${LIBCONFIG_LIBRARIES}
+    ${LIBZIP_LIBRARIES}
 )
 
 add_dependencies(ola_client_cli build-snappy build-config)

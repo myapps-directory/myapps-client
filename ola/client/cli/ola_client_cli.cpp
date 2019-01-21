@@ -20,6 +20,10 @@
 
 #include "boost/program_options.hpp"
 
+#include "boost/filesystem.hpp"
+
+#include "zip.h"
+
 #include "libconfig.h++"
 
 #include <fstream>
@@ -41,6 +45,7 @@ const solid::LoggerT logger("cli");
 using AioSchedulerT = frame::Scheduler<frame::aio::Reactor>;
 
 string get_home_env();
+string path(const std::string& _path);
 bool   read(string& _rs, istream& _ris, size_t _sz);
 
 //-----------------------------------------------------------------------------
@@ -442,8 +447,9 @@ void handle_list(istream& _ris, Engine &_reng){
     }
 }
 
-bool load_app_config(ola::utility::AppConfig &_app_cfg, const string &_path);
-bool store_app_config(const ola::utility::AppConfig &_app_cfg, const string &_path);
+bool load_app_config(ola::utility::AppConfig &_rcfg, const string &_path);
+bool store_app_config(const ola::utility::AppConfig &_rcfg, const string &_path);
+string generate_temp_name();
 
 void handle_create_app(istream& _ris, Engine &_reng){
     string config_path;
@@ -451,7 +457,7 @@ void handle_create_app(istream& _ris, Engine &_reng){
     
     auto req_ptr = make_shared<CreateAppRequest>();
     
-    if(!load_app_config(req_ptr->config_, config_path)){
+    if(!load_app_config(req_ptr->config_, path(config_path))){
         return;
     }
     
@@ -482,12 +488,173 @@ void handle_create_app(istream& _ris, Engine &_reng){
     solid_check(prom.get_future().wait_for(chrono::seconds(100)) == future_status::ready, "Taking too long - waited 100 secs");
 }
 
+bool load_build_config(ola::utility::BuildConfig &_rbuild_cfg, const string &_path);
+bool store_build_config(const ola::utility::BuildConfig &_rbuild_cfg, const string &_path);
+
+bool zip_create(const string &_zip_path, string _root, uint64_t &_rsize);
+
+void on_upload_receive_last_response(
+    frame::mprpc::ConnectionContext& _rctx,
+    std::shared_ptr<UploadBuildRequest>&        _rsent_msg_ptr,
+    std::shared_ptr<Response>&       _rrecv_msg_ptr,
+    ErrorConditionT const&           _rerror,
+    promise<void> &prom,
+    const string &zip_path)
+{
+    solid_check(_rrecv_msg_ptr);
+    
+    
+    if(_rrecv_msg_ptr){
+        if(_rrecv_msg_ptr->error_ == 0){
+            cout<<"Success uploading: "<<zip_path<<endl;
+        }else{
+            cout<<"Error: "<<_rrecv_msg_ptr->error_<<" message: "<<_rrecv_msg_ptr->message_<<endl;
+        }
+    }else{
+        cout<<"Error - no response: "<<_rerror.message()<<endl;
+    }
+    boost::filesystem::remove(zip_path);
+    prom.set_value();
+}
+
+void on_upload_receive_response(
+    frame::mprpc::ConnectionContext& _rctx,
+    std::shared_ptr<UploadBuildRequest>&        _rsent_msg_ptr,
+    std::shared_ptr<Response>&       _rrecv_msg_ptr,
+    ErrorConditionT const&           _rerror,
+    promise<void> &prom,
+    const string &zip_path)
+{
+    if (!_rsent_msg_ptr->ifs_.eof()) {
+        auto lambda = [&prom, &zip_path](
+            frame::mprpc::ConnectionContext&        _rctx,
+            std::shared_ptr<UploadBuildRequest>&  _rsent_msg_ptr,
+            std::shared_ptr<Response>& _rrecv_msg_ptr,
+            ErrorConditionT const&                  _rerror
+        ){
+            on_upload_receive_response(_rctx, _rsent_msg_ptr, _rrecv_msg_ptr, _rerror, prom, zip_path);
+        };
+        frame::mprpc::MessageFlagsT flags{frame::mprpc::MessageFlagsE::ResponsePart, frame::mprpc::MessageFlagsE::AwaitResponse};
+        _rctx.service().sendMessage(_rctx.recipientId(), _rsent_msg_ptr, lambda, flags);
+        flags.reset(frame::mprpc::MessageFlagsE::AwaitResponse);
+        _rctx.service().sendMessage(_rctx.recipientId(), _rsent_msg_ptr, flags);
+    } else {
+        auto lambda = [&prom, &zip_path](
+            frame::mprpc::ConnectionContext&        _rctx,
+            std::shared_ptr<UploadBuildRequest>&  _rsent_msg_ptr,
+            std::shared_ptr<Response>& _rrecv_msg_ptr,
+            ErrorConditionT const&                  _rerror
+        ){
+            on_upload_receive_last_response(_rctx, _rsent_msg_ptr, _rrecv_msg_ptr, _rerror, prom, zip_path);
+        };
+    
+        frame::mprpc::MessageFlagsT flags{frame::mprpc::MessageFlagsE::ResponseLast, frame::mprpc::MessageFlagsE::AwaitResponse};
+        _rctx.service().sendMessage(_rctx.recipientId(), _rsent_msg_ptr, lambda, flags);
+    }
+}
+
+
+void handle_create_build(istream& _ris, Engine &_reng){
+    auto req_ptr = make_shared<CreateBuildRequest>();
+    
+    string config_path, build_path;
+    _ris>>req_ptr->app_id_>>req_ptr->tag_;
+    _ris>>config_path>>build_path;
+    
+    req_ptr->app_id_ = ola::utility::base64_decode(req_ptr->app_id_);
+    
+    if(!load_build_config(req_ptr->config_, path(config_path))){
+        return;
+    }
+    
+    //create archive from build_path/*
+    
+    string zip_path = "/tmp/ola_client_cli_" + generate_temp_name() + ".zip";
+    
+    if(!zip_create(zip_path, path(build_path), req_ptr->size_)){
+        return;
+    }
+    
+    {
+        ifstream ifs(zip_path);
+        if(ifs){
+            req_ptr->sha_sum_ = ola::utility::sha256(ifs);
+            cout<<"sha_sum for "<<zip_path<<": "<<req_ptr->sha_sum_<<endl;
+        }else{
+            cout<<"could not open "<<zip_path<<" for reading"<<endl;
+            return;
+        }
+    }
+    
+    req_ptr->size_ += boost::filesystem::file_size(zip_path);
+    
+    promise<void> prom;
+    
+    auto lambda = [&prom, &zip_path](
+        frame::mprpc::ConnectionContext&        _rctx,
+        std::shared_ptr<CreateBuildRequest>&  _rsent_msg_ptr,
+        std::shared_ptr<Response>& _rrecv_msg_ptr,
+        ErrorConditionT const&                  _rerror
+    ){
+        if(_rrecv_msg_ptr){
+            if(_rrecv_msg_ptr->error_ != 0){
+                cout<<"Error: "<<_rrecv_msg_ptr->error_<<" message: "<<_rrecv_msg_ptr->message_<<endl;
+            }else{
+                cout<<"Start uploading build file: "<<zip_path<<" for build tagged: "<<_rsent_msg_ptr->tag_<<endl;
+                //now we must upload the file
+                auto req_ptr = make_shared<UploadBuildRequest>();
+                req_ptr->ifs_.open(zip_path);
+                req_ptr->header(_rrecv_msg_ptr->header());
+                
+                if (!req_ptr->ifs_.eof()) {
+                    
+                    auto lambda = [&prom, &zip_path](
+                        frame::mprpc::ConnectionContext&        _rctx,
+                        std::shared_ptr<UploadBuildRequest>&  _rsent_msg_ptr,
+                        std::shared_ptr<Response>& _rrecv_msg_ptr,
+                        ErrorConditionT const&                  _rerror
+                    ){
+                        on_upload_receive_response(_rctx, _rsent_msg_ptr, _rrecv_msg_ptr, _rerror, prom, zip_path);
+                    };
+                    
+                    solid_log(logger, Verbose, "client: sending " << zip_path << " to " << _rctx.recipientId());
+                    frame::mprpc::MessageFlagsT flags{frame::mprpc::MessageFlagsE::ResponsePart, frame::mprpc::MessageFlagsE::AwaitResponse};
+                    _rctx.service().sendMessage(_rctx.recipientId(), _rsent_msg_ptr, lambda, flags);
+                    flags.reset(frame::mprpc::MessageFlagsE::AwaitResponse);
+                    _rctx.service().sendMessage(_rctx.recipientId(), _rsent_msg_ptr, flags);
+                } else {
+                    auto lambda = [&prom, &zip_path](
+                        frame::mprpc::ConnectionContext&        _rctx,
+                        std::shared_ptr<UploadBuildRequest>&  _rsent_msg_ptr,
+                        std::shared_ptr<Response>& _rrecv_msg_ptr,
+                        ErrorConditionT const&                  _rerror
+                    ){
+                        on_upload_receive_last_response(_rctx, _rsent_msg_ptr, _rrecv_msg_ptr, _rerror, prom, zip_path);
+                    };
+                    
+                    solid_log(logger, Verbose, "client: sending " << zip_path << " to " << _rctx.recipientId() << " last");
+                    frame::mprpc::MessageFlagsT flags{frame::mprpc::MessageFlagsE::ResponseLast, frame::mprpc::MessageFlagsE::AwaitResponse};
+                    _rctx.service().sendMessage(_rctx.recipientId(), _rsent_msg_ptr, lambda, flags);
+                }
+            }
+        }else{
+            cout<<"Error - no response: "<<_rerror.message()<<endl;
+        }
+        prom.set_value();
+    };
+    _reng.rpcService().sendRequest(_reng.serverEndpoint().c_str(), req_ptr, lambda);
+    
+    solid_check(prom.get_future().wait_for(chrono::seconds(100)) == future_status::ready, "Taking too long - waited 100 secs");
+}
+
 void handle_create(istream& _ris, Engine &_reng){
     string what;
     _ris>>what;
     
     if(what == "app"){
         handle_create_app(_ris, _reng);
+    }else if(what == "build"){
+        handle_create_build(_ris, _reng);
     }
 }
 
@@ -500,7 +667,45 @@ void handle_generate_app(istream& _ris, Engine &_reng){
     cfg.description_ = "multi-line app description";
     cfg.short_description_ = "short single line app description";
     cfg.name_vec_.emplace_back(make_pair("name_en", "generic_name"));
-    store_app_config(cfg, config_path);
+    store_app_config(cfg, path(config_path));
+}
+
+void handle_generate_buid(istream& _ris, Engine &_reng){
+    string config_path;
+    _ris>>config_path;
+    
+    ola::utility::BuildConfig cfg;
+    
+    {
+        auto req_ptr = make_shared<ListOSesRequest>();
+    
+        promise<void> prom;
+        
+        auto lambda = [&prom, &cfg](
+            frame::mprpc::ConnectionContext&        _rctx,
+            std::shared_ptr<ListOSesRequest>&  _rsent_msg_ptr,
+            std::shared_ptr<ListOSesResponse>& _rrecv_msg_ptr,
+            ErrorConditionT const&                  _rerror
+        ){
+            if(_rrecv_msg_ptr){
+                cfg.os_vec_ = std::move(_rrecv_msg_ptr->osvec_);
+            }else{
+                cout<<"Error - no response: "<<_rerror.message()<<endl;
+            }
+            prom.set_value();
+        };
+        _reng.rpcService().sendRequest(_reng.serverEndpoint().c_str(), req_ptr, lambda);
+        
+        solid_check(prom.get_future().wait_for(chrono::seconds(100)) == future_status::ready, "Taking too long - waited 100 secs");
+    }
+    
+    cfg.name_ = "generic_name";
+    cfg.description_ = "multi-line build description";
+    cfg.mount_vec_.emplace_back(make_pair("mount/point/first", "path/to/first"));
+    cfg.mount_vec_.emplace_back(make_pair("mount/point/second", "path/to/second"));
+    cfg.exe_vec_.emplace_back("path/to/first.exe");
+    cfg.exe_vec_.emplace_back("path/to/second.exe");
+    store_build_config(cfg, path(config_path));
 }
 
 void handle_generate(istream& _ris, Engine &_reng){
@@ -509,6 +714,8 @@ void handle_generate(istream& _ris, Engine &_reng){
     
     if(what == "app"){
         handle_generate_app(_ris, _reng);
+    }else if(what == "build"){
+        handle_generate_buid(_ris, _reng);
     }
 }
 //-----------------------------------------------------------------------------
@@ -703,7 +910,7 @@ bool read(string& _rs, istream& _ris, size_t _sz)
     return _sz == 0;
 }
 
-bool load_app_config(ola::utility::AppConfig &_app_cfg, const string &_path){
+bool load_app_config(ola::utility::AppConfig &_rcfg, const string &_path){
     using namespace libconfig;
     Config cfg;
     cfg.setOptions(Config::OptionFsync
@@ -728,15 +935,15 @@ bool load_app_config(ola::utility::AppConfig &_app_cfg, const string &_path){
     
     Setting &root = cfg.getRoot();
     
-    if(!root.lookupValue("name", _app_cfg.name_)){
+    if(!root.lookupValue("name", _rcfg.name_)){
         cout<<"Error: app name not found in configuration"<<endl;
         return false;
     }
-    if(!root.lookupValue("description", _app_cfg.description_)){
+    if(!root.lookupValue("description", _rcfg.description_)){
         cout<<"Error: app description not found in configuration"<<endl;
         return false;
     }
-    if(!root.lookupValue("short_description", _app_cfg.short_description_)){
+    if(!root.lookupValue("short_description", _rcfg.short_description_)){
         cout<<"Error: app short_description not found in configuration"<<endl;
         return false;
     }
@@ -745,14 +952,14 @@ bool load_app_config(ola::utility::AppConfig &_app_cfg, const string &_path){
         Setting &names = root.lookup("names");
         
         for(auto it = names.begin(); it != names.end(); ++it){
-            _app_cfg.name_vec_.emplace_back(it->getName(), *it);
+            _rcfg.name_vec_.emplace_back(it->getName(), *it);
         }
     }
 
     return true;
 }
 
-bool store_app_config(const ola::utility::AppConfig &_app_cfg, const string &_path){
+bool store_app_config(const ola::utility::AppConfig &_rcfg, const string &_path){
     using namespace libconfig;
     Config cfg;
     
@@ -763,13 +970,13 @@ bool store_app_config(const ola::utility::AppConfig &_app_cfg, const string &_pa
     
     Setting &root = cfg.getRoot();
     
-    root.add("name", Setting::TypeString) = _app_cfg.name_;
-    root.add("description", Setting::TypeString) = _app_cfg.description_;
-    root.add("short_description", Setting::TypeString) = _app_cfg.short_description_;
+    root.add("name", Setting::TypeString) = _rcfg.name_;
+    root.add("description", Setting::TypeString) = _rcfg.description_;
+    root.add("short_description", Setting::TypeString) = _rcfg.short_description_;
     
     Setting &names = root.add("names", Setting::TypeGroup);
     
-    for(auto v: _app_cfg.name_vec_){
+    for(auto v: _rcfg.name_vec_){
         names.add(v.first, Setting::TypeString) = v.second;
     }
     
@@ -783,6 +990,202 @@ bool store_app_config(const ola::utility::AppConfig &_app_cfg, const string &_pa
         cerr << "I/O error while writing file: " << _path << endl;
         return false;
     }
+    return true;
+}
+
+bool load_build_config(ola::utility::BuildConfig &_rcfg, const string &_path){
+    using namespace libconfig;
+    Config cfg;
+    cfg.setOptions(Config::OptionFsync
+                 | Config::OptionSemicolonSeparators
+                 | Config::OptionColonAssignmentForGroups
+                 | Config::OptionOpenBraceOnSeparateLine);
+    try
+    {
+        cfg.readFile(_path.c_str());
+    }
+    catch(const FileIOException &fioex)
+    {
+        std::cerr << "I/O error while reading file." << std::endl;
+        return false;
+    }
+    catch(const ParseException &pex)
+    {
+        std::cerr << "Parse error at " << pex.getFile() << ":" << pex.getLine()
+                << " - " << pex.getError() << std::endl;
+        return false;
+    }
+    
+    Setting &root = cfg.getRoot();
+    
+    if(!root.lookupValue("name", _rcfg.name_)){
+        cout<<"Error: build name not found in configuration"<<endl;
+        return false;
+    }
+    if(!root.lookupValue("description", _rcfg.description_)){
+        cout<<"Error: build description not found in configuration"<<endl;
+        return false;
+    }
+    
+    if(root.exists("mount")){
+        Setting &names = root.lookup("mount");
+        
+        for(auto it = names.begin(); it != names.end(); ++it){
+            Setting &local = it->lookup("local");
+            Setting &remote = it->lookup("remote");
+            _rcfg.mount_vec_.emplace_back(local, remote);
+        }
+    }
+    
+    if(root.exists("exe")){
+        Setting &exe = root.lookup("exe");
+        
+        for(auto it = exe.begin(); it != exe.end(); ++it){
+            _rcfg.exe_vec_.emplace_back(static_cast<const string&>(*it));
+        }
+    }
+    
+    if(root.exists("os")){
+        Setting &os = root.lookup("os");
+        
+        for(auto it = os.begin(); it != os.end(); ++it){
+            _rcfg.os_vec_.emplace_back(static_cast<const string&>(*it));
+        }
+    }
+
+    return true;
+}
+
+bool store_build_config(const ola::utility::BuildConfig &_rcfg, const string &_path){
+    using namespace libconfig;
+    Config cfg;
+    
+    cfg.setOptions(Config::OptionFsync
+                 | Config::OptionSemicolonSeparators
+                 | Config::OptionColonAssignmentForGroups
+                 | Config::OptionOpenBraceOnSeparateLine);
+    
+    Setting &root = cfg.getRoot();
+    
+    root.add("name", Setting::TypeString) = _rcfg.name_;
+    root.add("description", Setting::TypeString) = _rcfg.description_;
+    
+    Setting &mount = root.add("mount", Setting::TypeList);
+    
+    for(auto& v: _rcfg.mount_vec_){
+        Setting &g  = mount.add(Setting::TypeGroup);
+        g.add("local", Setting::TypeString) = v.first;
+        g.add("remote", Setting::TypeString) = v.second;
+    }
+    
+    Setting &exe = root.add("exe", Setting::TypeArray);
+    for(auto &v: _rcfg.exe_vec_){
+        exe.add(Setting::TypeString) = v;
+    }
+    
+    Setting &os = root.add("os", Setting::TypeArray);
+    for(auto &v: _rcfg.os_vec_){
+        os.add(Setting::TypeString) = v;
+    }
+    
+    try
+    {
+        cfg.writeFile(_path.c_str());
+        cerr << "Updated configuration successfully written to: " << _path << endl;
+    }
+    catch(const FileIOException &fioex)
+    {
+        cerr << "I/O error while writing file: " << _path << endl;
+        return false;
+    }
+    return true;
+}
+
+string path(const std::string &_path){
+    if(_path.empty()){
+        return _path;
+    }
+    if(_path.front() == '~'){
+        return get_home_env() + (_path.c_str() + 1);
+    }
+    return _path;
+}
+
+string generate_temp_name(){
+    uint64_t salt = chrono::steady_clock::now().time_since_epoch().count();
+
+    ostringstream oss;
+    oss << salt;
+    return oss.str();
+}
+
+bool zip_add_file(zip_t *_pzip, const boost::filesystem::path &_path, size_t _base_path_len, uint64_t &_rsize){
+    zip_source_t *psrc = zip_source_file(_pzip, _path.c_str(), 0, 0);
+    if(psrc != nullptr){
+        _rsize += file_size(_path);
+        zip_int64_t err = zip_file_add(_pzip, (_path.c_str() + _base_path_len), psrc, ZIP_FL_ENC_UTF_8);
+        cout<<"zip_add_file: "<<(_path.c_str() + _base_path_len)<<" rv = "<<err<<endl;
+        if(err < 0){
+            zip_source_free(psrc);
+        }
+    }
+    return true;
+}
+
+bool zip_add_dir(zip_t *_pzip, const boost::filesystem::path &_path, size_t _base_path_len, uint64_t &_rsize){
+    using namespace boost::filesystem;
+    
+    zip_int64_t err = zip_dir_add(_pzip, (_path.c_str() + _base_path_len), ZIP_FL_ENC_UTF_8);
+    
+    cout<<"zip_add_dir: "<<(_path.c_str() + _base_path_len)<<" rv = "<<err<<endl;
+    
+    for (directory_entry& x : directory_iterator(_path)){
+        auto p = x.path();
+        if(is_directory(p)){
+            zip_add_dir(_pzip, p, _base_path_len, _rsize);
+        }else{
+            zip_add_file(_pzip, p, _base_path_len, _rsize);
+        }        
+    }
+}
+
+bool zip_create(const string &_zip_path, string _root, uint64_t &_rsize){
+    using namespace boost::filesystem;
+    
+    int err;
+    zip_t *pzip = zip_open(_zip_path.c_str(), ZIP_CREATE| ZIP_EXCL, &err);
+    
+    if(pzip == nullptr){
+        zip_error_t error;
+        zip_error_init_with_code(&error, err);
+        cout<<"Failed creating zip: "<<zip_error_strerror(&error)<<endl;
+        zip_error_fini(&error);
+        return false;
+    }
+    
+    if(!_root.empty() && _root.back() != '/'){
+        _root += '/';
+    }
+    
+    cout<<"Creating zip archive: "<<_zip_path <<" from "<<_root<<endl;
+    
+    _rsize = 0;
+    
+    if(!is_directory(_root)){
+        cout<<"Path: "<<_root<<" not a directory"<<endl;
+        return false;
+    }
+    
+    for (directory_entry& x : directory_iterator(_root)){
+        auto p = x.path();
+        if(is_directory(p)){
+            zip_add_dir(pzip, p, _root.size(), _rsize);
+        }else{
+            zip_add_file(pzip, p, _root.size(), _rsize);
+        }
+        
+    }
+    zip_close(pzip);
     return true;
 }
 
