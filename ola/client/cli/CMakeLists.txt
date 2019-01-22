@@ -16,5 +16,5 @@ target_link_libraries (ola_client_cli
     ${LIBZIP_LIBRARIES}
 )
 
-add_dependencies(ola_client_cli build-snappy build-config)
+add_dependencies(ola_client_cli build-snappy build-config build-libzip)
 

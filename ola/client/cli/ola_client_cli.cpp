@@ -574,6 +574,7 @@ void handle_create_build(istream& _ris, Engine &_reng){
     if(!zip_create(zip_path, path(build_path), req_ptr->size_)){
         return;
     }
+    return;
     
     {
         ifstream ifs(zip_path);
@@ -1149,6 +1150,52 @@ bool zip_add_dir(zip_t *_pzip, const boost::filesystem::path &_path, size_t _bas
     }
 }
 
+bool unzip(const std::string& _zip_path, const std::string& _fld, uint64_t& _total_size)
+{
+    using namespace boost::filesystem;
+    
+    int err;
+    zip_t *pzip = zip_open(_zip_path.c_str(), ZIP_RDONLY, &err);
+    zip_stat_t stat;
+    constexpr size_t bufcp = 1024 * 64;
+    char buf[bufcp];
+    
+    for (int64_t i = 0; i < zip_get_num_entries(pzip, 0); i++) {
+        if (zip_stat_index(pzip, i, 0, &stat) == 0) {
+            _total_size += stat.size;
+            cout<<stat.name<<" "<<stat.size<<endl;
+            size_t name_len = strlen(stat.name);
+            if(stat.name[name_len - 1] == '/'){
+                //folder
+                create_directory(_fld + '/' + stat.name);
+            }else{
+                zip_file *pzf = zip_fopen_index(pzip, i, 0);
+                
+                if(pzf){
+                    std::ofstream ofs(_fld + '/' + stat.name);
+                    uint64_t fsz = 0;
+                    do{
+                        auto v =  zip_fread(pzf, buf, bufcp);
+                        if(v > 0){
+                            ofs.write(buf, v);
+                            fsz += v;
+                        }else{
+                            break;
+                        }
+                    }while(true);
+                    if(fsz != stat.size){
+                        return false;
+                    }
+                }else{
+                    return false;
+                }
+            }
+        }
+    }
+    return true;
+}
+
+
 bool zip_create(const string &_zip_path, string _root, uint64_t &_rsize){
     using namespace boost::filesystem;
     
@@ -1186,8 +1233,16 @@ bool zip_create(const string &_zip_path, string _root, uint64_t &_rsize){
         
     }
     zip_close(pzip);
+    {
+        remove_all("/tmp/ola_client_cli_unzip");
+        create_directory("/tmp/ola_client_cli_unzip");
+        uint64_t total_size = 0;
+        unzip(_zip_path, "/tmp/ola_client_cli_unzip", total_size);
+        solid_check(total_size == _rsize);
+    }
     return true;
 }
+
 
 }//namespace
 
