@@ -148,6 +148,7 @@ void configure_service(Engine& _reng, AioSchedulerT& _rsch, frame::aio::Resolver
 void handle_list(istream& _ris, Engine& _reng);
 void handle_create(istream& _ris, Engine& _reng);
 void handle_generate(istream& _ris, Engine& _reng);
+void handle_acquire(istream& _ris, Engine& _reng);
 
 } //namespace
 
@@ -227,6 +228,8 @@ int main(int argc, char* argv[])
             handle_create(iss, engine);
         } else if (cmd == "generate") {
             handle_generate(iss, engine);
+        } else if (cmd == "acquire") {
+            handle_acquire(iss, engine);
         }
     }
     engine.stop();
@@ -275,7 +278,7 @@ void complete_message(
     std::shared_ptr<M>&              _rrecv_msg_ptr,
     ErrorConditionT const&           _rerror)
 {
-    solid_check(false); //this method should not be called
+    //solid_check(false); //this method should not be called
 }
 //-----------------------------------------------------------------------------
 string get_command(const string &_line){
@@ -375,6 +378,7 @@ void handle_list_oses(istream& _ris, Engine &_reng){
 
 void handle_list_apps(istream& _ris, Engine &_reng){
     auto req_ptr = make_shared<ListAppsRequest>();
+    
     //o - owned applications
     //a - aquired applications
     //A - all applications
@@ -436,6 +440,40 @@ void handle_list_apps(istream& _ris, Engine &_reng){
     
 }
 
+void handle_list_builds(istream& _ris, Engine &_reng){
+    auto req_ptr = make_shared<ListBuildsRequest>();
+    
+    _ris>>req_ptr->app_id_;
+    
+    req_ptr->app_id_ = ola::utility::base64_decode(req_ptr->app_id_);
+    
+    promise<void> prom;
+    
+    auto lambda = [&prom](
+        frame::mprpc::ConnectionContext&        _rctx,
+        std::shared_ptr<ListBuildsRequest>&  _rsent_msg_ptr,
+        std::shared_ptr<ListBuildsResponse>& _rrecv_msg_ptr,
+        ErrorConditionT const&                  _rerror
+    ){
+        if(_rrecv_msg_ptr){
+            cout<<"{\n";
+            for(auto it = begin(_rrecv_msg_ptr->build_vec_); it != end(_rrecv_msg_ptr->build_vec_); ++it){
+                cout<<"\ttag: ["<<*it;
+                ++it;
+                solid_check(it != end(_rrecv_msg_ptr->build_vec_));
+                cout<<"] name: ["<<*it<<"]\n";
+            }
+            cout<<"}"<<endl;
+        }else{
+            cout<<"Error - no response: "<<_rerror.message()<<endl;
+        }
+        prom.set_value();
+    };
+    _reng.rpcService().sendRequest(_reng.serverEndpoint().c_str(), req_ptr, lambda);
+    
+    solid_check(prom.get_future().wait_for(chrono::seconds(100)) == future_status::ready, "Taking too long - waited 100 secs");
+}
+
 void handle_list(istream& _ris, Engine &_reng){
     string what;
     _ris>>what;
@@ -444,6 +482,8 @@ void handle_list(istream& _ris, Engine &_reng){
         handle_list_oses(_ris, _reng);
     }else if(what == "apps"){
         handle_list_apps(_ris, _reng);
+    }else if(what == "builds"){
+        handle_list_builds(_ris, _reng);
     }
 }
 
@@ -502,7 +542,7 @@ void on_upload_receive_last_response(
     const string &zip_path)
 {
     solid_check(_rrecv_msg_ptr);
-    
+    //cout<<"on_upload_receive_last_response"<<endl;
     
     if(_rrecv_msg_ptr){
         if(_rrecv_msg_ptr->error_ == 0){
@@ -525,6 +565,7 @@ void on_upload_receive_response(
     promise<void> &prom,
     const string &zip_path)
 {
+    //cout<<"on_upload_receive_response"<<endl;
     if (!_rsent_msg_ptr->ifs_.eof()) {
         auto lambda = [&prom, &zip_path](
             frame::mprpc::ConnectionContext&        _rctx,
@@ -574,7 +615,6 @@ void handle_create_build(istream& _ris, Engine &_reng){
     if(!zip_create(zip_path, path(build_path), req_ptr->size_)){
         return;
     }
-    return;
     
     {
         ifstream ifs(zip_path);
@@ -620,9 +660,9 @@ void handle_create_build(istream& _ris, Engine &_reng){
                     
                     solid_log(logger, Verbose, "client: sending " << zip_path << " to " << _rctx.recipientId());
                     frame::mprpc::MessageFlagsT flags{frame::mprpc::MessageFlagsE::ResponsePart, frame::mprpc::MessageFlagsE::AwaitResponse};
-                    _rctx.service().sendMessage(_rctx.recipientId(), _rsent_msg_ptr, lambda, flags);
+                    _rctx.service().sendMessage(_rctx.recipientId(), req_ptr, lambda, flags);
                     flags.reset(frame::mprpc::MessageFlagsE::AwaitResponse);
-                    _rctx.service().sendMessage(_rctx.recipientId(), _rsent_msg_ptr, flags);
+                    _rctx.service().sendMessage(_rctx.recipientId(), req_ptr, flags);
                 } else {
                     auto lambda = [&prom, &zip_path](
                         frame::mprpc::ConnectionContext&        _rctx,
@@ -635,13 +675,12 @@ void handle_create_build(istream& _ris, Engine &_reng){
                     
                     solid_log(logger, Verbose, "client: sending " << zip_path << " to " << _rctx.recipientId() << " last");
                     frame::mprpc::MessageFlagsT flags{frame::mprpc::MessageFlagsE::ResponseLast, frame::mprpc::MessageFlagsE::AwaitResponse};
-                    _rctx.service().sendMessage(_rctx.recipientId(), _rsent_msg_ptr, lambda, flags);
+                    _rctx.service().sendMessage(_rctx.recipientId(), req_ptr, lambda, flags);
                 }
             }
         }else{
             cout<<"Error - no response: "<<_rerror.message()<<endl;
         }
-        prom.set_value();
     };
     _reng.rpcService().sendRequest(_reng.serverEndpoint().c_str(), req_ptr, lambda);
     
@@ -717,6 +756,41 @@ void handle_generate(istream& _ris, Engine &_reng){
         handle_generate_app(_ris, _reng);
     }else if(what == "build"){
         handle_generate_buid(_ris, _reng);
+    }
+}
+void handle_acquire_app(istream& _ris, Engine &_reng){
+    auto req_ptr = make_shared<AcquireAppRequest>();
+    
+    _ris>>req_ptr->app_id_;
+    
+    req_ptr->app_id_ = ola::utility::base64_decode(req_ptr->app_id_);
+    
+    promise<void> prom;
+    
+    auto lambda = [&prom](
+        frame::mprpc::ConnectionContext&        _rctx,
+        std::shared_ptr<AcquireAppRequest>&  _rsent_msg_ptr,
+        std::shared_ptr<Response>& _rrecv_msg_ptr,
+        ErrorConditionT const&                  _rerror
+    ){
+        if(_rrecv_msg_ptr){
+            cout<<"Acquire response: "<<_rrecv_msg_ptr->error_<<" "<<_rrecv_msg_ptr->message_<<endl;
+        }else{
+            cout<<"Error - no response: "<<_rerror.message()<<endl;
+        }
+        prom.set_value();
+    };
+    _reng.rpcService().sendRequest(_reng.serverEndpoint().c_str(), req_ptr, lambda);
+    
+    solid_check(prom.get_future().wait_for(chrono::seconds(100)) == future_status::ready, "Taking too long - waited 100 secs");
+};
+
+void handle_acquire(istream& _ris, Engine &_reng){
+    string what;
+    _ris>>what;
+    
+    if(what == "app"){
+        handle_acquire_app(_ris, _reng);
     }
 }
 //-----------------------------------------------------------------------------
@@ -1233,7 +1307,7 @@ bool zip_create(const string &_zip_path, string _root, uint64_t &_rsize){
         
     }
     zip_close(pzip);
-    {
+    if(0){
         remove_all("/tmp/ola_client_cli_unzip");
         create_directory("/tmp/ola_client_cli_unzip");
         uint64_t total_size = 0;
