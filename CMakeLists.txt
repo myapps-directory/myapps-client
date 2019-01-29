@@ -40,6 +40,10 @@ if(EXTERNAL_DIR STREQUAL "")
     message(FATAL_ERROR "EXTERNAL DIR not specified.")
 endif()
 
+set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
+set(THREADS_PREFER_PTHREAD_FLAG TRUE)
+
+find_package(Threads REQUIRED)
 
 include(cmake/find-boost.cmake)
 
@@ -55,7 +59,7 @@ include(cmake/build-config.cmake)
 
 include(cmake/build-libzip.cmake)
 
-set(SYSTEM_BASIC_LIBRARIES pthread rt)
+set(SYSTEM_BASIC_LIBRARIES rt)
     
 find_library(ATOMIC_LIBRARY NAMES atomic atomic.so.1 libatomic.so.1)
 
