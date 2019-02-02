@@ -24,6 +24,8 @@
 
 #include "zip.h"
 
+#define LIBCONFIGXX_STATIC
+#define LIBCONFIG_STATIC
 #include "libconfig.h++"
 
 #include <fstream>
@@ -45,7 +47,9 @@ const solid::LoggerT logger("cli");
 using AioSchedulerT = frame::Scheduler<frame::aio::Reactor>;
 
 string get_home_env();
+string get_temp_env();
 string path(const std::string& _path);
+string system_path(const std::string& _path);
 bool   read(string& _rs, istream& _ris, size_t _sz);
 
 //-----------------------------------------------------------------------------
@@ -91,7 +95,7 @@ struct Engine {
 
     void start()
     {
-        ifstream ifs(authTokenStorePath());
+        ifstream ifs(authTokenStorePath(), std::ifstream::binary);
 
         if (ifs) {
             read(auth_token_, ifs, -1);
@@ -145,6 +149,7 @@ string get_command(const string& _line);
 
 void configure_service(Engine& _reng, AioSchedulerT& _rsch, frame::aio::Resolver& _rres);
 
+void handle_help(istream& _ris, Engine& _reng);
 void handle_list(istream& _ris, Engine& _reng);
 void handle_create(istream& _ris, Engine& _reng);
 void handle_generate(istream& _ris, Engine& _reng);
@@ -158,8 +163,9 @@ int main(int argc, char* argv[])
 
     if (parse_arguments(params, argc, argv))
         return 0;
-
+#ifndef SOLID_ON_WINDOWS
     signal(SIGPIPE, SIG_IGN);
+#endif
 
     if (params.dbg_addr.size() && params.dbg_port.size()) {
         solid::log_start(
@@ -230,6 +236,8 @@ int main(int argc, char* argv[])
             handle_generate(iss, engine);
         } else if (cmd == "acquire") {
             handle_acquire(iss, engine);
+        } else if (cmd == "help" || line == "h") {
+            handle_help(iss, engine);
         }
     }
     engine.stop();
@@ -343,6 +351,22 @@ void configure_service(Engine &_reng, AioSchedulerT &_rsch, frame::aio::Resolver
         cout << "Error starting ipcservice: " << err.message() << endl;
         exit(0);
     }
+}
+
+void handle_help(istream& _ris, Engine &_reng){
+    cout<<"Commands:\n\n";
+    cout<<"> list oses\n\n";
+    cout<<"> list apps o/a/A i|n|s|d [*field_name]\n";
+    cout<<"\to - owned applications\n";
+    cout<<"\ta - aquired applications\n";
+    cout<<"\tA - All applications\n";
+    cout<<"\n\ti - id\n\tn - name\n\ts - short description\n\td - description\n\n";
+    cout<<"> list builds APP_ID\n\n";
+    cout<<"> generate app ~/path/to/app.cfg\n\n";
+    cout<<"> generate build ~/path/to/build.cfg\n\n";
+    cout<<"> create app ~/path/to/app.cfg\n\n";
+    cout<<"> create build APP_ID BUILD_TAG ~/path/to/build.cfg ~/path/to/build_folder\r\n";
+    cout<<endl;
 }
 
 //-----------------------------------------------------------------------------
@@ -553,6 +577,7 @@ void on_upload_receive_last_response(
     }else{
         cout<<"Error - no response: "<<_rerror.message()<<endl;
     }
+	_rsent_msg_ptr->ifs_.close();
     boost::filesystem::remove(zip_path);
     prom.set_value();
 }
@@ -610,14 +635,15 @@ void handle_create_build(istream& _ris, Engine &_reng){
     
     //create archive from build_path/*
     
-    string zip_path = "/tmp/ola_client_cli_" + generate_temp_name() + ".zip";
+    string zip_path = system_path(get_temp_env() + "/ola_client_cli_" + generate_temp_name() + ".zip");
+
     
     if(!zip_create(zip_path, path(build_path), req_ptr->size_)){
         return;
     }
     
     {
-        ifstream ifs(zip_path);
+        ifstream ifs(zip_path, std::ifstream::binary);
         if(ifs){
             req_ptr->sha_sum_ = ola::utility::sha256(ifs);
             cout<<"sha_sum for "<<zip_path<<": "<<req_ptr->sha_sum_<<endl;
@@ -640,11 +666,13 @@ void handle_create_build(istream& _ris, Engine &_reng){
         if(_rrecv_msg_ptr){
             if(_rrecv_msg_ptr->error_ != 0){
                 cout<<"Error: "<<_rrecv_msg_ptr->error_<<" message: "<<_rrecv_msg_ptr->message_<<endl;
+                prom.set_value();
             }else{
                 cout<<"Start uploading build file: "<<zip_path<<" for build tagged: "<<_rsent_msg_ptr->tag_<<endl;
                 //now we must upload the file
                 auto req_ptr = make_shared<UploadBuildRequest>();
-                req_ptr->ifs_.open(zip_path);
+                req_ptr->ifs_.open(zip_path, std::ifstream::binary);
+                solid_check(req_ptr->ifs_, "failed open file: "<<zip_path);
                 req_ptr->header(_rrecv_msg_ptr->header());
                 
                 if (!req_ptr->ifs_.eof()) {
@@ -680,6 +708,7 @@ void handle_create_build(istream& _ris, Engine &_reng){
             }
         }else{
             cout<<"Error - no response: "<<_rerror.message()<<endl;
+            prom.set_value();
         }
     };
     _reng.rpcService().sendRequest(_reng.serverEndpoint().c_str(), req_ptr, lambda);
@@ -968,6 +997,15 @@ string get_home_env()
     return pname == nullptr ? "" : pname;
 }
 
+string get_temp_env()
+{
+    const char* pname = getenv("temp");
+    if(pname == nullptr){
+        pname = getenv("tmp");
+    }
+    return pname == nullptr ? "/tmp" : pname;
+}
+
 bool read(string& _rs, istream& _ris, size_t _sz)
 {
     static constexpr size_t bufcp = 1024 * 2;
@@ -1186,6 +1224,22 @@ string path(const std::string &_path){
     return _path;
 }
 
+string system_path(const std::string &_path){
+#ifdef SOLID_ON_WINDOWS
+    string o;
+	for(auto c: _path){
+		if(c == '/'){
+			o += '\\';
+		}else{
+			o += c;
+		}
+	}
+    return o;
+#else
+	return _path;
+#endif
+}
+
 string generate_temp_name(){
     uint64_t salt = chrono::steady_clock::now().time_since_epoch().count();
 
@@ -1195,11 +1249,12 @@ string generate_temp_name(){
 }
 
 bool zip_add_file(zip_t *_pzip, const boost::filesystem::path &_path, size_t _base_path_len, uint64_t &_rsize){
-    zip_source_t *psrc = zip_source_file(_pzip, _path.c_str(), 0, 0);
+	string path = _path.string();
+    zip_source_t *psrc = zip_source_file(_pzip, path.c_str(), 0, 0);
     if(psrc != nullptr){
         _rsize += file_size(_path);
-        zip_int64_t err = zip_file_add(_pzip, (_path.c_str() + _base_path_len), psrc, ZIP_FL_ENC_UTF_8);
-        cout<<"zip_add_file: "<<(_path.c_str() + _base_path_len)<<" rv = "<<err<<endl;
+        zip_int64_t err = zip_file_add(_pzip, (path.c_str() + _base_path_len), psrc, ZIP_FL_ENC_UTF_8);
+        cout<<"zip_add_file: "<<(path.c_str() + _base_path_len)<<" rv = "<<err<<endl;
         if(err < 0){
             zip_source_free(psrc);
         }
@@ -1209,10 +1264,10 @@ bool zip_add_file(zip_t *_pzip, const boost::filesystem::path &_path, size_t _ba
 
 bool zip_add_dir(zip_t *_pzip, const boost::filesystem::path &_path, size_t _base_path_len, uint64_t &_rsize){
     using namespace boost::filesystem;
+    string path = _path.string();
+    zip_int64_t err = zip_dir_add(_pzip, (path.c_str() + _base_path_len), ZIP_FL_ENC_UTF_8);
     
-    zip_int64_t err = zip_dir_add(_pzip, (_path.c_str() + _base_path_len), ZIP_FL_ENC_UTF_8);
-    
-    cout<<"zip_add_dir: "<<(_path.c_str() + _base_path_len)<<" rv = "<<err<<endl;
+    cout<<"zip_add_dir: "<<(path.c_str() + _base_path_len)<<" rv = "<<err<<endl;
     
     for (directory_entry& x : directory_iterator(_path)){
         auto p = x.path();
@@ -1222,6 +1277,7 @@ bool zip_add_dir(zip_t *_pzip, const boost::filesystem::path &_path, size_t _bas
             zip_add_file(_pzip, p, _base_path_len, _rsize);
         }        
     }
+	return true;
 }
 
 bool unzip(const std::string& _zip_path, const std::string& _fld, uint64_t& _total_size)
@@ -1308,10 +1364,10 @@ bool zip_create(const string &_zip_path, string _root, uint64_t &_rsize){
     }
     zip_close(pzip);
     if(0){
-        remove_all("/tmp/ola_client_cli_unzip");
-        create_directory("/tmp/ola_client_cli_unzip");
+        remove_all(get_temp_env() + "/ola_client_cli_unzip");
+        create_directory(get_temp_env() + "/ola_client_cli_unzip");
         uint64_t total_size = 0;
-        unzip(_zip_path, "/tmp/ola_client_cli_unzip", total_size);
+        unzip(_zip_path, get_temp_env() + "/ola_client_cli_unzip", total_size);
         solid_check(total_size == _rsize);
     }
     return true;

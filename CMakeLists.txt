@@ -16,6 +16,25 @@ message("project version: ${PROJECT_VERSION} - ${PROJECT_VERSION_MAJOR}.${PROJEC
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+if(NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE "release")
+endif()
+
+string(TOLOWER "${CMAKE_BUILD_TYPE}" CMAKE_BUILD_TYPE)
+
+set(CMAKE_CONFIGURATION_TYPES "release" CACHE STRING "" FORCE)
+set(CONFIGURATION_TYPE "release")
+
+if(CMAKE_BUILD_TYPE STREQUAL "debug")
+    #force a single configuration type on Windows builds
+    set(CMAKE_CONFIGURATION_TYPES "debug" CACHE STRING "" FORCE)
+    set(CONFIGURATION_TYPE "debug")
+else()
+    #force a single configuration type on Windows builds
+    set(CMAKE_CONFIGURATION_TYPES "release" CACHE STRING "" FORCE)
+    set(CONFIGURATION_TYPE "release")
+endif()
+
 set (CMAKE_CXX_STANDARD 14)
 
 set(EXTRA_DEFINITIONS "${EXTRA_DEFINITIONS}" CACHE STRING "Extra compiler definitions")
@@ -59,16 +78,21 @@ include(cmake/build-config.cmake)
 
 include(cmake/build-libzip.cmake)
 
-set(SYSTEM_BASIC_LIBRARIES rt)
-    
-find_library(ATOMIC_LIBRARY NAMES atomic atomic.so.1 libatomic.so.1)
-
-if(ATOMIC_LIBRARY)
-    message("Atomic library found: ${ATOMIC_LIBRARY}")
-    list(APPEND SYSTEM_BASIC_LIBRARIES atomic)
+if(UNIX AND NOT APPLE)
+    set(LINUX TRUE)
 endif()
 
-set(SYSTEM_DYNAMIC_LOAD_LIBRARY dl)
+if(LINUX)
+    set(SYSTEM_BASIC_LIBRARIES rt)
+    find_library(ATOMIC_LIBRARY NAMES atomic atomic.so.1 libatomic.so.1)
+
+    if(ATOMIC_LIBRARY)
+        message("Atomic library found: ${ATOMIC_LIBRARY}")
+        list(APPEND SYSTEM_BASIC_LIBRARIES atomic)
+    endif()
+
+    set(SYSTEM_DYNAMIC_LOAD_LIBRARY dl)
+endif(LINUX)
 
 ###############################################################################
 include_directories(
