@@ -70,6 +70,8 @@ include(cmake/find-openssl.cmake)
 
 include(cmake/find-solidframe.cmake)
 
+include(cmake/find-fuse.cmake)
+
 include(cmake/build-cereal.cmake)
 
 include(cmake/build-snappy.cmake)
@@ -96,7 +98,7 @@ endif(LINUX)
 
 ###############################################################################
 include_directories(
-    "${EXTERNAL_DIR}/include/"
+    "${EXTERNAL_DIR}/include"
     "${CMAKE_SOURCE_DIR}"
     "${CMAKE_BINARY_DIR}"
     "${CMAKE_BINARY_DIR}/external/include"
