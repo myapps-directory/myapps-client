@@ -186,18 +186,12 @@ int main(int argc, char* argv[])
     }
     AioSchedulerT          scheduler;
     frame::Manager         manager;
-    FunctionWorkPool       fwp{WorkPoolConfiguration()};
+    FunctionWorkPool<>     fwp{WorkPoolConfiguration()};
     frame::aio::Resolver   resolver(fwp);
     frame::mprpc::ServiceT rpc_service(manager);
     Engine                 engine(rpc_service, params);
-    ErrorConditionT        err;
 
-    err = scheduler.start(1);
-
-    if (err) {
-        solid_log(logger, Error, "Starting aio scheduler: " << err.message());
-        return 0;
-    }
+    scheduler.start(1);
 
     {
         string home = get_home_env();
@@ -345,12 +339,7 @@ void configure_service(Engine &_reng, AioSchedulerT &_rsch, frame::aio::Resolver
         frame::mprpc::snappy::setup(cfg);
     }
 
-    ErrorConditionT err = _reng.rpcService().reconfigure(std::move(cfg));
-
-    if (err) {
-        cout << "Error starting ipcservice: " << err.message() << endl;
-        exit(0);
-    }
+    _reng.rpcService().start(std::move(cfg));
 }
 
 void handle_help(istream& _ris, Engine &_reng){
