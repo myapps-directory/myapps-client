@@ -8,16 +8,20 @@
 #include <strsafe.h>
 #include <winfsp/winfsp.hpp>
 
-#include "solid/system/log.hpp"
+#include "solid/frame/manager.hpp"
+#include "solid/frame/scheduler.hpp"
+#include "solid/frame/service.hpp"
+
+#include "solid/frame/aio/aioresolver.hpp"
+
+#include "solid/frame/mprpc/mprpccompression_snappy.hpp"
+#include "solid/frame/mprpc/mprpcconfiguration.hpp"
+#include "solid/frame/mprpc/mprpcservice.hpp"
+#include "solid/frame/mprpc/mprpcsocketstub_openssl.hpp"
 
 #include "ola/common/utility/crypto.hpp"
 
 #include "ola/common/ola_front_protocol.hpp"
-
-#include "boost/program_options.hpp"
-
-#include "ola/client/service/engine.hpp"
-#include <iostream>
 
 
 #define PROGNAME                        "ola-fs"
@@ -33,38 +37,19 @@
 #define HandleFromFileDesc(FD)          ((FileDesc *)(FD))->Handle
 
 using namespace Fsp;
+//using namespace solid;
 using namespace std;
 
 namespace{
 
-struct Parameters{
-    wstring				debug_log_file_;
-    uint32_t			debug_flags_;
-    wstring				mount_point_;
-    vector<string>      debug_modules_;
-    string				debug_addr_;
-    string				debug_port_;
-    bool				debug_console_;
-    bool				debug_buffered_;
-    bool				secure_;
-    bool				compress_;
-    string				front_endpoint_;
-
-    bool parse(ULONG argc, PWSTR *argv);
-};
-
 class FileSystem final : public FileSystemBase
 {
-    ola::client::service::Engine &rengine_;
 public:
-    FileSystem(ola::client::service::Engine &_rengine);
+    FileSystem();
     ~FileSystem();
+    NTSTATUS SetPath(PWSTR Path);
 
-private:
-    ola::client::service::Engine& engine()const{
-        return rengine_;
-    }
-
+protected:
     static NTSTATUS GetFileInfoInternal(HANDLE Handle, FileInfo *FileInfo);
     NTSTATUS Init(PVOID Host)override;
     NTSTATUS GetVolumeInfo(
@@ -181,20 +166,24 @@ private:
         PWSTR Marker,
         PVOID *PContext,
         DirInfo *DirInfo)override;
+
+private:
+    PWSTR _Path;
+    UINT64 _CreationTime;
 };
 
 class FileSystemService final : public Service
 {
-    ola::client::service::Engine    engine_;
-    FileSystem						fs_;
-    FileSystemHost					host_;
-    Parameters						params_;
 public:
     FileSystemService();
 
 protected:
     NTSTATUS OnStart(ULONG Argc, PWSTR *Argv) override;
     NTSTATUS OnStop() override;
+
+private:
+    FileSystem fs_;
+    FileSystemHost host_;
 };
 }//namespace
 
@@ -247,40 +236,10 @@ static ULONG wcstol_deflt(wchar_t *w, ULONG deflt)
     return L'\0' != w[0] && L'\0' == *endp ? ul : deflt;
 }
 
-bool Parameters::parse(ULONG argc, PWSTR *argv){
-    using namespace boost::program_options;
-    
-    options_description desc("ola_auth_service");
-    // clang-format off
-    desc.add_options()
-        ("help,h", "List program options")
-        ("debug-flags,F", value<uint32_t>(&debug_flags_), "Debug logging flags")
-        ("debug-log-file", wvalue<wstring>(&debug_log_file_), "Debug log file")
-        ("debug-modules,M", value<vector<string>>(&debug_modules_), "Debug logging modules")
-        ("debug-address,A", value<string>(&debug_addr_), "Debug server address (e.g. on linux use: nc -l 9999)")
-        ("debug-port,P", value<string>(&debug_port_)->default_value("9999"), "Debug server port (e.g. on linux use: nc -l 9999)")
-        ("debug-console,C", value<bool>(&debug_console_)->implicit_value(true)->default_value(false), "Debug console")
-        ("debug-unbuffered,S", value<bool>(&debug_buffered_)->implicit_value(false)->default_value(true), "Debug unbuffered")
-        ("mount-point,m", wvalue<wstring>(&mount_point_)->default_value(L"C:\\ola", "c:\\ola"), "Mount point")
-        ("secure,s", value<bool>(&secure_)->implicit_value(true)->default_value(false), "Use SSL to secure communication")
-        ("compress", value<bool>(&compress_)->implicit_value(true)->default_value(false), "Use Snappy to compress communication")
-        ("front", value<std::string>(&front_endpoint_)->default_value(string("localhost:") + ola::front::default_port()), "OLA Front Endpoint");
-    // clang-format off
-    variables_map vm;
-    store(parse_command_line(argc, argv, desc), vm);
-    notify(vm);
-    if (vm.count("help")) {
-        cout << desc << "\n";
-        return true;
-    }
-    return false;
-
-}
-
-FileSystemService::FileSystemService() : Service(L"" PROGNAME), fs_(engine_), host_(fs_)
+FileSystemService::FileSystemService() : Service(L"" PROGNAME), fs_(), host_(fs_)
 {
 }
-#if 0
+
 NTSTATUS FileSystemService::OnStart(ULONG argc, PWSTR *argv)
 {
 #define argtos(v)                       if (arge > ++argp) v = *argp; else goto usage
@@ -407,30 +366,9 @@ usage:
 #undef argtol
 }
 
-#else
-NTSTATUS FileSystemService::OnStart(ULONG argc, PWSTR *argv)
-{
-    try {
-        if(!params_.parse(argc, argv)){
-            return STATUS_UNSUCCESSFUL;
-        }
-    } catch (exception& e) {
-        cout << e.what() << "\n";
-        return STATUS_UNSUCCESSFUL;
-    }
-    ola::client::service::Configuration cfg;
-    cfg.secure_ = params_.secure_;
-    cfg.compress_ = params_.compress_;
-    cfg.front_endpoint_ = params_.front_endpoint_;
-    engine_.start(cfg);
-    return STATUS_SUCCESS;
-}
-#endif
-
 NTSTATUS FileSystemService::OnStop()
 {
     host_.Unmount();
-    engine_.stop();
     return STATUS_SUCCESS;
 }
 
@@ -450,12 +388,55 @@ struct FileDesc
     PVOID DirBuffer;
 };
 
-FileSystem::FileSystem(ola::client::service::Engine &_rengine) :  rengine_(_rengine)
+FileSystem::FileSystem() : FileSystemBase(), _Path()
 {
 }
 
 FileSystem::~FileSystem()
 {
+    delete[] _Path;
+}
+
+NTSTATUS FileSystem::SetPath(PWSTR Path)
+{
+    WCHAR FullPath[MAX_PATH];
+    ULONG Length;
+    HANDLE Handle;
+    FILETIME CreationTime;
+    DWORD LastError;
+
+    Handle = CreateFileW(
+        Path, FILE_READ_ATTRIBUTES, 0, 0,
+        OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, 0);
+    if (INVALID_HANDLE_VALUE == Handle)
+        return NtStatusFromWin32(GetLastError());
+
+    Length = GetFinalPathNameByHandleW(Handle, FullPath, FULLPATH_SIZE - 1, 0);
+    if (0 == Length)
+    {
+        LastError = GetLastError();
+        CloseHandle(Handle);
+        return NtStatusFromWin32(LastError);
+    }
+    if (L'\\' == FullPath[Length - 1])
+        FullPath[--Length] = L'\0';
+
+    if (!GetFileTime(Handle, &CreationTime, 0, 0))
+    {
+        LastError = GetLastError();
+        CloseHandle(Handle);
+        return NtStatusFromWin32(LastError);
+    }
+
+    CloseHandle(Handle);
+
+    Length++;
+    _Path = new WCHAR[Length];
+    memcpy(_Path, FullPath, Length * sizeof(WCHAR));
+
+    _CreationTime = ((PLARGE_INTEGER)&CreationTime)->QuadPart;
+
+    return STATUS_SUCCESS;
 }
 
 NTSTATUS FileSystem::GetFileInfoInternal(HANDLE Handle, FileInfo *FileInfo)
@@ -493,7 +474,7 @@ NTSTATUS FileSystem::Init(PVOID Host0)
     Host->SetPersistentAcls(TRUE);
     Host->SetPostCleanupWhenModifiedOnly(TRUE);
     Host->SetPassQueryDirectoryPattern(TRUE);
-    //Host->SetVolumeCreationTime(_CreationTime);
+    Host->SetVolumeCreationTime(_CreationTime);
     Host->SetVolumeSerialNumber(0);
     return STATUS_SUCCESS;
 }
@@ -504,8 +485,8 @@ NTSTATUS FileSystem::GetVolumeInfo(
     WCHAR Root[MAX_PATH];
     ULARGE_INTEGER TotalSize, FreeSize;
 
-    //if (!GetVolumePathName(_Path, Root, MAX_PATH))
-    //    return NtStatusFromWin32(GetLastError());
+    if (!GetVolumePathName(_Path, Root, MAX_PATH))
+        return NtStatusFromWin32(GetLastError());
 
     if (!GetDiskFreeSpaceEx(Root, 0, &TotalSize, &FreeSize))
         return NtStatusFromWin32(GetLastError());
@@ -522,7 +503,57 @@ NTSTATUS FileSystem::GetSecurityByName(
     PSECURITY_DESCRIPTOR SecurityDescriptor,
     SIZE_T *PSecurityDescriptorSize)
 {
-    return STATUS_SUCCESS;
+    WCHAR FullPath[FULLPATH_SIZE];
+    HANDLE Handle;
+    FILE_ATTRIBUTE_TAG_INFO AttributeTagInfo;
+    DWORD SecurityDescriptorSizeNeeded;
+    NTSTATUS Result;
+
+    if (!ConcatPath(FileName, FullPath))
+        return STATUS_OBJECT_NAME_INVALID;
+
+    Handle = CreateFileW(FullPath,
+        FILE_READ_ATTRIBUTES | READ_CONTROL, 0, 0,
+        OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, 0);
+    if (INVALID_HANDLE_VALUE == Handle)
+    {
+        Result = NtStatusFromWin32(GetLastError());
+        goto exit;
+    }
+
+    if (0 != PFileAttributes)
+    {
+        if (!GetFileInformationByHandleEx(Handle,
+            FileAttributeTagInfo, &AttributeTagInfo, sizeof AttributeTagInfo))
+        {
+            Result = NtStatusFromWin32(GetLastError());
+            goto exit;
+        }
+
+        *PFileAttributes = AttributeTagInfo.FileAttributes;
+    }
+
+    if (0 != PSecurityDescriptorSize)
+    {
+        if (!GetKernelObjectSecurity(Handle,
+            OWNER_SECURITY_INFORMATION | GROUP_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
+            SecurityDescriptor, (DWORD)*PSecurityDescriptorSize, &SecurityDescriptorSizeNeeded))
+        {
+            *PSecurityDescriptorSize = SecurityDescriptorSizeNeeded;
+            Result = NtStatusFromWin32(GetLastError());
+            goto exit;
+        }
+
+        *PSecurityDescriptorSize = SecurityDescriptorSizeNeeded;
+    }
+
+    Result = STATUS_SUCCESS;
+
+exit:
+    if (INVALID_HANDLE_VALUE != Handle)
+        CloseHandle(Handle);
+
+    return Result;
 }
 
 NTSTATUS FileSystem::Create(
@@ -536,7 +567,53 @@ NTSTATUS FileSystem::Create(
     PVOID *PFileDesc,
     OpenFileInfo *OpenFileInfo)
 {
-    return STATUS_SUCCESS;
+    WCHAR FullPath[FULLPATH_SIZE];
+    SECURITY_ATTRIBUTES SecurityAttributes;
+    ULONG CreateFlags;
+    FileDesc *pFileDesc;
+
+    if (!ConcatPath(FileName, FullPath))
+        return STATUS_OBJECT_NAME_INVALID;
+
+    pFileDesc = new FileDesc;
+
+    SecurityAttributes.nLength = sizeof SecurityAttributes;
+    SecurityAttributes.lpSecurityDescriptor = SecurityDescriptor;
+    SecurityAttributes.bInheritHandle = FALSE;
+
+    CreateFlags = FILE_FLAG_BACKUP_SEMANTICS;
+    if (CreateOptions & FILE_DELETE_ON_CLOSE)
+        CreateFlags |= FILE_FLAG_DELETE_ON_CLOSE;
+
+    if (CreateOptions & FILE_DIRECTORY_FILE)
+    {
+        /*
+         * It is not widely known but CreateFileW can be used to create directories!
+         * It requires the specification of both FILE_FLAG_BACKUP_SEMANTICS and
+         * FILE_FLAG_POSIX_SEMANTICS. It also requires that FileAttributes has
+         * FILE_ATTRIBUTE_DIRECTORY set.
+         */
+        CreateFlags |= FILE_FLAG_POSIX_SEMANTICS;
+        FileAttributes |= FILE_ATTRIBUTE_DIRECTORY;
+    }
+    else
+        FileAttributes &= ~FILE_ATTRIBUTE_DIRECTORY;
+
+    if (0 == FileAttributes)
+        FileAttributes = FILE_ATTRIBUTE_NORMAL;
+
+    pFileDesc->Handle = CreateFileW(FullPath,
+        GrantedAccess, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, &SecurityAttributes,
+        CREATE_NEW, CreateFlags | FileAttributes, 0);
+    if (INVALID_HANDLE_VALUE == pFileDesc->Handle)
+    {
+        delete pFileDesc;
+        return NtStatusFromWin32(GetLastError());
+    }
+
+    *PFileDesc = pFileDesc;
+
+    return GetFileInfoInternal(pFileDesc->Handle, &OpenFileInfo->FileInfo);
 }
 
 NTSTATUS FileSystem::Open(
@@ -547,7 +624,31 @@ NTSTATUS FileSystem::Open(
     PVOID *PFileDesc,
     OpenFileInfo *OpenFileInfo)
 {
-    return STATUS_SUCCESS;
+    WCHAR FullPath[FULLPATH_SIZE];
+    ULONG CreateFlags;
+    FileDesc *pFileDesc;
+
+    if (!ConcatPath(FileName, FullPath))
+        return STATUS_OBJECT_NAME_INVALID;
+
+    pFileDesc = new FileDesc;
+
+    CreateFlags = FILE_FLAG_BACKUP_SEMANTICS;
+    if (CreateOptions & FILE_DELETE_ON_CLOSE)
+        CreateFlags |= FILE_FLAG_DELETE_ON_CLOSE;
+
+    pFileDesc->Handle = CreateFileW(FullPath,
+        GrantedAccess, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, 0,
+        OPEN_EXISTING, CreateFlags, 0);
+    if (INVALID_HANDLE_VALUE == pFileDesc->Handle)
+    {
+        delete pFileDesc;
+        return NtStatusFromWin32(GetLastError());
+    }
+
+    *PFileDesc = pFileDesc;
+
+    return GetFileInfoInternal(pFileDesc->Handle, &OpenFileInfo->FileInfo);
 }
 
 NTSTATUS FileSystem::Overwrite(
@@ -558,7 +659,41 @@ NTSTATUS FileSystem::Overwrite(
     UINT64 AllocationSize,
     FileInfo *FileInfo)
 {
-    return STATUS_SUCCESS;
+    HANDLE Handle = HandleFromFileDesc(pFileDesc);
+    FILE_BASIC_INFO BasicInfo = { 0 };
+    FILE_ALLOCATION_INFO AllocationInfo = { 0 };
+    FILE_ATTRIBUTE_TAG_INFO AttributeTagInfo;
+
+    if (ReplaceFileAttributes)
+    {
+        if (0 == FileAttributes)
+            FileAttributes = FILE_ATTRIBUTE_NORMAL;
+
+        BasicInfo.FileAttributes = FileAttributes;
+        if (!SetFileInformationByHandle(Handle,
+            FileBasicInfo, &BasicInfo, sizeof BasicInfo))
+            return NtStatusFromWin32(GetLastError());
+    }
+    else if (0 != FileAttributes)
+    {
+        if (!GetFileInformationByHandleEx(Handle,
+            FileAttributeTagInfo, &AttributeTagInfo, sizeof AttributeTagInfo))
+            return NtStatusFromWin32(GetLastError());
+
+        BasicInfo.FileAttributes = FileAttributes | AttributeTagInfo.FileAttributes;
+        if (BasicInfo.FileAttributes ^ FileAttributes)
+        {
+            if (!SetFileInformationByHandle(Handle,
+                FileBasicInfo, &BasicInfo, sizeof BasicInfo))
+                return NtStatusFromWin32(GetLastError());
+        }
+    }
+
+    if (!SetFileInformationByHandle(Handle,
+        FileAllocationInfo, &AllocationInfo, sizeof AllocationInfo))
+        return NtStatusFromWin32(GetLastError());
+
+    return GetFileInfoInternal(Handle, FileInfo);
 }
 
 VOID FileSystem::Cleanup(
@@ -766,6 +901,17 @@ NTSTATUS FileSystem::Rename(
     PWSTR NewFileName,
     BOOLEAN ReplaceIfExists)
 {
+    WCHAR FullPath[FULLPATH_SIZE], NewFullPath[FULLPATH_SIZE];
+
+    if (!ConcatPath(FileName, FullPath))
+        return STATUS_OBJECT_NAME_INVALID;
+
+    if (!ConcatPath(NewFileName, NewFullPath))
+        return STATUS_OBJECT_NAME_INVALID;
+
+    if (!MoveFileExW(FullPath, NewFullPath, ReplaceIfExists ? MOVEFILE_REPLACE_EXISTING : 0))
+        return NtStatusFromWin32(GetLastError());
+
     return STATUS_SUCCESS;
 }
 
