@@ -19,217 +19,222 @@
 #include "ola/client/service/engine.hpp"
 #include <iostream>
 
+#include "solid/system/log.hpp"
 
-#define PROGNAME                        "ola-fs"
+#include <wtsapi32.h>
+#pragma comment(lib, "wtsapi32.lib")
+#include <userenv.h>
+#pragma comment(lib, "userenv.lib")
 
-#define ALLOCATION_UNIT                 4096
-#define FULLPATH_SIZE                   (MAX_PATH + FSP_FSCTL_TRANSACT_PATH_SIZEMAX / sizeof(WCHAR))
+#define PROGNAME "ola-fs"
 
-#define info(format, ...)               Service::Log(EVENTLOG_INFORMATION_TYPE, format, __VA_ARGS__)
-#define warn(format, ...)               Service::Log(EVENTLOG_WARNING_TYPE, format, __VA_ARGS__)
-#define fail(format, ...)               Service::Log(EVENTLOG_ERROR_TYPE, format, __VA_ARGS__)
+#define ALLOCATION_UNIT 4096
+#define FULLPATH_SIZE (MAX_PATH + FSP_FSCTL_TRANSACT_PATH_SIZEMAX / sizeof(WCHAR))
 
-#define ConcatPath(FN, FP)              (0 == StringCbPrintfW(FP, sizeof FP, L"%s%s", _Path, FN))
-#define HandleFromFileDesc(FD)          ((FileDesc *)(FD))->Handle
+#define info(format, ...) Service::Log(EVENTLOG_INFORMATION_TYPE, format, __VA_ARGS__)
+#define warn(format, ...) Service::Log(EVENTLOG_WARNING_TYPE, format, __VA_ARGS__)
+#define fail(format, ...) Service::Log(EVENTLOG_ERROR_TYPE, format, __VA_ARGS__)
+
+#define ConcatPath(FN, FP) (0 == StringCbPrintfW(FP, sizeof FP, L"%s%s", _Path, FN))
+#define HandleFromFileDesc(FD) ((FileDesc*)(FD))->Handle
 
 using namespace Fsp;
 using namespace std;
 
-namespace{
+namespace {
 
-struct Parameters{
-    wstring				debug_log_file_;
-    uint32_t			debug_flags_;
-    wstring				mount_point_;
-    vector<string>      debug_modules_;
-    string				debug_addr_;
-    string				debug_port_;
-    bool				debug_console_;
-    bool				debug_buffered_;
-    bool				secure_;
-    bool				compress_;
-    string				front_endpoint_;
+const solid::LoggerT logger("ola-service");
 
-    bool parse(ULONG argc, PWSTR *argv);
+struct Parameters {
+    wstring        debug_log_file_;
+    uint32_t       debug_flags_;
+    wstring        mount_point_;
+    vector<string> debug_modules_;
+    string         debug_addr_;
+    string         debug_port_;
+    bool           debug_console_;
+    bool           debug_buffered_;
+    bool           secure_;
+    bool           compress_;
+    string         front_endpoint_;
+
+    bool parse(ULONG argc, PWSTR* argv);
 };
 
-class FileSystem final : public FileSystemBase
-{
-    ola::client::service::Engine &rengine_;
+class FileSystem final : public FileSystemBase {
+    ola::client::service::Engine& rengine_;
+
 public:
-    FileSystem(ola::client::service::Engine &_rengine);
+    FileSystem(ola::client::service::Engine& _rengine);
     ~FileSystem();
 
 private:
-    ola::client::service::Engine& engine()const{
+    ola::client::service::Engine& engine() const
+    {
         return rengine_;
     }
 
-    static NTSTATUS GetFileInfoInternal(HANDLE Handle, FileInfo *FileInfo);
-    NTSTATUS Init(PVOID Host)override;
-    NTSTATUS GetVolumeInfo(
-        VolumeInfo *VolumeInfo)override;
+    static NTSTATUS GetFileInfoInternal(HANDLE Handle, FileInfo* FileInfo);
+    NTSTATUS        Init(PVOID Host) override;
+    NTSTATUS        GetVolumeInfo(
+               VolumeInfo* VolumeInfo) override;
     NTSTATUS GetSecurityByName(
-        PWSTR FileName,
-        PUINT32 PFileAttributes/* or ReparsePointIndex */,
+        PWSTR                FileName,
+        PUINT32              PFileAttributes /* or ReparsePointIndex */,
         PSECURITY_DESCRIPTOR SecurityDescriptor,
-        SIZE_T *PSecurityDescriptorSize)override;
+        SIZE_T*              PSecurityDescriptorSize) override;
     NTSTATUS Create(
-        PWSTR FileName,
-        UINT32 CreateOptions,
-        UINT32 GrantedAccess,
-        UINT32 FileAttributes,
+        PWSTR                FileName,
+        UINT32               CreateOptions,
+        UINT32               GrantedAccess,
+        UINT32               FileAttributes,
         PSECURITY_DESCRIPTOR SecurityDescriptor,
-        UINT64 AllocationSize,
-        PVOID *PFileNode,
-        PVOID *PFileDesc,
-        OpenFileInfo *OpenFileInfo)override;
+        UINT64               AllocationSize,
+        PVOID*               PFileNode,
+        PVOID*               PFileDesc,
+        OpenFileInfo*        OpenFileInfo) override;
     NTSTATUS Open(
-        PWSTR FileName,
-        UINT32 CreateOptions,
-        UINT32 GrantedAccess,
-        PVOID *PFileNode,
-        PVOID *PFileDesc,
-        OpenFileInfo *OpenFileInfo)override;
+        PWSTR         FileName,
+        UINT32        CreateOptions,
+        UINT32        GrantedAccess,
+        PVOID*        PFileNode,
+        PVOID*        PFileDesc,
+        OpenFileInfo* OpenFileInfo) override;
     NTSTATUS Overwrite(
-        PVOID FileNode,
-        PVOID FileDesc,
-        UINT32 FileAttributes,
-        BOOLEAN ReplaceFileAttributes,
-        UINT64 AllocationSize,
-        FileInfo *FileInfo)override;
+        PVOID     FileNode,
+        PVOID     FileDesc,
+        UINT32    FileAttributes,
+        BOOLEAN   ReplaceFileAttributes,
+        UINT64    AllocationSize,
+        FileInfo* FileInfo) override;
     VOID Cleanup(
         PVOID FileNode,
         PVOID FileDesc,
         PWSTR FileName,
-        ULONG Flags)override;
+        ULONG Flags) override;
     VOID Close(
         PVOID FileNode,
-        PVOID FileDesc)override;
+        PVOID FileDesc) override;
     NTSTATUS Read(
-        PVOID FileNode,
-        PVOID FileDesc,
-        PVOID Buffer,
+        PVOID  FileNode,
+        PVOID  FileDesc,
+        PVOID  Buffer,
         UINT64 Offset,
-        ULONG Length,
-        PULONG PBytesTransferred)override;
+        ULONG  Length,
+        PULONG PBytesTransferred) override;
     NTSTATUS Write(
-        PVOID FileNode,
-        PVOID FileDesc,
-        PVOID Buffer,
-        UINT64 Offset,
-        ULONG Length,
-        BOOLEAN WriteToEndOfFile,
-        BOOLEAN ConstrainedIo,
-        PULONG PBytesTransferred,
-        FileInfo *FileInfo)override;
+        PVOID     FileNode,
+        PVOID     FileDesc,
+        PVOID     Buffer,
+        UINT64    Offset,
+        ULONG     Length,
+        BOOLEAN   WriteToEndOfFile,
+        BOOLEAN   ConstrainedIo,
+        PULONG    PBytesTransferred,
+        FileInfo* FileInfo) override;
     NTSTATUS Flush(
-        PVOID FileNode,
-        PVOID FileDesc,
-        FileInfo *FileInfo)override;
+        PVOID     FileNode,
+        PVOID     FileDesc,
+        FileInfo* FileInfo) override;
     NTSTATUS GetFileInfo(
-        PVOID FileNode,
-        PVOID FileDesc,
-        FileInfo *FileInfo)override;
+        PVOID     FileNode,
+        PVOID     FileDesc,
+        FileInfo* FileInfo) override;
     NTSTATUS SetBasicInfo(
-        PVOID FileNode,
-        PVOID FileDesc,
-        UINT32 FileAttributes,
-        UINT64 CreationTime,
-        UINT64 LastAccessTime,
-        UINT64 LastWriteTime,
-        UINT64 ChangeTime,
-        FileInfo *FileInfo)override;
+        PVOID     FileNode,
+        PVOID     FileDesc,
+        UINT32    FileAttributes,
+        UINT64    CreationTime,
+        UINT64    LastAccessTime,
+        UINT64    LastWriteTime,
+        UINT64    ChangeTime,
+        FileInfo* FileInfo) override;
     NTSTATUS SetFileSize(
-        PVOID FileNode,
-        PVOID FileDesc,
-        UINT64 NewSize,
-        BOOLEAN SetAllocationSize,
-        FileInfo *FileInfo)override;
+        PVOID     FileNode,
+        PVOID     FileDesc,
+        UINT64    NewSize,
+        BOOLEAN   SetAllocationSize,
+        FileInfo* FileInfo) override;
     NTSTATUS CanDelete(
         PVOID FileNode,
         PVOID FileDesc,
-        PWSTR FileName)override;
+        PWSTR FileName) override;
     NTSTATUS Rename(
-        PVOID FileNode,
-        PVOID FileDesc,
-        PWSTR FileName,
-        PWSTR NewFileName,
-        BOOLEAN ReplaceIfExists)override;
+        PVOID   FileNode,
+        PVOID   FileDesc,
+        PWSTR   FileName,
+        PWSTR   NewFileName,
+        BOOLEAN ReplaceIfExists) override;
     NTSTATUS GetSecurity(
-        PVOID FileNode,
-        PVOID FileDesc,
+        PVOID                FileNode,
+        PVOID                FileDesc,
         PSECURITY_DESCRIPTOR SecurityDescriptor,
-        SIZE_T *PSecurityDescriptorSize)override;
+        SIZE_T*              PSecurityDescriptorSize) override;
     NTSTATUS SetSecurity(
-        PVOID FileNode,
-        PVOID FileDesc,
+        PVOID                FileNode,
+        PVOID                FileDesc,
         SECURITY_INFORMATION SecurityInformation,
-        PSECURITY_DESCRIPTOR ModificationDescriptor)override;
+        PSECURITY_DESCRIPTOR ModificationDescriptor) override;
     NTSTATUS ReadDirectory(
-        PVOID FileNode,
-        PVOID FileDesc,
-        PWSTR Pattern,
-        PWSTR Marker,
-        PVOID Buffer,
-        ULONG Length,
-        PULONG PBytesTransferred)override;
+        PVOID  FileNode,
+        PVOID  FileDesc,
+        PWSTR  Pattern,
+        PWSTR  Marker,
+        PVOID  Buffer,
+        ULONG  Length,
+        PULONG PBytesTransferred) override;
     NTSTATUS ReadDirectoryEntry(
-        PVOID FileNode,
-        PVOID FileDesc,
-        PWSTR Pattern,
-        PWSTR Marker,
-        PVOID *PContext,
-        DirInfo *DirInfo)override;
+        PVOID    FileNode,
+        PVOID    FileDesc,
+        PWSTR    Pattern,
+        PWSTR    Marker,
+        PVOID*   PContext,
+        DirInfo* DirInfo) override;
 };
 
-class FileSystemService final : public Service
-{
-    ola::client::service::Engine    engine_;
-    FileSystem						fs_;
-    FileSystemHost					host_;
-    Parameters						params_;
+class FileSystemService final : public Service {
+    ola::client::service::Engine engine_;
+    FileSystem                   fs_;
+    FileSystemHost               host_;
+    Parameters                   params_;
+
 public:
     FileSystemService();
 
 protected:
-    NTSTATUS OnStart(ULONG Argc, PWSTR *Argv) override;
+    NTSTATUS OnStart(ULONG Argc, PWSTR* Argv) override;
     NTSTATUS OnStop() override;
 };
-}//namespace
+} //namespace
 
-
-int wmain(int argc, wchar_t **argv)
+int wmain(int argc, wchar_t** argv)
 {
     return FileSystemService().Run();
 }
 
-namespace{
+namespace {
 
 // -- FileSystemService -------------------------------------------------------
 
 static NTSTATUS EnableBackupRestorePrivileges(VOID)
 {
-    union
-    {
+    union {
         TOKEN_PRIVILEGES P;
-        UINT8 B[sizeof(TOKEN_PRIVILEGES) + sizeof(LUID_AND_ATTRIBUTES)];
+        UINT8            B[sizeof(TOKEN_PRIVILEGES) + sizeof(LUID_AND_ATTRIBUTES)];
     } Privileges;
     HANDLE Token;
 
-    Privileges.P.PrivilegeCount = 2;
+    Privileges.P.PrivilegeCount           = 2;
     Privileges.P.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
     Privileges.P.Privileges[1].Attributes = SE_PRIVILEGE_ENABLED;
 
-    if (!LookupPrivilegeValueW(0, SE_BACKUP_NAME, &Privileges.P.Privileges[0].Luid) ||
-        !LookupPrivilegeValueW(0, SE_RESTORE_NAME, &Privileges.P.Privileges[1].Luid))
+    if (!LookupPrivilegeValueW(0, SE_BACKUP_NAME, &Privileges.P.Privileges[0].Luid) || !LookupPrivilegeValueW(0, SE_RESTORE_NAME, &Privileges.P.Privileges[1].Luid))
         return FspNtStatusFromWin32(GetLastError());
 
     if (!OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES, &Token))
         return FspNtStatusFromWin32(GetLastError());
 
-    if (!AdjustTokenPrivileges(Token, FALSE, &Privileges.P, 0, 0, 0))
-    {
+    if (!AdjustTokenPrivileges(Token, FALSE, &Privileges.P, 0, 0, 0)) {
         CloseHandle(Token);
 
         return FspNtStatusFromWin32(GetLastError());
@@ -240,16 +245,17 @@ static NTSTATUS EnableBackupRestorePrivileges(VOID)
     return STATUS_SUCCESS;
 }
 
-static ULONG wcstol_deflt(wchar_t *w, ULONG deflt)
+static ULONG wcstol_deflt(wchar_t* w, ULONG deflt)
 {
-    wchar_t *endp;
-    ULONG ul = wcstol(w, &endp, 0);
+    wchar_t* endp;
+    ULONG    ul = wcstol(w, &endp, 0);
     return L'\0' != w[0] && L'\0' == *endp ? ul : deflt;
 }
 
-bool Parameters::parse(ULONG argc, PWSTR *argv){
+bool Parameters::parse(ULONG argc, PWSTR* argv)
+{
     using namespace boost::program_options;
-    
+
     options_description desc("ola_auth_service");
     // clang-format off
     desc.add_options()
@@ -408,21 +414,201 @@ usage:
 }
 
 #else
+
+DWORD GetSessionIdOfUser(PCWSTR pszUserName,  
+                         PCWSTR pszDomain) 
+{ 
+    DWORD dwSessionId = 0xFFFFFFFF; 
+     
+    if (pszUserName == NULL) 
+    { 
+        // If the user name is not provided, try to get the session attached  
+        // to the physical console. The physical console is the monitor,  
+        // keyboard, and mouse. 
+        dwSessionId = WTSGetActiveConsoleSessionId(); 
+    } 
+    else 
+    { 
+        // If the user name is provided, get the session of the provided user.  
+        // The same user could have more than one session, this sample just  
+        // retrieves the first one found. You can add more sophisticated  
+        // checks by requesting different types of information from  
+        // WTSQuerySessionInformation. 
+ 
+        PWTS_SESSION_INFO *pSessionsBuffer = NULL; 
+        DWORD dwSessionCount = 0; 
+ 
+        // Enumerate the sessions on the current server. 
+        if (WTSEnumerateSessions(WTS_CURRENT_SERVER_HANDLE, 0, 1,  
+            pSessionsBuffer, &dwSessionCount)) 
+        { 
+            for (DWORD i = 0; (dwSessionId == -1) && (i < dwSessionCount); i++) 
+            { 
+                DWORD sid = pSessionsBuffer[i]->SessionId; 
+ 
+                // Get the user name from the session ID. 
+                PWSTR pszSessionUserName = NULL; 
+                DWORD dwSize; 
+                if (WTSQuerySessionInformation(WTS_CURRENT_SERVER_HANDLE, sid,  
+                    WTSUserName, &pszSessionUserName, &dwSize)) 
+                { 
+                    // Compare with the provided user name (case insensitive). 
+                    if (_wcsicmp(pszUserName, pszSessionUserName) == 0) 
+                    { 
+                        // Get the domain from the session ID. 
+                        PWSTR pszSessionDomain = NULL; 
+                        if (WTSQuerySessionInformation(WTS_CURRENT_SERVER_HANDLE,  
+                            sid, WTSDomainName, &pszSessionDomain, &dwSize)) 
+                        { 
+                            // Compare with the provided domain (case insensitive). 
+                            if (_wcsicmp(pszDomain, pszSessionDomain) == 0) 
+                            { 
+                                // The session of the provided user is found. 
+                                dwSessionId = sid; 
+                            } 
+                            WTSFreeMemory(pszSessionDomain); 
+                        } 
+                    } 
+                    WTSFreeMemory(pszSessionUserName); 
+                } 
+            } 
+ 
+            WTSFreeMemory(pSessionsBuffer); 
+            pSessionsBuffer = NULL; 
+            dwSessionCount = 0; 
+ 
+            // Cannot find the session of the provided user. 
+            if (dwSessionId == 0xFFFFFFFF) 
+            { 
+                SetLastError(ERROR_INVALID_PARAMETER); 
+            } 
+        } 
+    } 
+ 
+    return dwSessionId; 
+} 
+ 
+ 
+BOOL DisplayInteractiveMessage(DWORD dwSessionId, 
+                               PWSTR pszTitle,  
+                               PWSTR pszMessage, 
+                               DWORD dwStyle,  
+                               BOOL fWait,  
+                               DWORD dwTimeoutSeconds,  
+                               DWORD *pResponse) 
+{ 
+    DWORD cbTitle = wcslen(pszTitle) * sizeof(*pszTitle); 
+    DWORD cbMessage = wcslen(pszMessage) * sizeof(*pszMessage); 
+ 
+    return WTSSendMessage( 
+        WTS_CURRENT_SERVER_HANDLE,  // The current server 
+        dwSessionId,                // Identify the session to display message 
+        pszTitle,                   // Title bar of the message box 
+        cbTitle,                    // Length, in bytes, of the title 
+        pszMessage,                 // Message to display 
+        cbMessage,                  // Length, in bytes, of the message 
+        dwStyle,                    // Contents and behavior of the message 
+        dwTimeoutSeconds,           // Timeout of the message in seconds 
+        pResponse,                  // Receive the user's response 
+        fWait                       // Whether wait for user's response or not 
+        ); 
+} 
+
+void WriteEventLogEntry(PWSTR pszMessage, WORD wType) 
+{ 
+	PWSTR m_name = L"ola_client_service"; 
+    HANDLE hEventSource = NULL; 
+    LPCWSTR lpszStrings[2] = { NULL, NULL }; 
+ 
+    hEventSource = RegisterEventSource(NULL, m_name); 
+    if (hEventSource) 
+    { 
+        lpszStrings[0] = m_name; 
+        lpszStrings[1] = pszMessage; 
+ 
+        ReportEvent(hEventSource,  // Event log handle 
+            wType,                 // Event type 
+            0,                     // Event category 
+            0,                     // Event identifier 
+            NULL,                  // No security identifier 
+            2,                     // Size of lpszStrings array 
+            0,                     // No binary data 
+            lpszStrings,           // Array of strings 
+            NULL                   // No binary data 
+            ); 
+ 
+        DeregisterEventSource(hEventSource); 
+    } 
+}
+void WriteErrorLogEntry(PWSTR pszFunction, DWORD dwError) 
+{ 
+    wchar_t szMessage[260]; 
+    StringCchPrintf(szMessage, ARRAYSIZE(szMessage),  
+        L"%s failed w/err 0x%08lx", pszFunction, dwError); 
+    WriteEventLogEntry(szMessage, EVENTLOG_ERROR_TYPE); 
+} 
+
 NTSTATUS FileSystemService::OnStart(ULONG argc, PWSTR *argv)
 {
     try {
-        if(!params_.parse(argc, argv)){
+        if(params_.parse(argc, argv)){
             return STATUS_UNSUCCESSFUL;
         }
     } catch (exception& e) {
         cout << e.what() << "\n";
         return STATUS_UNSUCCESSFUL;
     }
+
+#ifndef SOLID_ON_WINDOWS
+    signal(SIGPIPE, SIG_IGN);
+#endif
+
+    if (params_.debug_addr_.size() && params_.debug_port_.size()) {
+        solid::log_start(
+            params_.debug_addr_.c_str(),
+            params_.debug_port_.c_str(),
+            params_.debug_modules_,
+            params_.debug_buffered_);
+
+    } else if (params_.debug_console_) {
+        solid::log_start(std::cerr, params_.debug_modules_);
+    } else {
+        solid::log_start(
+            "ola_client_service",
+            params_.debug_modules_,
+            params_.debug_buffered_,
+            3,
+            1024 * 1024 * 64);
+    }
+
     ola::client::service::Configuration cfg;
     cfg.secure_ = params_.secure_;
     cfg.compress_ = params_.compress_;
     cfg.front_endpoint_ = params_.front_endpoint_;
     engine_.start(cfg);
+#if 0
+	DWORD dwSessionId = GetSessionIdOfUser(NULL, NULL); 
+    if (dwSessionId == 0xFFFFFFFF) 
+    { 
+        // Log the error and exit. 
+        WriteErrorLogEntry(L"GetSessionIdOfUser", GetLastError()); 
+        return STATUS_UNSUCCESSFUL; 
+    } 
+ 
+    // Display an interactive message in the session. 
+    wchar_t szTitle[] = L"CppInteractiveWindowsService"; 
+    wchar_t szMessage[] = L"Do you want to start Notepad?"; 
+    DWORD dwResponse; 
+    if (!DisplayInteractiveMessage(dwSessionId, szTitle, szMessage, MB_YESNO,  
+        TRUE, 5 /*5 seconds*/, &dwResponse)) 
+    { 
+        // Log the error and exit. 
+        WriteErrorLogEntry(L"DisplayInteractiveMessage", GetLastError()); 
+        return STATUS_UNSUCCESSFUL;
+    } 
+
+	this->Stop();
+#endif
     return STATUS_SUCCESS;
 }
 #endif

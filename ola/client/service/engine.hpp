@@ -2,15 +2,22 @@
 
 #include <memory>
 #include <string>
+#include <functional>
 
 namespace ola {
 namespace client {
 namespace service {
 
+struct GuiProtocolSetup;
+
 struct Configuration {
-    std::string front_endpoint_;
+    using GuiStartFunctionT = std::function<bool(int)>;
+
     bool        compress_;
     bool        secure_;
+    std::string front_endpoint_;
+	std::string path_prefix_;
+    GuiStartFunctionT gui_start_fnc_;
 
     Configuration()
         : compress_(true)
@@ -20,6 +27,7 @@ struct Configuration {
 };
 
 class Engine {
+    friend struct GuiProtocolSetup;
     struct Data;
     std::unique_ptr<Data> pimpl_;
 
