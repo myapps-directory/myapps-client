@@ -204,15 +204,45 @@ public:
 protected:
     NTSTATUS OnStart(ULONG Argc, PWSTR* Argv) override;
     NTSTATUS OnStop() override;
+
+private:
+    void onGuiStart(int _port);
+    void onGuiFail();
 };
 } //namespace
 
+#ifdef SOLID_ON_WINDOWS
+int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR pCmdLine, int nCmdShow)
+{
+    int     argc;
+    LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+#else
 int wmain(int argc, wchar_t** argv)
 {
+#endif
+#if 0
+    SetWindowPos(GetConsoleWindow(), NULL, 5000, 5000, 0, 0, 0);
+    ShowWindow(GetConsoleWindow(), SW_HIDE);
+#endif
     return FileSystemService().Run();
 }
 
 namespace {
+
+string envConfigPathPrefix()
+{
+    const char* v = getenv("APPDATA");
+    if (v == nullptr) {
+        v = getenv("LOCALAPPDATA");
+        if (v == nullptr) {
+            v = "c:";
+        }
+    }
+
+    string r = v;
+    r += "\\OLA";
+    return r;
+}
 
 // -- FileSystemService -------------------------------------------------------
 
@@ -512,7 +542,156 @@ BOOL DisplayInteractiveMessage(DWORD dwSessionId,
         pResponse,                  // Receive the user's response 
         fWait                       // Whether wait for user's response or not 
         ); 
-} 
+}
+
+#if 0
+BOOL CreateInteractiveProcess(DWORD dwSessionId,
+                              PWSTR pszCommandLine, 
+                              BOOL fWait, 
+                              DWORD dwTimeout, 
+                              DWORD *pExitCode)
+{
+    DWORD dwError = ERROR_SUCCESS;
+    HANDLE hToken = NULL;
+    LPVOID lpvEnv = NULL;
+    wchar_t szUserProfileDir[MAX_PATH];
+    DWORD cchUserProfileDir = ARRAYSIZE(szUserProfileDir);
+    STARTUPINFO si = { sizeof(si) };
+    PROCESS_INFORMATION pi = { 0 };
+    DWORD dwWaitResult;
+
+    // Obtain the primary access token of the logged-on user specified by the 
+    // session ID.
+    if (!WTSQueryUserToken(dwSessionId, &hToken))
+    {
+        dwError = GetLastError();
+        goto Cleanup;
+    }
+
+    // Run the command line in the session that we found by using the default 
+    // values for working directory and desktop.
+
+    // This creates the default environment block for the user.
+    if (!CreateEnvironmentBlock(&lpvEnv, hToken, TRUE))
+    {
+        dwError = GetLastError();
+        goto Cleanup;
+    }
+
+    // Retrieve the path to the root directory of the user's profile.
+    if (!GetUserProfileDirectory(hToken, szUserProfileDir, 
+        &cchUserProfileDir))
+    {
+        dwError = GetLastError();
+        goto Cleanup;
+    }
+
+    // Specify that the process runs in the interactive desktop.
+    si.lpDesktop = L"winsta0\\default";
+
+    // Launch the process.
+    if (!CreateProcessAsUser(hToken, NULL, pszCommandLine, NULL, NULL, FALSE, 
+        CREATE_UNICODE_ENVIRONMENT, lpvEnv, szUserProfileDir, &si, &pi))
+    {
+        dwError = GetLastError();
+        goto Cleanup;
+    }
+
+    if (fWait)
+    {
+        // Wait for the exit of the process.
+        dwWaitResult = WaitForSingleObject(pi.hProcess, dwTimeout);
+        if (dwWaitResult == WAIT_OBJECT_0)
+        {
+            // If the process exits before timeout, get the exit code.
+            GetExitCodeProcess(pi.hProcess, pExitCode);
+        }
+        else if (dwWaitResult == WAIT_TIMEOUT)
+        {
+            // If it times out, terminiate the process.
+            TerminateProcess(pi.hProcess, IDTIMEOUT);
+            *pExitCode = IDTIMEOUT;
+        }
+        else
+        {
+            dwError = GetLastError();
+            goto Cleanup;
+        }
+    }
+    else
+    {
+        *pExitCode = IDASYNC;
+    }
+
+Cleanup:
+
+    // Centralized cleanup for all allocated resources.
+    if (hToken)
+    {
+        CloseHandle(hToken);
+        hToken = NULL;
+    }
+    if (lpvEnv)
+    {
+        DestroyEnvironmentBlock(lpvEnv);
+        lpvEnv = NULL;
+    }
+    if (pi.hProcess)
+    {
+        CloseHandle(pi.hProcess);
+        pi.hProcess = NULL;
+    }
+    if (pi.hThread)
+    {
+        CloseHandle(pi.hThread);
+        pi.hThread = NULL;
+    }
+
+    // Set the last error if something failed in the function.
+    if (dwError != ERROR_SUCCESS)
+    {
+        SetLastError(dwError);
+        return FALSE;
+    }
+    else
+    {
+        return TRUE;
+    }
+}
+
+#endif
+
+bool CreateInteractiveProcess(PWSTR pszCommandLine, 
+                              BOOL fWait, 
+                              DWORD dwTimeout, 
+                              DWORD *pExitCode)
+{
+	STARTUPINFO si;
+    PROCESS_INFORMATION pi;
+
+    ZeroMemory( &si, sizeof(si) );
+    si.cb = sizeof(si);
+    ZeroMemory( &pi, sizeof(pi) );
+
+    // Start the child process. 
+    if( !CreateProcess( NULL,   // No module name (use command line)
+        pszCommandLine,        // Command line
+        NULL,           // Process handle not inheritable
+        NULL,           // Thread handle not inheritable
+        FALSE,          // Set handle inheritance to FALSE
+        0,              // No creation flags
+        NULL,           // Use parent's environment block
+        NULL,           // Use parent's starting directory 
+        &si,            // Pointer to STARTUPINFO structure
+        &pi )           // Pointer to PROCESS_INFORMATION structure
+    ) 
+    {
+        printf( "CreateProcess failed (%d).\n", GetLastError() );
+        return false;
+    }
+
+	return true;
+}
 
 void WriteEventLogEntry(PWSTR pszMessage, WORD wType) 
 { 
@@ -585,6 +764,13 @@ NTSTATUS FileSystemService::OnStart(ULONG argc, PWSTR *argv)
     cfg.secure_ = params_.secure_;
     cfg.compress_ = params_.compress_;
     cfg.front_endpoint_ = params_.front_endpoint_;
+	cfg.path_prefix_ = envConfigPathPrefix();
+	cfg.gui_fail_fnc_ = [this](){
+		onGuiFail();
+	};
+	cfg.gui_start_fnc_ = [this](int _port){
+		onGuiStart(_port);
+	};
     engine_.start(cfg);
 #if 0
 	DWORD dwSessionId = GetSessionIdOfUser(NULL, NULL); 
@@ -618,6 +804,53 @@ NTSTATUS FileSystemService::OnStop()
     host_.Unmount();
     engine_.stop();
     return STATUS_SUCCESS;
+}
+
+void FileSystemService::onGuiStart(int _port){
+#if 0
+	DWORD dwSessionId = GetSessionIdOfUser(NULL, NULL); 
+    if (dwSessionId == 0xFFFFFFFF) 
+    { 
+        // Log the error and exit. 
+        WriteErrorLogEntry(L"GetSessionIdOfUser", GetLastError()); 
+        return; 
+    }
+	RevertToSelf();
+#endif
+	wchar_t szCommandLine[] = L"notepad.exe";
+    DWORD dwExitCode;
+    if (!CreateInteractiveProcess(szCommandLine, FALSE, 0, 
+        &dwExitCode))
+    {
+        // Log the error and exit.
+        WriteErrorLogEntry(L"CreateInteractiveProcess", GetLastError());
+        return;
+    }
+}
+
+void FileSystemService::onGuiFail(){
+	DWORD dwSessionId = GetSessionIdOfUser(NULL, NULL); 
+    if (dwSessionId == 0xFFFFFFFF) 
+    { 
+        // Log the error and exit. 
+        WriteErrorLogEntry(L"GetSessionIdOfUser", GetLastError()); 
+        return; 
+    } 
+ 
+    // Display an interactive message in the session. 
+    wchar_t szTitle[] = L"Error"; 
+    wchar_t szMessage[] = L"Authentication failure - stoping the service"; 
+    DWORD dwResponse; 
+    if (!DisplayInteractiveMessage(dwSessionId, szTitle, szMessage, MB_OK,  
+        TRUE, 10 /*seconds*/, &dwResponse)) 
+    { 
+        // Log the error and exit. 
+        WriteErrorLogEntry(L"DisplayInteractiveMessage", GetLastError()); 
+        return;
+    } 
+
+	std::thread  t{&FileSystemService::Stop, this};
+	t.detach();
 }
 
 // -- FileSystem --------------------------------------------------------------
