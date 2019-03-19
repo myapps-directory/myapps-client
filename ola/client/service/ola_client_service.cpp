@@ -18,6 +18,7 @@
 
 #include "ola/client/service/engine.hpp"
 #include <iostream>
+#include <sstream>
 
 #include "solid/system/log.hpp"
 
@@ -300,7 +301,7 @@ bool Parameters::parse(ULONG argc, PWSTR* argv)
         ("mount-point,m", wvalue<wstring>(&mount_point_)->default_value(L"C:\\ola", "c:\\ola"), "Mount point")
         ("secure,s", value<bool>(&secure_)->implicit_value(true)->default_value(false), "Use SSL to secure communication")
         ("compress", value<bool>(&compress_)->implicit_value(true)->default_value(false), "Use Snappy to compress communication")
-        ("front", value<std::string>(&front_endpoint_)->default_value(string("localhost:") + ola::front::default_port()), "OLA Front Endpoint");
+        ("front", value<std::string>(&front_endpoint_)->default_value(string("192.168.32.130:") + ola::front::default_port()), "OLA Front Endpoint");
     // clang-format off
     variables_map vm;
     store(parse_command_line(argc, argv, desc), vm);
@@ -661,7 +662,7 @@ Cleanup:
 
 #endif
 
-bool CreateInteractiveProcess(PWSTR pszCommandLine, 
+bool CreateInteractiveProcess(const wstring &_cmd_line, 
                               BOOL fWait, 
                               DWORD dwTimeout, 
                               DWORD *pExitCode)
@@ -672,10 +673,10 @@ bool CreateInteractiveProcess(PWSTR pszCommandLine,
     ZeroMemory( &si, sizeof(si) );
     si.cb = sizeof(si);
     ZeroMemory( &pi, sizeof(pi) );
-
+	LPWSTR p;
     // Start the child process. 
     if( !CreateProcess( NULL,   // No module name (use command line)
-        pszCommandLine,        // Command line
+        const_cast<wchar_t*>(_cmd_line.c_str()),        // Command line
         NULL,           // Process handle not inheritable
         NULL,           // Thread handle not inheritable
         FALSE,          // Set handle inheritance to FALSE
@@ -806,6 +807,10 @@ NTSTATUS FileSystemService::OnStop()
     return STATUS_SUCCESS;
 }
 
+wstring a2w(const string &_a) {
+	return wstring(_a.begin(), _a.end());
+}
+
 void FileSystemService::onGuiStart(int _port){
 #if 0
 	DWORD dwSessionId = GetSessionIdOfUser(NULL, NULL); 
@@ -817,9 +822,10 @@ void FileSystemService::onGuiStart(int _port){
     }
 	RevertToSelf();
 #endif
-	wchar_t szCommandLine[] = L"notepad.exe";
+	wostringstream oss;
+	oss<<L"ola_client_gui.exe --front "<<a2w(params_.front_endpoint_)<<L" --local "<<_port;
     DWORD dwExitCode;
-    if (!CreateInteractiveProcess(szCommandLine, FALSE, 0, 
+    if (!CreateInteractiveProcess(oss.str(), FALSE, 0, 
         &dwExitCode))
     {
         // Log the error and exit.

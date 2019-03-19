@@ -5,33 +5,38 @@ set(CMAKE_AUTOMOC ON)
 # Create code from a list of Qt designer ui files
 set(CMAKE_AUTOUIC ON)
 
-
-find_package(Qt5Widgets)
+find_package (Qt5Core)
+find_package (Qt5Gui)
+find_package (Qt5Widgets)
 
 if(${Qt5Widgets_FOUND})
-    set(src_basic_gui
+    QT5_WRAP_UI(FORMS_HEADERS gui_auth_form.ui)
+    
+    set(basic_gui_SRCS
+        gui_auth_form.ui
         gui_main.cpp
         gui_auth_widget.cpp
         gui_auth_widget.hpp
-        gui_auth_form.ui
+		gui_protocol.hpp
+        ${FORMS_HEADERS}
     )
 
     if(WIN32)  
         add_executable(
             ola_client_gui
             WIN32
-            ${src_basic_gui}
+            ${basic_gui_SRCS}
         )
     elseif(APPLE)
         add_executable(
             ola_client_gui
             MACOSX_BUNDLE
-            ${src_basic_gui}
+            ${basic_gui_SRCS}
         )
     else()
         add_executable(
             ola_client_gui
-            ${src_basic_gui}
+            ${basic_gui_SRCS}
         )
     endif()
 

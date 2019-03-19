@@ -4,7 +4,7 @@
 #define _WINSOCKAPI_
 #ifndef NOMINMAX
 #define NOMINMAX
-#endif#undef UNICODE
+#endif #undef UNICODE
 #define UNICODE
 #undef _WINSOCKAPI_
 #define _WINSOCKAPI_
@@ -15,32 +15,30 @@
 
 #include "gui_auth_widget.hpp"
 
-
-#include "solid/system/log.hpp"
 #include "solid/frame/manager.hpp"
 #include "solid/frame/scheduler.hpp"
 #include "solid/frame/service.hpp"
+#include "solid/system/log.hpp"
 
 #include "solid/frame/aio/aioresolver.hpp"
 
 #include "solid/frame/reactor.hpp"
 #include "solid/frame/service.hpp"
 
-#include "solid/frame/mprpc/mprpcservice.hpp"
-#include "solid/frame/mprpc/mprpcconfiguration.hpp"
-#include "solid/frame/mprpc/mprpcsocketstub_openssl.hpp"
 #include "solid/frame/mprpc/mprpccompression_snappy.hpp"
-
+#include "solid/frame/mprpc/mprpcconfiguration.hpp"
+#include "solid/frame/mprpc/mprpcservice.hpp"
+#include "solid/frame/mprpc/mprpcsocketstub_openssl.hpp"
 
 #include "ola/common/utility/crypto.hpp"
 
-#include "ola/common/ola_front_protocol.hpp"
 #include "gui_protocol.hpp"
+#include "ola/common/ola_front_protocol.hpp"
 
 #include "boost/program_options.hpp"
 
-#include <QtGui>
 #include <QApplication>
+#include <QtGui>
 
 #include <signal.h>
 
@@ -49,62 +47,63 @@
 #include <userenv.h>
 #pragma comment(lib, "userenv.lib")
 
-#include <iostream>
 #include <fstream>
+#include <future>
+#include <iostream>
 
 using namespace ola;
 using namespace solid;
 using namespace std;
 
 using AioSchedulerT = frame::Scheduler<frame::aio::Reactor>;
-using SchedulerT = frame::Scheduler<frame::Reactor>;
+using SchedulerT    = frame::Scheduler<frame::Reactor>;
 
 //-----------------------------------------------------------------------------
 //      Parameters
 //-----------------------------------------------------------------------------
-namespace{
-struct Parameters{
-    vector<string>          dbg_modules;
-    string                  dbg_addr;
-    string                  dbg_port;
-    bool                    dbg_console;
-    bool                    dbg_buffered;
+namespace {
+struct Parameters {
+    vector<string> dbg_modules;
+    string         dbg_addr;
+    string         dbg_port;
+    bool           dbg_console;
+    bool           dbg_buffered;
+    bool           secure;
+    bool           compress;
+    string         front_endpoint;
+    string         local_port;
 
-    bool                    secure;
-    bool                    compress;
-    bool                    auto_pilot;
-
-    string                  front_endpoint;
-    string                  local_endpoint;
-
-    Parameters(){}
+    Parameters() {}
 
     bool parse(ULONG argc, PWSTR* argv);
 };
 
-void front_configure_service(const Parameters &_params, frame::mprpc::ServiceT& _rsvc, AioSchedulerT& _rsch, frame::aio::Resolver& _rres);
-void local_configure_service(const Parameters &_params, frame::mprpc::ServiceT& _rsvc, AioSchedulerT& _rsch, frame::aio::Resolver& _rres);
-
-}//namespace
+void front_configure_service(const Parameters& _params, frame::mprpc::ServiceT& _rsvc, AioSchedulerT& _rsch, frame::aio::Resolver& _rres);
+void local_configure_service(const Parameters& _params, frame::mprpc::ServiceT& _rsvc, AioSchedulerT& _rsch, frame::aio::Resolver& _rres);
+bool local_register(const Parameters& _params, frame::mprpc::ServiceT& _rsvc, client::gui::AuthWidget& _rwidget);
+} //namespace
 //-----------------------------------------------------------------------------
 //      main
 //-----------------------------------------------------------------------------
 #ifdef SOLID_ON_WINDOWS
-int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR pCmdLine, int nCmdShow){
+int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR pCmdLine, int nCmdShow)
+{
     int     wargc;
-    LPWSTR* wargv = CommandLineToArgvW(GetCommandLineW(), &wargc);
-    int argc = 1;
-    char *argv[1] = {GetCommandLineA()};
+    LPWSTR* wargv   = CommandLineToArgvW(GetCommandLineW(), &wargc);
+    int     argc    = 1;
+    char*   argv[1] = {GetCommandLineA()};
 #else
-int main(int argc, char *argv[]){
+int main(int argc, char* argv[])
+{
 #endif
     Parameters params;
-    
-    if(params.parse(wargc, wargv)) return 0;
+
+    if (params.parse(wargc, wargv))
+        return 0;
 #if !defined(SOLID_ON_WINDOWS)
     signal(SIGPIPE, SIG_IGN);
 #endif
-    
+
     if (params.dbg_addr.size() && params.dbg_port.size()) {
         solid::log_start(
             params.dbg_addr.c_str(),
@@ -123,53 +122,54 @@ int main(int argc, char *argv[]){
             1024 * 1024 * 64);
     }
 
+    QApplication app(argc, argv);
 
-    QApplication                        app(argc, argv);
+    AioSchedulerT aioscheduler;
 
-    AioSchedulerT                       aioscheduler;
+    frame::Manager  manager;
+    frame::ServiceT service{manager};
 
-    frame::Manager                      manager;
-    frame::ServiceT                     service{manager};
+    frame::mprpc::ServiceT front_rpc_service{manager};
+    frame::mprpc::ServiceT local_rpc_service{manager};
 
-    frame::mprpc::ServiceT              front_rpc_service{manager};
-    frame::mprpc::ServiceT              local_rpc_service{manager};
-    
-    FunctionWorkPool<>                  fwp{WorkPoolConfiguration()};
-    frame::aio::Resolver                resolver(fwp);
-
-    ErrorConditionT                     err;
-    
-    client::gui::AuthWidget             auth_widget;
+    FunctionWorkPool<>      fwp{WorkPoolConfiguration()};
+    frame::aio::Resolver    resolver(fwp);
+    client::gui::AuthWidget auth_widget;
 
     aioscheduler.start(1);
 
+    local_configure_service(params, local_rpc_service, aioscheduler, resolver);
+
+    if (!local_register(params, local_rpc_service, auth_widget)) {
+        cout << "register failed" << endl;
+        return 0;
+    }
+
     auth_widget.start();
 
-    int rv = app.exec();
-
-    return rv;
+    return app.exec();
 }
 
 //-----------------------------------------------------------------------------
-namespace{
-bool Parameters::parse(ULONG argc, PWSTR* argv){
+namespace {
+bool Parameters::parse(ULONG argc, PWSTR* argv)
+{
     using namespace boost::program_options;
-    try{
+    try {
         options_description desc("Bubbles client");
-        desc.add_options()
-            ("help,h", "List program options")
-            ("debug-modules,M", value<vector<string>>(&dbg_modules),"Debug logging modules (e.g. \".*:EW\", \"\\*:VIEW\")")
-            ("debug-address,A", value<string>(&dbg_addr), "Debug server address (e.g. on linux use: nc -l 9999)")
-            ("debug-port,P", value<string>(&dbg_port)->default_value("9999"), "Debug server port (e.g. on linux use: nc -l 9999)")
-            ("debug-console,C", value<bool>(&dbg_console)->implicit_value(true)->default_value(false), "Debug console")
-            ("debug-unbuffered,S", value<bool>(&dbg_buffered)->implicit_value(false)->default_value(true), "Debug unbuffered")
-
+        // clang-format off
+		desc.add_options()
+			("help,h", "List program options")
+			("debug-modules,M", value<vector<string>>(&dbg_modules), "Debug logging modules (e.g. \".*:EW\", \"\\*:VIEW\")")
+			("debug-address,A", value<string>(&dbg_addr), "Debug server address (e.g. on linux use: nc -l 9999)")
+			("debug-port,P", value<string>(&dbg_port)->default_value("9999"), "Debug server port (e.g. on linux use: nc -l 9999)")
+			("debug-console,C", value<bool>(&dbg_console)->implicit_value(true)->default_value(false), "Debug console")
+			("debug-unbuffered,S", value<bool>(&dbg_buffered)->implicit_value(false)->default_value(true), "Debug unbuffered")
             ("front,f", value<std::string>(&front_endpoint)->required(), "Front Server endpoint: address:port")
-            ("local,l", value<std::string>(&front_endpoint)->required(), "Local Server endpoint: address:port")
-            ("secure,s", value<bool>(&secure)->implicit_value(true)->default_value(true), "Use SSL to secure communication")
-            ("compress", value<bool>(&compress)->implicit_value(true)->default_value(true), "Use Snappy to compress communication")
-            ("auto,a", value<bool>(&auto_pilot)->implicit_value(true)->default_value(true), "Auto randomly move the bubble")
-        ;
+			("local,l", value<std::string>(&local_port)->required(), "Local Server Port")
+			("secure,s", value<bool>(&secure)->implicit_value(true)->default_value(true), "Use SSL to secure communication")
+			("compress", value<bool>(&compress)->implicit_value(true)->default_value(true), "Use Snappy to compress communication");
+        // clang-format on
         variables_map vm;
         store(parse_command_line(argc, argv, desc), vm);
         notify(vm);
@@ -178,7 +178,7 @@ bool Parameters::parse(ULONG argc, PWSTR* argv){
             return true;
         }
         return false;
-    }catch(exception& e){
+    } catch (exception& e) {
         cout << e.what() << "\n";
         return true;
     }
@@ -206,7 +206,8 @@ struct FrontSetup {
         _rprotocol.registerMessage<T>(complete_message<T>, _rtid);
     }
 };
-void front_configure_service(const Parameters &_params, frame::mprpc::ServiceT& _rsvc, AioSchedulerT& _rsch, frame::aio::Resolver& _rres){
+void front_configure_service(const Parameters& _params, frame::mprpc::ServiceT& _rsvc, AioSchedulerT& _rsch, frame::aio::Resolver& _rres)
+{
     auto                        proto = front::ProtocolT::create();
     frame::mprpc::Configuration cfg(_rsch, proto);
 
@@ -215,13 +216,13 @@ void front_configure_service(const Parameters &_params, frame::mprpc::ServiceT& 
     cfg.client.name_resolve_fnc = frame::mprpc::InternetResolverF(_rres, ola::front::default_port());
 
     cfg.client.connection_start_state = frame::mprpc::ConnectionState::Passive;
-    
+
     {
-//         auto connection_stop_lambda = [&_rctx](frame::mpipc::ConnectionContext &_ctx){
-//             engine_ptr->onConnectionStop(_ctx);
-//         };
-        auto connection_start_lambda = [](frame::mprpc::ConnectionContext &_ctx){
-            
+        //         auto connection_stop_lambda = [&_rctx](frame::mpipc::ConnectionContext &_ctx){
+        //             engine_ptr->onConnectionStop(_ctx);
+        //         };
+        auto connection_start_lambda = [](frame::mprpc::ConnectionContext& _ctx) {
+
         };
         //cfg.connection_stop_fnc = std::move(connection_stop_lambda);
         cfg.client.connection_start_fnc = std::move(connection_start_lambda);
@@ -238,8 +239,8 @@ void front_configure_service(const Parameters &_params, frame::mprpc::ServiceT& 
             },
             frame::mprpc::openssl::NameCheckSecureStart{"ola-front-server"});
     }
-    
-    if(_params.compress){
+
+    if (_params.compress) {
         frame::mprpc::snappy::setup(cfg);
     }
 
@@ -247,7 +248,7 @@ void front_configure_service(const Parameters &_params, frame::mprpc::ServiceT& 
 }
 
 //-----------------------------------------------------------------------------
-// Front
+// Local
 //-----------------------------------------------------------------------------
 struct LocalSetup {
     template <class T>
@@ -257,16 +258,43 @@ struct LocalSetup {
     }
 };
 
-void local_configure_service(const Parameters &_params, frame::mprpc::ServiceT& _rsvc, AioSchedulerT& _rsch, frame::aio::Resolver& _rres){
+void local_configure_service(const Parameters& _params, frame::mprpc::ServiceT& _rsvc, AioSchedulerT& _rsch, frame::aio::Resolver& _rres)
+{
     auto                        proto = client::gui::ProtocolT::create();
     frame::mprpc::Configuration cfg(_rsch, proto);
 
     client::gui::protocol_setup(LocalSetup(), *proto);
 
-    cfg.client.name_resolve_fnc = frame::mprpc::InternetResolverF(_rres, "0");
+    cfg.client.name_resolve_fnc = frame::mprpc::InternetResolverF(_rres, _params.local_port.c_str());
 
     cfg.client.connection_start_state = frame::mprpc::ConnectionState::Active;
 
     _rsvc.start(std::move(cfg));
 }
-}//namespace
+
+bool local_register(const Parameters& _params, frame::mprpc::ServiceT& _rsvc, client::gui::AuthWidget& _rwidget)
+{
+    promise<bool> prom;
+
+    auto msg_ptr = make_shared<client::gui::RegisterRequest>();
+    auto lambda  = [&prom, &_rwidget](
+                      frame::mprpc::ConnectionContext&                _rctx,
+                      std::shared_ptr<client::gui::RegisterRequest>&  _rsent_msg_ptr,
+                      std::shared_ptr<client::gui::RegisterResponse>& _rrecv_msg_ptr,
+                      ErrorConditionT const&                          _rerror) {
+        if (_rrecv_msg_ptr) {
+            if (_rrecv_msg_ptr->error_) {
+                prom.set_value(false);
+            } else {
+                _rwidget.setUser(_rrecv_msg_ptr->user_);
+                prom.set_value(true);          
+			}
+        } else {
+            prom.set_value(false);
+        }
+    };
+    _rsvc.sendRequest("127.0.0.1", msg_ptr, lambda);
+    auto fut = prom.get_future();
+    return fut.wait_for(chrono::seconds(10)) == future_status::ready && fut.get();
+}
+} //namespace
