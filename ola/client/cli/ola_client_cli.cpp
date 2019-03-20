@@ -60,11 +60,11 @@ struct Parameters {
     {
     }
 
-    vector<string> dbg_modules;
+    vector<string> dbg_modules = {"ola::.*:VIEW"};
     string         dbg_addr;
     string         dbg_port;
-    bool           dbg_console;
-    bool           dbg_buffered;
+    bool           dbg_console = false;
+    bool           dbg_buffered = false;
     bool           secure;
     bool           compress;
     string         front_endpoint;
@@ -253,7 +253,7 @@ bool parse_arguments(Parameters& _par, int argc, char* argv[])
             ("debug-address,A", value<string>(&_par.dbg_addr), "Debug server address (e.g. on linux use: nc -l 9999)")
             ("debug-port,P", value<string>(&_par.dbg_port)->default_value("9999"), "Debug server port (e.g. on linux use: nc -l 9999)")
             ("debug-console,C", value<bool>(&_par.dbg_console)->implicit_value(true)->default_value(false), "Debug console")
-            ("debug-unbuffered,S", value<bool>(&_par.dbg_buffered)->implicit_value(false)->default_value(true), "Debug unbuffered")
+            ("debug-buffered,S", value<bool>(&_par.dbg_buffered)->implicit_value(true)->default_value(false), "Debug buffered")
             ("secure,s", value<bool>(&_par.secure)->implicit_value(true)->default_value(false), "Use SSL to secure communication")
             ("compress", value<bool>(&_par.compress)->implicit_value(true)->default_value(false), "Use Snappy to compress communication")
             ("front", value<std::string>(&_par.front_endpoint)->default_value(string("localhost:") + ola::front::default_port()), "OLA Front Endpoint");

@@ -44,6 +44,7 @@ if(${Qt5Widgets_FOUND})
 
     target_link_libraries(
         ola_client_gui
+		ola_utility
         solid_frame_mprpc
         solid_frame_aio_openssl
         solid_serialization_v2

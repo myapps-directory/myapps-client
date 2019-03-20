@@ -62,12 +62,15 @@ using SchedulerT    = frame::Scheduler<frame::Reactor>;
 //      Parameters
 //-----------------------------------------------------------------------------
 namespace {
+
+const solid::LoggerT logger("ola::client::gui");
+
 struct Parameters {
-    vector<string> dbg_modules;
+    vector<string> dbg_modules = {"ola::.*:VIEW"};
     string         dbg_addr;
     string         dbg_port;
-    bool           dbg_console;
-    bool           dbg_buffered;
+    bool           dbg_console  = false;
+    bool           dbg_buffered = false;
     bool           secure;
     bool           compress;
     string         front_endpoint;
@@ -78,9 +81,62 @@ struct Parameters {
     bool parse(ULONG argc, PWSTR* argv);
 };
 
-void front_configure_service(const Parameters& _params, frame::mprpc::ServiceT& _rsvc, AioSchedulerT& _rsch, frame::aio::Resolver& _rres);
+struct Engine {
+    client::gui::AuthWidget&             auth_widget_;
+    frame::mprpc::ServiceT&              front_rpc_service_;
+    frame::mprpc::ServiceT&              local_rpc_service_;
+    Parameters&                          params_;
+    shared_ptr<client::gui::AuthRequest> local_auth_req_ptr_;
+    frame::mprpc::RecipientId            local_recipient_id_;
+    std::shared_ptr<front::AuthRequest>  front_auth_req_ptr_;
+    frame::mprpc::RecipientId            front_recipient_id_;
+    mutex                                mutex_;
+
+    Engine(
+        client::gui::AuthWidget& _auth_widget,
+        frame::mprpc::ServiceT&  _front_rpc_service,
+        frame::mprpc::ServiceT&  _local_rpc_service,
+        Parameters&              _params)
+        : auth_widget_(_auth_widget)
+        , front_rpc_service_(_front_rpc_service)
+        , local_rpc_service_(_local_rpc_service)
+        , params_(_params)
+    {
+    }
+
+    void onConnectionStart(frame::mprpc::ConnectionContext& _ctx);
+    void onConnectionStop(frame::mprpc::ConnectionContext& _ctx);
+
+    void onAuthStart(const string& _user, const string& _pass);
+
+    void onAuthResponse(
+        frame::mprpc::ConnectionContext&      _rctx,
+        std::shared_ptr<front::AuthRequest>&  _rsent_msg_ptr,
+        std::shared_ptr<front::AuthResponse>& _rrecv_msg_ptr,
+        ErrorConditionT const&                _rerror);
+
+    bool localRegister(client::gui::AuthWidget& _rwidget);
+};
+
+void front_configure_service(Engine& _rengine, const Parameters& _params, frame::mprpc::ServiceT& _rsvc, AioSchedulerT& _rsch, frame::aio::Resolver& _rres);
 void local_configure_service(const Parameters& _params, frame::mprpc::ServiceT& _rsvc, AioSchedulerT& _rsch, frame::aio::Resolver& _rres);
-bool local_register(const Parameters& _params, frame::mprpc::ServiceT& _rsvc, client::gui::AuthWidget& _rwidget);
+
+//TODO: find a better name
+string envLogPathPrefix()
+{
+    const char* v = getenv("LOCALAPPDATA");
+    if (v == nullptr) {
+        v = getenv("APPDATA");
+        if (v == nullptr) {
+            v = "c:";
+        }
+    }
+
+    string r = v;
+    r += "\\OLA\\client";
+    return r;
+}
+
 } //namespace
 //-----------------------------------------------------------------------------
 //      main
@@ -115,7 +171,7 @@ int main(int argc, char* argv[])
         solid::log_start(std::cerr, params.dbg_modules);
     } else {
         solid::log_start(
-            "ola_client_gui",
+            (envLogPathPrefix() + "\\log\\gui").c_str(),
             params.dbg_modules,
             params.dbg_buffered,
             3,
@@ -132,22 +188,35 @@ int main(int argc, char* argv[])
     frame::mprpc::ServiceT front_rpc_service{manager};
     frame::mprpc::ServiceT local_rpc_service{manager};
 
-    FunctionWorkPool<>      fwp{WorkPoolConfiguration()};
-    frame::aio::Resolver    resolver(fwp);
+    FunctionWorkPool<>   fwp{WorkPoolConfiguration()};
+    frame::aio::Resolver resolver(fwp);
+
     client::gui::AuthWidget auth_widget;
+    Engine                  engine(auth_widget, front_rpc_service, local_rpc_service, params);
 
     aioscheduler.start(1);
 
     local_configure_service(params, local_rpc_service, aioscheduler, resolver);
 
-    if (!local_register(params, local_rpc_service, auth_widget)) {
+    solid_log(logger, Info, "try register on local service");
+
+    if (!engine.localRegister(auth_widget)) {
         cout << "register failed" << endl;
+        solid_log(logger, Info, "register failed");
         return 0;
     }
 
-    auth_widget.start();
+    auth_widget.start(
+        [&engine](const std::string& _user, const std::string& _pass) {
+            engine.onAuthStart(_user, ola::utility::sha256(_pass));
+        });
 
-    return app.exec();
+    front_configure_service(engine, params, front_rpc_service, aioscheduler, resolver);
+
+    const int rv = app.exec();
+    front_rpc_service.stop();
+    local_rpc_service.stop();
+    return rv;
 }
 
 //-----------------------------------------------------------------------------
@@ -164,11 +233,11 @@ bool Parameters::parse(ULONG argc, PWSTR* argv)
 			("debug-address,A", value<string>(&dbg_addr), "Debug server address (e.g. on linux use: nc -l 9999)")
 			("debug-port,P", value<string>(&dbg_port)->default_value("9999"), "Debug server port (e.g. on linux use: nc -l 9999)")
 			("debug-console,C", value<bool>(&dbg_console)->implicit_value(true)->default_value(false), "Debug console")
-			("debug-unbuffered,S", value<bool>(&dbg_buffered)->implicit_value(false)->default_value(true), "Debug unbuffered")
+			("debug-buffered,S", value<bool>(&dbg_buffered)->implicit_value(true)->default_value(false), "Debug unbuffered")
             ("front,f", value<std::string>(&front_endpoint)->required(), "Front Server endpoint: address:port")
-			("local,l", value<std::string>(&local_port)->required(), "Local Server Port")
-			("secure,s", value<bool>(&secure)->implicit_value(true)->default_value(true), "Use SSL to secure communication")
-			("compress", value<bool>(&compress)->implicit_value(true)->default_value(true), "Use Snappy to compress communication");
+			("local,l", value<std::string>(&local_port)->default_value(""), "Local Server Port")
+			("secure,s", value<bool>(&secure)->implicit_value(true)->default_value(false), "Use SSL to secure communication")
+			("compress", value<bool>(&compress)->implicit_value(true)->default_value(false), "Use Snappy to compress communication");
         // clang-format on
         variables_map vm;
         store(parse_command_line(argc, argv, desc), vm);
@@ -206,7 +275,9 @@ struct FrontSetup {
         _rprotocol.registerMessage<T>(complete_message<T>, _rtid);
     }
 };
-void front_configure_service(const Parameters& _params, frame::mprpc::ServiceT& _rsvc, AioSchedulerT& _rsch, frame::aio::Resolver& _rres)
+
+
+void front_configure_service(Engine& _rengine, const Parameters& _params, frame::mprpc::ServiceT& _rsvc, AioSchedulerT& _rsch, frame::aio::Resolver& _rres)
 {
     auto                        proto = front::ProtocolT::create();
     frame::mprpc::Configuration cfg(_rsch, proto);
@@ -215,16 +286,18 @@ void front_configure_service(const Parameters& _params, frame::mprpc::ServiceT& 
 
     cfg.client.name_resolve_fnc = frame::mprpc::InternetResolverF(_rres, ola::front::default_port());
 
-    cfg.client.connection_start_state = frame::mprpc::ConnectionState::Passive;
+    cfg.client.connection_start_state     = frame::mprpc::ConnectionState::Passive;
+    cfg.pool_max_active_connection_count  = 1;
+    cfg.pool_max_pending_connection_count = 1;
 
     {
-        //         auto connection_stop_lambda = [&_rctx](frame::mpipc::ConnectionContext &_ctx){
-        //             engine_ptr->onConnectionStop(_ctx);
-        //         };
-        auto connection_start_lambda = [](frame::mprpc::ConnectionContext& _ctx) {
-
+        auto connection_stop_lambda = [&_rengine](frame::mprpc::ConnectionContext& _ctx) {
+            _rengine.onConnectionStop(_ctx);
         };
-        //cfg.connection_stop_fnc = std::move(connection_stop_lambda);
+        auto connection_start_lambda = [&_rengine](frame::mprpc::ConnectionContext& _ctx) {
+            _rengine.onConnectionStart(_ctx);
+        };
+        cfg.connection_stop_fnc = std::move(connection_stop_lambda);
         cfg.client.connection_start_fnc = std::move(connection_start_lambda);
     }
 
@@ -245,6 +318,7 @@ void front_configure_service(const Parameters& _params, frame::mprpc::ServiceT& 
     }
 
     _rsvc.start(std::move(cfg));
+    _rsvc.createConnectionPool(_params.front_endpoint.c_str(), 1);
 }
 
 //-----------------------------------------------------------------------------
@@ -272,12 +346,15 @@ void local_configure_service(const Parameters& _params, frame::mprpc::ServiceT& 
     _rsvc.start(std::move(cfg));
 }
 
-bool local_register(const Parameters& _params, frame::mprpc::ServiceT& _rsvc, client::gui::AuthWidget& _rwidget)
+bool Engine::localRegister(client::gui::AuthWidget& _rwidget)
 {
+    if (params_.local_port.empty()) {
+        return true;
+    }
     promise<bool> prom;
 
     auto msg_ptr = make_shared<client::gui::RegisterRequest>();
-    auto lambda  = [&prom, &_rwidget](
+    auto lambda  = [this, &prom, &_rwidget](
                       frame::mprpc::ConnectionContext&                _rctx,
                       std::shared_ptr<client::gui::RegisterRequest>&  _rsent_msg_ptr,
                       std::shared_ptr<client::gui::RegisterResponse>& _rrecv_msg_ptr,
@@ -286,15 +363,117 @@ bool local_register(const Parameters& _params, frame::mprpc::ServiceT& _rsvc, cl
             if (_rrecv_msg_ptr->error_) {
                 prom.set_value(false);
             } else {
+
+                local_auth_req_ptr_ = std::make_shared<client::gui::AuthRequest>(*_rrecv_msg_ptr);
+                local_recipient_id_ = _rctx.recipientId();
                 _rwidget.setUser(_rrecv_msg_ptr->user_);
-                prom.set_value(true);          
-			}
+                prom.set_value(true);
+            }
         } else {
             prom.set_value(false);
         }
     };
-    _rsvc.sendRequest("127.0.0.1", msg_ptr, lambda);
+    local_rpc_service_.sendRequest("127.0.0.1", msg_ptr, lambda, {frame::mprpc::MessageFlagsE::OneShotSend});
     auto fut = prom.get_future();
-    return fut.wait_for(chrono::seconds(10)) == future_status::ready && fut.get();
+    return /*fut.wait_for(chrono::seconds(10)) == future_status::ready &&*/ fut.get();
 }
+
+void Engine::onAuthStart(const string& _user, const string& _pass)
+{
+    //on gui thread
+    {
+        lock_guard<mutex> lock(mutex_);
+        front_auth_req_ptr_ = std::make_shared<front::AuthRequest>(_user, _pass);
+
+        if (!front_recipient_id_.empty()) {
+            auto lambda = [this](
+                              frame::mprpc::ConnectionContext&      _rctx,
+                              std::shared_ptr<front::AuthRequest>&  _rsent_msg_ptr,
+                              std::shared_ptr<front::AuthResponse>& _rrecv_msg_ptr,
+                              ErrorConditionT const&                _rerror) {
+                onAuthResponse(_rctx, _rsent_msg_ptr, _rrecv_msg_ptr, _rerror);
+            };
+            if (!front_rpc_service_.sendRequest(front_recipient_id_, front_auth_req_ptr_, lambda)) {
+                front_auth_req_ptr_.reset();
+            }
+        }
+    }
+}
+
+void Engine::onConnectionStart(frame::mprpc::ConnectionContext& _ctx)
+{
+    auth_widget_.offlineSignal(false);
+    {
+        lock_guard<mutex> lock(mutex_);
+        front_recipient_id_ = _ctx.recipientId();
+        if (front_auth_req_ptr_) {
+            auto lambda = [this](
+                              frame::mprpc::ConnectionContext&      _rctx,
+                              std::shared_ptr<front::AuthRequest>&  _rsent_msg_ptr,
+                              std::shared_ptr<front::AuthResponse>& _rrecv_msg_ptr,
+                              ErrorConditionT const&                _rerror) {
+                onAuthResponse(_rctx, _rsent_msg_ptr, _rrecv_msg_ptr, _rerror);
+            };
+            if (!front_rpc_service_.sendRequest(front_recipient_id_, front_auth_req_ptr_, lambda)) {
+                front_auth_req_ptr_.reset();
+            }
+        }
+    }
+}
+void Engine::onConnectionStop(frame::mprpc::ConnectionContext& _ctx)
+{
+    auth_widget_.offlineSignal(true);
+    {
+        lock_guard<mutex> lock(mutex_);
+        if (front_recipient_id_ == _ctx.recipientId()) {
+            front_recipient_id_.clear();
+        }
+    }
+}
+
+void Engine::onAuthResponse(
+    frame::mprpc::ConnectionContext&      _rctx,
+    std::shared_ptr<front::AuthRequest>&  _rsent_msg_ptr,
+    std::shared_ptr<front::AuthResponse>& _rrecv_msg_ptr,
+    ErrorConditionT const&                _rerror)
+{
+    if (_rrecv_msg_ptr) {
+        solid_log(logger, Info, "AuthResponse: " << _rrecv_msg_ptr->error_ << " " << _rrecv_msg_ptr->message_);
+        if (_rrecv_msg_ptr->error_) {
+            auth_widget_.authFailSignal();
+        } else {
+            auth_widget_.authSuccessSignal();
+            if (!params_.local_port.empty()) {
+
+                local_auth_req_ptr_->user_  = _rsent_msg_ptr->auth_;
+                local_auth_req_ptr_->token_ = _rrecv_msg_ptr->message_;
+                auto lambda                 = [this](
+                                  frame::mprpc::ConnectionContext&            _rctx,
+                                  std::shared_ptr<client::gui::AuthRequest>&  _rsent_msg_ptr,
+                                  std::shared_ptr<client::gui::AuthResponse>& _rrecv_msg_ptr,
+                                  ErrorConditionT const&                      _rerror) {
+                    auth_widget_.closeSignal();
+                };
+
+                if (local_rpc_service_.sendMessage(
+                        local_recipient_id_,
+                        local_auth_req_ptr_,
+                        lambda,
+                        {frame::mprpc::MessageFlagsE::AwaitResponse, frame::mprpc::MessageFlagsE::Response})) {
+                    auth_widget_.closeSignal();
+                }
+            } else {
+            }
+        }
+    } else {
+        solid_log(logger, Info, "No AuthResponse");
+        //offline
+
+        {
+            lock_guard<mutex> lock(mutex_);
+            front_auth_req_ptr_ = std::move(_rsent_msg_ptr);
+		}
+    }
+}
+
 } //namespace

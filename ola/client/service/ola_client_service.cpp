@@ -44,13 +44,13 @@ using namespace std;
 
 namespace {
 
-const solid::LoggerT logger("ola-service");
+const solid::LoggerT logger("ola::client::service");
 
 struct Parameters {
     wstring        debug_log_file_;
     uint32_t       debug_flags_;
     wstring        mount_point_;
-    vector<string> debug_modules_;
+    vector<string> debug_modules_ = {"ola::.*:VIEW"};
     string         debug_addr_;
     string         debug_port_;
     bool           debug_console_;
@@ -229,7 +229,7 @@ int wmain(int argc, wchar_t** argv)
 }
 
 namespace {
-
+//TODO: find a better name
 string envConfigPathPrefix()
 {
     const char* v = getenv("APPDATA");
@@ -242,6 +242,22 @@ string envConfigPathPrefix()
 
     string r = v;
     r += "\\OLA";
+    return r;
+}
+
+//TODO: find a better name
+string envLogPathPrefix()
+{
+    const char* v = getenv("LOCALAPPDATA");
+    if (v == nullptr) {
+        v = getenv("APPDATA");
+        if (v == nullptr) {
+            v = "c:";
+        }
+    }
+
+    string r = v;
+    r += "\\OLA\\client";
     return r;
 }
 
@@ -297,7 +313,7 @@ bool Parameters::parse(ULONG argc, PWSTR* argv)
         ("debug-address,A", value<string>(&debug_addr_), "Debug server address (e.g. on linux use: nc -l 9999)")
         ("debug-port,P", value<string>(&debug_port_)->default_value("9999"), "Debug server port (e.g. on linux use: nc -l 9999)")
         ("debug-console,C", value<bool>(&debug_console_)->implicit_value(true)->default_value(false), "Debug console")
-        ("debug-unbuffered,S", value<bool>(&debug_buffered_)->implicit_value(false)->default_value(true), "Debug unbuffered")
+        ("debug-buffered,S", value<bool>(&debug_buffered_)->implicit_value(true)->default_value(false), "Debug buffered")
         ("mount-point,m", wvalue<wstring>(&mount_point_)->default_value(L"C:\\ola", "c:\\ola"), "Mount point")
         ("secure,s", value<bool>(&secure_)->implicit_value(true)->default_value(false), "Use SSL to secure communication")
         ("compress", value<bool>(&compress_)->implicit_value(true)->default_value(false), "Use Snappy to compress communication")
@@ -754,7 +770,7 @@ NTSTATUS FileSystemService::OnStart(ULONG argc, PWSTR *argv)
         solid::log_start(std::cerr, params_.debug_modules_);
     } else {
         solid::log_start(
-            "ola_client_service",
+            (envLogPathPrefix() + "\\log\\service").c_str(),
             params_.debug_modules_,
             params_.debug_buffered_,
             3,

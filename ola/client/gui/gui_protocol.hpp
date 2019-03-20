@@ -19,7 +19,7 @@ struct RegisterResponse : solid::frame::mprpc::Message {
     RegisterResponse() {}
 
     RegisterResponse(const RegisterRequest& _rreq)
-        : solid::frame::mprpc::Message(_rreq)
+        : Message(_rreq)
     {
     }
 
@@ -30,14 +30,26 @@ struct RegisterResponse : solid::frame::mprpc::Message {
     }
 };
 
-struct AuthMessage : solid::frame::mprpc::Message {
+struct AuthRequest : solid::frame::mprpc::Message {
     std::string user_;
     std::string token_;
+
+    AuthRequest(){}
+
+    AuthRequest(const RegisterResponse& _rmsg):Message(_rmsg){}
 
     SOLID_PROTOCOL_V2(_s, _rthis, _rctx, _name)
     {
         _s.add(_rthis.user_, _rctx, "user");
         _s.add(_rthis.token_, _rctx, "token");
+    }
+};
+
+struct AuthResponse : solid::frame::mprpc::Message {
+	AuthResponse(){}
+    AuthResponse(const AuthRequest &_req): Message(_req){}
+    SOLID_PROTOCOL_V2(_s, _rthis, _rctx, _name)
+    {
     }
 };
 
@@ -50,7 +62,8 @@ inline void protocol_setup(R _r, ProtocolT& _rproto)
 
     _r(_rproto, solid::TypeToType<RegisterRequest>(), 1);
     _r(_rproto, solid::TypeToType<RegisterResponse>(), 2);
-    _r(_rproto, solid::TypeToType<AuthMessage>(), 3);
+    _r(_rproto, solid::TypeToType<AuthRequest>(), 3);
+    _r(_rproto, solid::TypeToType<AuthResponse>(), 4);
 }
 
 } //namespace gui
