@@ -63,7 +63,7 @@ struct Parameters {
     vector<string> dbg_modules = {"ola::.*:VIEW"};
     string         dbg_addr;
     string         dbg_port;
-    bool           dbg_console = false;
+    bool           dbg_console  = false;
     bool           dbg_buffered = false;
     bool           secure;
     bool           compress;
@@ -151,6 +151,7 @@ void configure_service(Engine& _reng, AioSchedulerT& _rsch, frame::aio::Resolver
 
 void handle_help(istream& _ris, Engine& _reng);
 void handle_list(istream& _ris, Engine& _reng);
+void handle_fetch(istream& _ris, Engine& _reng);
 void handle_create(istream& _ris, Engine& _reng);
 void handle_generate(istream& _ris, Engine& _reng);
 void handle_acquire(istream& _ris, Engine& _reng);
@@ -224,6 +225,8 @@ int main(int argc, char* argv[])
 
         if (cmd == "list") {
             handle_list(iss, engine);
+        } else if (cmd == "fetch") {
+            handle_fetch(iss, engine);
         } else if (cmd == "create") {
             handle_create(iss, engine);
         } else if (cmd == "generate") {
@@ -359,7 +362,11 @@ void handle_help(istream& _ris, Engine &_reng){
 }
 
 //-----------------------------------------------------------------------------
-// Command handlers
+//  Command handlers
+//-----------------------------------------------------------------------------
+
+//-----------------------------------------------------------------------------
+//  List
 //-----------------------------------------------------------------------------
 
 void handle_list_oses(istream& _ris, Engine &_reng){
@@ -389,6 +396,8 @@ void handle_list_oses(istream& _ris, Engine &_reng){
     solid_check(prom.get_future().wait_for(chrono::seconds(100)) == future_status::ready, "Taking too long - waited 100 secs");
 }
 
+//-----------------------------------------------------------------------------
+
 void handle_list_apps(istream& _ris, Engine &_reng){
     auto req_ptr = make_shared<ListAppsRequest>();
     
@@ -396,21 +405,6 @@ void handle_list_apps(istream& _ris, Engine &_reng){
     //a - aquired applications
     //A - all applications
     _ris>>req_ptr->choice_;
-    //i - id
-    //n - name
-    //s - short description
-    //d - description
-    _ris>>req_ptr->static_fields_;
-    while(!_ris.eof()){
-        string f;
-        _ris>>f;
-        
-        if(!f.empty()){
-            req_ptr->field_vec_.emplace_back(f);
-        }else{
-            break;
-        }
-    }
     
     promise<void> prom;
     
@@ -422,59 +416,8 @@ void handle_list_apps(istream& _ris, Engine &_reng){
     ){
         if(_rrecv_msg_ptr){
             cout<<"{\n";
-            auto lambda = [](const char _static_field, const string &_field, const string &_v, const bool _is_first, const bool _is_last){
-                if(_is_first){
-                    cout<<"\t{\n";
-                }
-                
-                switch(_static_field){
-                    case 'i': cout<<"\tID:\t"<<ola::utility::base64_encode(_v)<<"\n";break;
-                    case 'n': cout<<"\tName:\t"<<_v<<"\n";break;
-                    case 's': cout<<"\tShort:\t"<<_v<<"\n";break;
-                    case 'd': cout<<"\tDesc:\t"<<_v<<"\n";break;
-                    default:
-                        cout<<'\t'<<_field<<":\t"<<_v<<"\n";break;
-                }
-                
-                if(_is_last){
-                    cout<<"\t}\n";
-                }
-            };
-            _rrecv_msg_ptr->visit(lambda, _rsent_msg_ptr->static_fields_, _rsent_msg_ptr->field_vec_);
-            cout<<"}"<<endl;
-        }else{
-            cout<<"Error - no response: "<<_rerror.message()<<endl;
-        }
-        prom.set_value();
-    };
-    _reng.rpcService().sendRequest(_reng.serverEndpoint().c_str(), req_ptr, lambda);
-    
-    solid_check(prom.get_future().wait_for(chrono::seconds(100)) == future_status::ready, "Taking too long - waited 100 secs");
-    
-}
-
-void handle_list_builds(istream& _ris, Engine &_reng){
-    auto req_ptr = make_shared<ListBuildsRequest>();
-    
-    _ris>>req_ptr->app_id_;
-    
-    req_ptr->app_id_ = ola::utility::base64_decode(req_ptr->app_id_);
-    
-    promise<void> prom;
-    
-    auto lambda = [&prom](
-        frame::mprpc::ConnectionContext&        _rctx,
-        std::shared_ptr<ListBuildsRequest>&  _rsent_msg_ptr,
-        std::shared_ptr<ListBuildsResponse>& _rrecv_msg_ptr,
-        ErrorConditionT const&                  _rerror
-    ){
-        if(_rrecv_msg_ptr){
-            cout<<"{\n";
-            for(auto it = begin(_rrecv_msg_ptr->build_vec_); it != end(_rrecv_msg_ptr->build_vec_); ++it){
-                cout<<"\ttag: ["<<*it;
-                ++it;
-                solid_check(it != end(_rrecv_msg_ptr->build_vec_));
-                cout<<"] name: ["<<*it<<"]\n";
+            for(const auto& app_id: _rrecv_msg_ptr->app_id_vec_){
+                cout<<'\t'<<utility::base64_encode(app_id)<<endl;
             }
             cout<<"}"<<endl;
         }else{
@@ -485,7 +428,10 @@ void handle_list_builds(istream& _ris, Engine &_reng){
     _reng.rpcService().sendRequest(_reng.serverEndpoint().c_str(), req_ptr, lambda);
     
     solid_check(prom.get_future().wait_for(chrono::seconds(100)) == future_status::ready, "Taking too long - waited 100 secs");
+    
 }
+
+//-----------------------------------------------------------------------------
 
 void handle_list(istream& _ris, Engine &_reng){
     string what;
@@ -495,16 +441,155 @@ void handle_list(istream& _ris, Engine &_reng){
         handle_list_oses(_ris, _reng);
     }else if(what == "apps"){
         handle_list_apps(_ris, _reng);
-    }else if(what == "builds"){
-        handle_list_builds(_ris, _reng);
     }
 }
+
+//-----------------------------------------------------------------------------
+//  Fetch
+//-----------------------------------------------------------------------------
+
+ostream& operator<<(ostream &_ros, const utility::AppConfig &_cfg){
+    _ros<<"Name : "<<_cfg.name_<<endl;
+    _ros<<"Short: "<<_cfg.short_description_<<endl;
+    _ros<<"Desc : "<<_cfg.description_<<endl;
+    _ros<<"Names: ";
+    for(const auto& p: _cfg.name_vec_){
+        _ros<<"{["<<p.first<<"]["<<p.second<<"]} ";
+    }
+    _ros<<endl;
+    return _ros;
+}
+
+void handle_fetch_app(istream& _ris, Engine &_reng){
+     auto req_ptr = make_shared<FetchAppRequest>();
+    
+    _ris>>req_ptr->app_id_;
+    _ris>>req_ptr->lang_;
+    
+    req_ptr->app_id_ = utility::base64_decode(req_ptr->app_id_);
+    
+    promise<void> prom;
+    
+    auto lambda = [&prom](
+        frame::mprpc::ConnectionContext&        _rctx,
+        std::shared_ptr<FetchAppRequest>&  _rsent_msg_ptr,
+        std::shared_ptr<FetchAppResponse>& _rrecv_msg_ptr,
+        ErrorConditionT const&                  _rerror
+    ){
+        if(_rrecv_msg_ptr){
+            cout<<"{\n";
+            cout<<"Builds: ";
+            for(const auto& build_id: _rrecv_msg_ptr->build_id_vec_){
+                cout<<utility::base64_encode(build_id)<<endl;
+            }
+            cout<<endl;
+            cout<<_rrecv_msg_ptr->config_;
+            cout<<endl;
+            cout<<"}"<<endl;
+        }else{
+            cout<<"Error - no response: "<<_rerror.message()<<endl;
+        }
+        prom.set_value();
+    };
+    _reng.rpcService().sendRequest(_reng.serverEndpoint().c_str(), req_ptr, lambda);
+    
+    solid_check(prom.get_future().wait_for(chrono::seconds(100)) == future_status::ready, "Taking too long - waited 100 secs");
+}
+
+//-----------------------------------------------------------------------------
+
+ostream& operator<<(ostream &_ros, const utility::BuildConfig &_cfg){
+    _ros<<"Name : "<<_cfg.name_<<endl;
+    _ros<<"Tag: "<<_cfg.tag_<<endl;
+    _ros<<"Components: {";
+    for(const auto& c: _cfg.component_vec_){
+        _ros<<"Name: "<<c.name_<<endl;
+        _ros<<"Oses: ";
+        for(const auto &o: c.os_vec_){
+            _ros<<o<<' ';
+        }
+        _ros<<endl;
+        _ros<<"Mounts: ";
+        for(const auto &m: c.mount_vec_){
+            _ros<<'['<<m.first<<" | "<<m.second<<']';
+        }
+        _ros<<endl;
+        _ros<<"Exes:";
+        for(const auto &e: c.exe_vec_){
+            _ros<<e<<' ';
+        }
+        _ros<<endl;
+        _ros<<"Shortcuts: {"<<endl;
+        for(const auto &s: c.shortcut_vec_){
+            _ros<<"Name:   "<<s.name_<<endl;
+            _ros<<"Command:"<<s.command_<<endl;
+            _ros<<"Run Fld:"<<s.run_folder_<<endl;
+            _ros<<"Icon:   "<<s.icon_<<endl;
+            _ros<<endl;
+        }
+        _ros<<"}"<<endl;
+    }
+    _ros<<'}'<<endl;
+    return _ros;
+}
+
+void handle_fetch_build(istream& _ris, Engine &_reng){
+    auto req_ptr = make_shared<FetchBuildRequest>();
+    
+    _ris>>req_ptr->app_id_;
+    _ris>>req_ptr->build_id_;
+    _ris>>req_ptr->lang_;
+    _ris>>req_ptr->os_id_;
+    
+    req_ptr->app_id_ = utility::base64_decode(req_ptr->app_id_);
+    req_ptr->build_id_ = utility::base64_decode(req_ptr->build_id_);
+    
+    promise<void> prom;
+    
+    auto lambda = [&prom](
+        frame::mprpc::ConnectionContext&        _rctx,
+        std::shared_ptr<FetchBuildRequest>&  _rsent_msg_ptr,
+        std::shared_ptr<FetchBuildResponse>& _rrecv_msg_ptr,
+        ErrorConditionT const&                  _rerror
+    ){
+        if(_rrecv_msg_ptr){
+            cout<<"{\n";
+            cout<<"Remote Root: "<<_rrecv_msg_ptr->remote_root_<<endl;
+            cout<<_rrecv_msg_ptr->config_;
+            cout<<endl;
+            cout<<"}"<<endl;
+        }else{
+            cout<<"Error - no response: "<<_rerror.message()<<endl;
+        }
+        prom.set_value();
+    };
+    _reng.rpcService().sendRequest(_reng.serverEndpoint().c_str(), req_ptr, lambda);
+    
+    solid_check(prom.get_future().wait_for(chrono::seconds(100)) == future_status::ready, "Taking too long - waited 100 secs");
+}
+
+//-----------------------------------------------------------------------------
+
+void handle_fetch(istream& _ris, Engine& _reng){
+    string what;
+    _ris>>what;
+    
+    if(what == "app"){
+        handle_fetch_app(_ris, _reng);
+    }else if(what == "build"){
+        handle_fetch_build(_ris, _reng);
+    }
+}
+
+//-----------------------------------------------------------------------------
+//  Create
+//-----------------------------------------------------------------------------
 
 bool load_app_config(ola::utility::AppConfig &_rcfg, const string &_path);
 bool store_app_config(const ola::utility::AppConfig &_rcfg, const string &_path);
 string generate_temp_name();
 
-void handle_create_app(istream& _ris, Engine &_reng){
+void handle_create_app ( istream& _ris, Engine &_reng){
     string config_path;
     _ris>>config_path;
     
@@ -517,10 +602,10 @@ void handle_create_app(istream& _ris, Engine &_reng){
     promise<void> prom;
     
     auto lambda = [&prom](
-        frame::mprpc::ConnectionContext&        _rctx,
+        frame::mprpc::ConnectionContext&     _rctx,
         std::shared_ptr<CreateAppRequest>&  _rsent_msg_ptr,
-        std::shared_ptr<Response>& _rrecv_msg_ptr,
-        ErrorConditionT const&                  _rerror
+        std::shared_ptr<Response>&          _rrecv_msg_ptr,
+        ErrorConditionT const&              _rerror
     ){
         if(_rrecv_msg_ptr){
             cout<<"{\n";
@@ -540,6 +625,8 @@ void handle_create_app(istream& _ris, Engine &_reng){
     
     solid_check(prom.get_future().wait_for(chrono::seconds(100)) == future_status::ready, "Taking too long - waited 100 secs");
 }
+
+//-----------------------------------------------------------------------------
 
 bool load_build_config(ola::utility::BuildConfig &_rbuild_cfg, const string &_path);
 bool store_build_config(const ola::utility::BuildConfig &_rbuild_cfg, const string &_path);
@@ -608,12 +695,13 @@ void on_upload_receive_response(
     }
 }
 
+//-----------------------------------------------------------------------------
 
 void handle_create_build(istream& _ris, Engine &_reng){
     auto req_ptr = make_shared<CreateBuildRequest>();
     
     string config_path, build_path;
-    _ris>>req_ptr->app_id_>>req_ptr->tag_;
+    _ris>>req_ptr->app_id_>>req_ptr->unique_;
     _ris>>config_path>>build_path;
     
     req_ptr->app_id_ = ola::utility::base64_decode(req_ptr->app_id_);
@@ -657,7 +745,7 @@ void handle_create_build(istream& _ris, Engine &_reng){
                 cout<<"Error: "<<_rrecv_msg_ptr->error_<<" message: "<<_rrecv_msg_ptr->message_<<endl;
                 prom.set_value();
             }else{
-                cout<<"Start uploading build file: "<<zip_path<<" for build tagged: "<<_rsent_msg_ptr->tag_<<endl;
+                cout<<"Start uploading build file: "<<zip_path<<" for build tagged: "<<_rsent_msg_ptr->unique_<<endl;
                 //now we must upload the file
                 auto req_ptr = make_shared<UploadBuildRequest>();
                 req_ptr->ifs_.open(zip_path, std::ifstream::binary);
@@ -705,6 +793,8 @@ void handle_create_build(istream& _ris, Engine &_reng){
     solid_check(prom.get_future().wait_for(chrono::seconds(100)) == future_status::ready, "Taking too long - waited 100 secs");
 }
 
+//-----------------------------------------------------------------------------
+
 void handle_create(istream& _ris, Engine &_reng){
     string what;
     _ris>>what;
@@ -716,6 +806,10 @@ void handle_create(istream& _ris, Engine &_reng){
     }
 }
 
+//-----------------------------------------------------------------------------
+//  Generate
+//-----------------------------------------------------------------------------
+
 void handle_generate_app(istream& _ris, Engine &_reng){
     string config_path;
     _ris>>config_path;
@@ -726,7 +820,14 @@ void handle_generate_app(istream& _ris, Engine &_reng){
     cfg.short_description_ = "short single line app description";
     cfg.name_vec_.emplace_back(make_pair("name_en", "generic_name"));
     store_app_config(cfg, path(config_path));
+    {
+        ola::utility::AppConfig cfg_check;
+        load_app_config(cfg_check, path(config_path));
+        solid_check(cfg == cfg_check);
+    }
 }
+
+//-----------------------------------------------------------------------------
 
 void handle_generate_buid(istream& _ris, Engine &_reng){
     string config_path;
@@ -734,37 +835,50 @@ void handle_generate_buid(istream& _ris, Engine &_reng){
     
     ola::utility::BuildConfig cfg;
     
-    {
-        auto req_ptr = make_shared<ListOSesRequest>();
-    
-        promise<void> prom;
-        
-        auto lambda = [&prom, &cfg](
-            frame::mprpc::ConnectionContext&        _rctx,
-            std::shared_ptr<ListOSesRequest>&  _rsent_msg_ptr,
-            std::shared_ptr<ListOSesResponse>& _rrecv_msg_ptr,
-            ErrorConditionT const&                  _rerror
-        ){
-            if(_rrecv_msg_ptr){
-                cfg.os_vec_ = std::move(_rrecv_msg_ptr->osvec_);
-            }else{
-                cout<<"Error - no response: "<<_rerror.message()<<endl;
+    cfg.name_ = "windows";
+    cfg.tag_ = "r1.3";
+    cfg.component_vec_ = ola::utility::BuildConfig::ComponentVectorT{
+        {
+            {
+                "windows32bit",
+                {"Windows10x86_32", "Windows10x86_64"},
+                {{"bin", "bin32"}, {"lib", "lib32"}},
+                {"bin/bubbles.exe"},
+                {
+                    {
+                        "Bubbles",
+                        "bin/bubbles.exe",
+                        "bin"
+                        "bubbles_icon"
+                    }
+                }
+            },
+            {
+                "windows64bit",
+                {"Windows10x86_64"},
+                {{"bin", "bin64"}, {"lib", "lib64"}},
+                {"bin/bubbles.exe"},
+                {
+                    {
+                        "Bubbles",
+                        "bin/bubbles.exe",
+                        "bin"
+                        "bubbles_icon"
+                    }
+                }
             }
-            prom.set_value();
-        };
-        _reng.rpcService().sendRequest(_reng.serverEndpoint().c_str(), req_ptr, lambda);
-        
-        solid_check(prom.get_future().wait_for(chrono::seconds(100)) == future_status::ready, "Taking too long - waited 100 secs");
-    }
+        }
+    };
     
-    cfg.name_ = "generic_name";
-    cfg.description_ = "multi-line build description";
-    cfg.mount_vec_.emplace_back(make_pair("mount/point/first", "path/to/first"));
-    cfg.mount_vec_.emplace_back(make_pair("mount/point/second", "path/to/second"));
-    cfg.exe_vec_.emplace_back("path/to/first.exe");
-    cfg.exe_vec_.emplace_back("path/to/second.exe");
     store_build_config(cfg, path(config_path));
+    {
+        ola::utility::BuildConfig cfg_check;
+        load_build_config(cfg_check, path(config_path));
+        solid_check(cfg == cfg_check);
+    }
 }
+
+//-----------------------------------------------------------------------------
 
 void handle_generate(istream& _ris, Engine &_reng){
     string what;
@@ -776,6 +890,12 @@ void handle_generate(istream& _ris, Engine &_reng){
         handle_generate_buid(_ris, _reng);
     }
 }
+
+
+//-----------------------------------------------------------------------------
+//  Acquire
+//-----------------------------------------------------------------------------
+
 void handle_acquire_app(istream& _ris, Engine &_reng){
     auto req_ptr = make_shared<AcquireAppRequest>();
     
@@ -803,6 +923,8 @@ void handle_acquire_app(istream& _ris, Engine &_reng){
     solid_check(prom.get_future().wait_for(chrono::seconds(100)) == future_status::ready, "Taking too long - waited 100 secs");
 };
 
+//-----------------------------------------------------------------------------
+
 void handle_acquire(istream& _ris, Engine &_reng){
     string what;
     _ris>>what;
@@ -811,6 +933,7 @@ void handle_acquire(istream& _ris, Engine &_reng){
         handle_acquire_app(_ris, _reng);
     }
 }
+
 //-----------------------------------------------------------------------------
 // Engine
 //-----------------------------------------------------------------------------
@@ -915,6 +1038,8 @@ void Engine::authRun(){
     }
 }
 
+//-----------------------------------------------------------------------------
+
 void Engine::onConnectionStart(frame::mprpc::ConnectionContext &_ctx){
     string auth_token;
     {
@@ -950,6 +1075,8 @@ void Engine::onConnectionStart(frame::mprpc::ConnectionContext &_ctx){
         auth_thread_ = std::thread(&Engine::authRun, this);
     }
 }
+
+//-----------------------------------------------------------------------------
 
 void Engine::onAuthResponse(frame::mprpc::ConnectionContext &_ctx, AuthResponse &_rresponse){
     if(_rresponse.error_ == 0){
@@ -995,6 +1122,8 @@ string get_temp_env()
     return pname == nullptr ? "/tmp" : pname;
 }
 
+//-----------------------------------------------------------------------------
+
 bool read(string& _rs, istream& _ris, size_t _sz)
 {
     static constexpr size_t bufcp = 1024 * 2;
@@ -1011,6 +1140,8 @@ bool read(string& _rs, istream& _ris, size_t _sz)
     }
     return _sz == 0;
 }
+
+//-----------------------------------------------------------------------------
 
 bool load_app_config(ola::utility::AppConfig &_rcfg, const string &_path){
     using namespace libconfig;
@@ -1061,6 +1192,8 @@ bool load_app_config(ola::utility::AppConfig &_rcfg, const string &_path){
     return true;
 }
 
+//-----------------------------------------------------------------------------
+
 bool store_app_config(const ola::utility::AppConfig &_rcfg, const string &_path){
     using namespace libconfig;
     Config cfg;
@@ -1095,6 +1228,8 @@ bool store_app_config(const ola::utility::AppConfig &_rcfg, const string &_path)
     return true;
 }
 
+//-----------------------------------------------------------------------------
+
 bool load_build_config(ola::utility::BuildConfig &_rcfg, const string &_path){
     using namespace libconfig;
     Config cfg;
@@ -1124,39 +1259,87 @@ bool load_build_config(ola::utility::BuildConfig &_rcfg, const string &_path){
         cout<<"Error: build name not found in configuration"<<endl;
         return false;
     }
-    if(!root.lookupValue("description", _rcfg.description_)){
-        cout<<"Error: build description not found in configuration"<<endl;
+    
+    if(!root.lookupValue("tag", _rcfg.tag_)){
+        cout<<"Error: build name not found in configuration"<<endl;
         return false;
     }
     
-    if(root.exists("mount")){
-        Setting &names = root.lookup("mount");
-        
-        for(auto it = names.begin(); it != names.end(); ++it){
-            Setting &local = it->lookup("local");
-            Setting &remote = it->lookup("remote");
-            _rcfg.mount_vec_.emplace_back(local, remote);
+    if(root.exists("components")){
+        Setting &components = root.lookup("components");
+        for(auto it = components.begin(); it != components.end(); ++it){
+            ola::utility::BuildConfig::Component c;
+            
+            if(!it->lookupValue("name", c.name_)){
+                cout<<"Error: component name not found in configuration"<<endl;
+                return false;
+            }
+            
+            if(it->exists("oses")){
+                Setting &oses = it->lookup("oses");
+                for(auto it = oses.begin(); it != oses.end(); ++it){
+                    c.os_vec_.emplace_back(static_cast<const string&>(*it));
+                }
+            }else{
+                cout<<"Error: component oses not fount in configuration"<<endl;
+                return false;
+            }
+            
+            
+            if(it->exists("exes")){
+                Setting &exes = it->lookup("exes");
+                for(auto it = exes.begin(); it != exes.end(); ++it){
+                    c.exe_vec_.emplace_back(static_cast<const string&>(*it));
+                }
+            }else{
+                cout<<"Error: component exes not fount in configuration"<<endl;
+                return false;
+            }
+            
+            if(it->exists("mounts")){
+                Setting &mounts = it->lookup("mounts");
+                
+                for(auto it = mounts.begin(); it != mounts.end(); ++it){
+                    string local;
+                    string remote;
+                    it->lookupValue("local", local);
+                    it->lookupValue("remote", remote);
+                    
+                    c.mount_vec_.emplace_back(local, remote);
+                }
+            }else{
+                cout<<"Error: component mounts not fount in configuration"<<endl;
+                return false;
+            }
+            
+            if(it->exists("shortcuts")){
+                Setting &shortcuts = it->lookup("shortcuts");
+                
+                for(auto it = shortcuts.begin(); it != shortcuts.end(); ++it){
+                    ola::utility::BuildConfig::Shortcut s;
+                    
+                    it->lookupValue("name", s.name_);
+                    it->lookupValue("command", s.command_);
+                    it->lookupValue("run_folder", s.run_folder_);
+                    it->lookupValue("icon", s.icon_);
+                    
+                    c.shortcut_vec_.emplace_back(std::move(s));
+                }
+            }else{
+                cout<<"Error: component mounts not fount in configuration"<<endl;
+                return false;
+            }
+            
+            _rcfg.component_vec_.emplace_back(std::move(c));
         }
+    }else{
+        cout<<"Error: no component found"<<endl;
+        return false;
     }
-    
-    if(root.exists("exe")){
-        Setting &exe = root.lookup("exe");
-        
-        for(auto it = exe.begin(); it != exe.end(); ++it){
-            _rcfg.exe_vec_.emplace_back(static_cast<const string&>(*it));
-        }
-    }
-    
-    if(root.exists("os")){
-        Setting &os = root.lookup("os");
-        
-        for(auto it = os.begin(); it != os.end(); ++it){
-            _rcfg.os_vec_.emplace_back(static_cast<const string&>(*it));
-        }
-    }
-
     return true;
 }
+
+//-----------------------------------------------------------------------------
 
 bool store_build_config(const ola::utility::BuildConfig &_rcfg, const string &_path){
     using namespace libconfig;
@@ -1170,24 +1353,39 @@ bool store_build_config(const ola::utility::BuildConfig &_rcfg, const string &_p
     Setting &root = cfg.getRoot();
     
     root.add("name", Setting::TypeString) = _rcfg.name_;
-    root.add("description", Setting::TypeString) = _rcfg.description_;
+    root.add("tag", Setting::TypeString) = _rcfg.tag_;
     
-    Setting &mount = root.add("mount", Setting::TypeList);
+    Setting &os_specific = root.add("components", Setting::TypeList);
     
-    for(auto& v: _rcfg.mount_vec_){
-        Setting &g  = mount.add(Setting::TypeGroup);
-        g.add("local", Setting::TypeString) = v.first;
-        g.add("remote", Setting::TypeString) = v.second;
-    }
-    
-    Setting &exe = root.add("exe", Setting::TypeArray);
-    for(auto &v: _rcfg.exe_vec_){
-        exe.add(Setting::TypeString) = v;
-    }
-    
-    Setting &os = root.add("os", Setting::TypeArray);
-    for(auto &v: _rcfg.os_vec_){
-        os.add(Setting::TypeString) = v;
+    for(const auto &component: _rcfg.component_vec_){
+        Setting &cmp_g = os_specific.add(Setting::TypeGroup);
+        {
+            cmp_g.add("name", Setting::TypeString) = component.name_;
+            Setting &oses = cmp_g.add("oses", Setting::TypeArray);
+            for(auto &v: component.os_vec_){
+                oses.add(Setting::TypeString) = v;
+            }
+            Setting &mount = cmp_g.add("mounts", Setting::TypeList);
+            for(auto& v: component.mount_vec_){
+                Setting &g  = mount.add(Setting::TypeGroup);
+                g.add("local", Setting::TypeString) = v.first;
+                g.add("remote", Setting::TypeString) = v.second;
+            }
+            Setting &exe = cmp_g.add("exes", Setting::TypeArray);
+            for(auto &v: component.exe_vec_){
+                exe.add(Setting::TypeString) = v;
+            }
+            
+            Setting &shortcut_list = cmp_g.add("shortcuts", Setting::TypeList);
+            for(auto &v: component.shortcut_vec_){
+                Setting &g  = shortcut_list.add(Setting::TypeGroup);
+                g.add("name", Setting::TypeString) = v.name_;
+                g.add("command", Setting::TypeString) = v.command_;
+                g.add("icon", Setting::TypeString) = v.icon_;
+                g.add("run_folder", Setting::TypeString) = v.run_folder_;
+            }
+        }
+
     }
     
     try
@@ -1203,6 +1401,8 @@ bool store_build_config(const ola::utility::BuildConfig &_rcfg, const string &_p
     return true;
 }
 
+//-----------------------------------------------------------------------------
+
 string path(const std::string &_path){
     if(_path.empty()){
         return _path;
@@ -1212,6 +1412,8 @@ string path(const std::string &_path){
     }
     return _path;
 }
+
+//-----------------------------------------------------------------------------
 
 string system_path(const std::string &_path){
 #ifdef SOLID_ON_WINDOWS
@@ -1229,6 +1431,8 @@ string system_path(const std::string &_path){
 #endif
 }
 
+//-----------------------------------------------------------------------------
+
 string generate_temp_name(){
     uint64_t salt = chrono::steady_clock::now().time_since_epoch().count();
 
@@ -1236,6 +1440,8 @@ string generate_temp_name(){
     oss << salt;
     return oss.str();
 }
+
+//-----------------------------------------------------------------------------
 
 bool zip_add_file(zip_t *_pzip, const boost::filesystem::path &_path, size_t _base_path_len, uint64_t &_rsize){
 	string path = _path.string();
@@ -1250,6 +1456,8 @@ bool zip_add_file(zip_t *_pzip, const boost::filesystem::path &_path, size_t _ba
     }
     return true;
 }
+
+//-----------------------------------------------------------------------------
 
 bool zip_add_dir(zip_t *_pzip, const boost::filesystem::path &_path, size_t _base_path_len, uint64_t &_rsize){
     using namespace boost::filesystem;
@@ -1266,8 +1474,10 @@ bool zip_add_dir(zip_t *_pzip, const boost::filesystem::path &_path, size_t _bas
             zip_add_file(_pzip, p, _base_path_len, _rsize);
         }        
     }
-	return true;
+    return true;
 }
+
+//-----------------------------------------------------------------------------
 
 bool unzip(const std::string& _zip_path, const std::string& _fld, uint64_t& _total_size)
 {
@@ -1314,6 +1524,7 @@ bool unzip(const std::string& _zip_path, const std::string& _fld, uint64_t& _tot
     return true;
 }
 
+//-----------------------------------------------------------------------------
 
 bool zip_create(const string &_zip_path, string _root, uint64_t &_rsize){
     using namespace boost::filesystem;
@@ -1361,7 +1572,7 @@ bool zip_create(const string &_zip_path, string _root, uint64_t &_rsize){
     }
     return true;
 }
-
+//-----------------------------------------------------------------------------
 
 }//namespace
 

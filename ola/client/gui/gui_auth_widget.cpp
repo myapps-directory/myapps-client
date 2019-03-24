@@ -56,18 +56,18 @@ void AuthWidget::onAuthClick()
 
 void AuthWidget::onOffline(bool _b)
 {
-    solid_log(logger, Verbose, ""<<_b);
+    solid_log(logger, Verbose, "" << _b);
     if (_b) {
         pimpl_->form_.label->setText("Offline...");
     } else {
         pimpl_->form_.label->setText("Online...");
-	}
+    }
 }
 
 void AuthWidget::onAuthFail()
 {
     solid_log(logger, Verbose, "");
-    
+
     pimpl_->form_.label->setText("Failed authentication");
     pimpl_->form_.passwordEdit->setText("");
     this->setEnabled(true);
@@ -78,7 +78,8 @@ void AuthWidget::onAuthSuccess()
     pimpl_->form_.label->setText("Succes");
 }
 
-void AuthWidget::closeEvent(QCloseEvent*) {
+void AuthWidget::closeEvent(QCloseEvent*)
+{
     QApplication::quit();
 }
 

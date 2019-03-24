@@ -365,10 +365,10 @@ void Engine::Implementation::loadAuthData()
     if (ifs) {
         getline(ifs, auth_user_);
         getline(ifs, auth_token_);
-        solid_log(logger, Info, "Loaded auth data from: " << path.generic_string()<<" for user: "<<auth_user_);
+        solid_log(logger, Info, "Loaded auth data from: " << path.generic_string() << " for user: " << auth_user_);
     } else {
         solid_log(logger, Error, "Failed loading auth data to: " << path.generic_string());
-	}
+    }
 }
 
 void Engine::Implementation::storeAuthData(const string& _user, const string& _token)

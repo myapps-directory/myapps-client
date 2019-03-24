@@ -34,9 +34,12 @@ struct AuthRequest : solid::frame::mprpc::Message {
     std::string user_;
     std::string token_;
 
-    AuthRequest(){}
+    AuthRequest() {}
 
-    AuthRequest(const RegisterResponse& _rmsg):Message(_rmsg){}
+    AuthRequest(const RegisterResponse& _rmsg)
+        : Message(_rmsg)
+    {
+    }
 
     SOLID_PROTOCOL_V2(_s, _rthis, _rctx, _name)
     {
@@ -46,8 +49,11 @@ struct AuthRequest : solid::frame::mprpc::Message {
 };
 
 struct AuthResponse : solid::frame::mprpc::Message {
-	AuthResponse(){}
-    AuthResponse(const AuthRequest &_req): Message(_req){}
+    AuthResponse() {}
+    AuthResponse(const AuthRequest& _req)
+        : Message(_req)
+    {
+    }
     SOLID_PROTOCOL_V2(_s, _rthis, _rctx, _name)
     {
     }

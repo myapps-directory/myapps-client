@@ -276,7 +276,6 @@ struct FrontSetup {
     }
 };
 
-
 void front_configure_service(Engine& _rengine, const Parameters& _params, frame::mprpc::ServiceT& _rsvc, AioSchedulerT& _rsch, frame::aio::Resolver& _rres)
 {
     auto                        proto = front::ProtocolT::create();
@@ -297,7 +296,7 @@ void front_configure_service(Engine& _rengine, const Parameters& _params, frame:
         auto connection_start_lambda = [&_rengine](frame::mprpc::ConnectionContext& _ctx) {
             _rengine.onConnectionStart(_ctx);
         };
-        cfg.connection_stop_fnc = std::move(connection_stop_lambda);
+        cfg.connection_stop_fnc         = std::move(connection_stop_lambda);
         cfg.client.connection_start_fnc = std::move(connection_start_lambda);
     }
 
@@ -472,7 +471,7 @@ void Engine::onAuthResponse(
         {
             lock_guard<mutex> lock(mutex_);
             front_auth_req_ptr_ = std::move(_rsent_msg_ptr);
-		}
+        }
     }
 }
 

@@ -95,8 +95,10 @@ static NTSTATUS SetVolumeLabel_(FSP_FILE_SYSTEM* FileSystem,
 }
 
 static NTSTATUS GetSecurityByName(FSP_FILE_SYSTEM* FileSystem,
-    PWSTR FileName, PUINT32 PFileAttributes,
-    PSECURITY_DESCRIPTOR SecurityDescriptor, SIZE_T* PSecurityDescriptorSize)
+    PWSTR                                          FileName,
+    PUINT32                                        PFileAttributes,
+    PSECURITY_DESCRIPTOR                           SecurityDescriptor,
+    SIZE_T*                                        PSecurityDescriptorSize)
 {
     PTFS*                   Ptfs = (PTFS*)FileSystem->UserContext;
     WCHAR                   FullPath[FULLPATH_SIZE];
@@ -109,8 +111,12 @@ static NTSTATUS GetSecurityByName(FSP_FILE_SYSTEM* FileSystem,
         return STATUS_OBJECT_NAME_INVALID;
 
     Handle = CreateFileW(FullPath,
-        FILE_READ_ATTRIBUTES | READ_CONTROL, 0, 0,
-        OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, 0);
+        FILE_READ_ATTRIBUTES | READ_CONTROL,
+        0,
+        0,
+        OPEN_EXISTING,
+        FILE_FLAG_BACKUP_SEMANTICS,
+        0);
     if (INVALID_HANDLE_VALUE == Handle) {
         Result = FspNtStatusFromWin32(GetLastError());
         goto exit;
@@ -118,7 +124,9 @@ static NTSTATUS GetSecurityByName(FSP_FILE_SYSTEM* FileSystem,
 
     if (0 != PFileAttributes) {
         if (!GetFileInformationByHandleEx(Handle,
-                FileAttributeTagInfo, &AttributeTagInfo, sizeof AttributeTagInfo)) {
+                FileAttributeTagInfo,
+                &AttributeTagInfo,
+                sizeof AttributeTagInfo)) {
             Result = FspNtStatusFromWin32(GetLastError());
             goto exit;
         }
@@ -129,7 +137,9 @@ static NTSTATUS GetSecurityByName(FSP_FILE_SYSTEM* FileSystem,
     if (0 != PSecurityDescriptorSize) {
         if (!GetKernelObjectSecurity(Handle,
                 OWNER_SECURITY_INFORMATION | GROUP_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
-                SecurityDescriptor, (DWORD)*PSecurityDescriptorSize, &SecurityDescriptorSizeNeeded)) {
+                SecurityDescriptor,
+                (DWORD)*PSecurityDescriptorSize,
+                &SecurityDescriptorSizeNeeded)) {
             *PSecurityDescriptorSize = SecurityDescriptorSizeNeeded;
             Result                   = FspNtStatusFromWin32(GetLastError());
             goto exit;
@@ -148,9 +158,14 @@ exit:
 }
 
 static NTSTATUS Create(FSP_FILE_SYSTEM* FileSystem,
-    PWSTR FileName, UINT32 CreateOptions, UINT32 GrantedAccess,
-    UINT32 FileAttributes, PSECURITY_DESCRIPTOR SecurityDescriptor, UINT64 AllocationSize,
-    PVOID* PFileContext, FSP_FSCTL_FILE_INFO* FileInfo)
+    PWSTR                               FileName,
+    UINT32                              CreateOptions,
+    UINT32                              GrantedAccess,
+    UINT32                              FileAttributes,
+    PSECURITY_DESCRIPTOR                SecurityDescriptor,
+    UINT64                              AllocationSize,
+    PVOID*                              PFileContext,
+    FSP_FSCTL_FILE_INFO*                FileInfo)
 {
     PTFS*               Ptfs = (PTFS*)FileSystem->UserContext;
     WCHAR               FullPath[FULLPATH_SIZE];
@@ -190,8 +205,12 @@ static NTSTATUS Create(FSP_FILE_SYSTEM* FileSystem,
         FileAttributes = FILE_ATTRIBUTE_NORMAL;
 
     FileContext->Handle = CreateFileW(FullPath,
-        GrantedAccess, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, &SecurityAttributes,
-        CREATE_NEW, CreateFlags | FileAttributes, 0);
+        GrantedAccess,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        &SecurityAttributes,
+        CREATE_NEW,
+        CreateFlags | FileAttributes,
+        0);
     if (INVALID_HANDLE_VALUE == FileContext->Handle) {
         free(FileContext);
         return FspNtStatusFromWin32(GetLastError());
@@ -203,8 +222,11 @@ static NTSTATUS Create(FSP_FILE_SYSTEM* FileSystem,
 }
 
 static NTSTATUS Open(FSP_FILE_SYSTEM* FileSystem,
-    PWSTR FileName, UINT32 CreateOptions, UINT32 GrantedAccess,
-    PVOID* PFileContext, FSP_FSCTL_FILE_INFO* FileInfo)
+    PWSTR                             FileName,
+    UINT32                            CreateOptions,
+    UINT32                            GrantedAccess,
+    PVOID*                            PFileContext,
+    FSP_FSCTL_FILE_INFO*              FileInfo)
 {
     PTFS*              Ptfs = (PTFS*)FileSystem->UserContext;
     WCHAR              FullPath[FULLPATH_SIZE];
@@ -224,8 +246,12 @@ static NTSTATUS Open(FSP_FILE_SYSTEM* FileSystem,
         CreateFlags |= FILE_FLAG_DELETE_ON_CLOSE;
 
     FileContext->Handle = CreateFileW(FullPath,
-        GrantedAccess, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, 0,
-        OPEN_EXISTING, CreateFlags, 0);
+        GrantedAccess,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        0,
+        OPEN_EXISTING,
+        CreateFlags,
+        0);
     if (INVALID_HANDLE_VALUE == FileContext->Handle) {
         free(FileContext);
         return FspNtStatusFromWin32(GetLastError());
@@ -237,8 +263,11 @@ static NTSTATUS Open(FSP_FILE_SYSTEM* FileSystem,
 }
 
 static NTSTATUS Overwrite(FSP_FILE_SYSTEM* FileSystem,
-    PVOID FileContext, UINT32 FileAttributes, BOOLEAN ReplaceFileAttributes, UINT64 AllocationSize,
-    FSP_FSCTL_FILE_INFO* FileInfo)
+    PVOID                                  FileContext,
+    UINT32                                 FileAttributes,
+    BOOLEAN                                ReplaceFileAttributes,
+    UINT64                                 AllocationSize,
+    FSP_FSCTL_FILE_INFO*                   FileInfo)
 {
     HANDLE                  Handle         = HandleFromContext(FileContext);
     FILE_BASIC_INFO         BasicInfo      = {0};
@@ -251,30 +280,40 @@ static NTSTATUS Overwrite(FSP_FILE_SYSTEM* FileSystem,
 
         BasicInfo.FileAttributes = FileAttributes;
         if (!SetFileInformationByHandle(Handle,
-                FileBasicInfo, &BasicInfo, sizeof BasicInfo))
+                FileBasicInfo,
+                &BasicInfo,
+                sizeof BasicInfo))
             return FspNtStatusFromWin32(GetLastError());
     } else if (0 != FileAttributes) {
         if (!GetFileInformationByHandleEx(Handle,
-                FileAttributeTagInfo, &AttributeTagInfo, sizeof AttributeTagInfo))
+                FileAttributeTagInfo,
+                &AttributeTagInfo,
+                sizeof AttributeTagInfo))
             return FspNtStatusFromWin32(GetLastError());
 
         BasicInfo.FileAttributes = FileAttributes | AttributeTagInfo.FileAttributes;
         if (BasicInfo.FileAttributes ^ FileAttributes) {
             if (!SetFileInformationByHandle(Handle,
-                    FileBasicInfo, &BasicInfo, sizeof BasicInfo))
+                    FileBasicInfo,
+                    &BasicInfo,
+                    sizeof BasicInfo))
                 return FspNtStatusFromWin32(GetLastError());
         }
     }
 
     if (!SetFileInformationByHandle(Handle,
-            FileAllocationInfo, &AllocationInfo, sizeof AllocationInfo))
+            FileAllocationInfo,
+            &AllocationInfo,
+            sizeof AllocationInfo))
         return FspNtStatusFromWin32(GetLastError());
 
     return GetFileInfoInternal(Handle, FileInfo);
 }
 
 static VOID Cleanup(FSP_FILE_SYSTEM* FileSystem,
-    PVOID FileContext, PWSTR FileName, ULONG Flags)
+    PVOID                            FileContext,
+    PWSTR                            FileName,
+    ULONG                            Flags)
 {
     HANDLE Handle = HandleFromContext(FileContext);
 
@@ -299,8 +338,11 @@ static VOID Close(FSP_FILE_SYSTEM* FileSystem,
 }
 
 static NTSTATUS Read(FSP_FILE_SYSTEM* FileSystem,
-    PVOID FileContext, PVOID Buffer, UINT64 Offset, ULONG Length,
-    PULONG PBytesTransferred)
+    PVOID                             FileContext,
+    PVOID                             Buffer,
+    UINT64                            Offset,
+    ULONG                             Length,
+    PULONG                            PBytesTransferred)
 {
     HANDLE     Handle     = HandleFromContext(FileContext);
     OVERLAPPED Overlapped = {0};
@@ -315,9 +357,14 @@ static NTSTATUS Read(FSP_FILE_SYSTEM* FileSystem,
 }
 
 static NTSTATUS Write(FSP_FILE_SYSTEM* FileSystem,
-    PVOID FileContext, PVOID Buffer, UINT64 Offset, ULONG Length,
-    BOOLEAN WriteToEndOfFile, BOOLEAN ConstrainedIo,
-    PULONG PBytesTransferred, FSP_FSCTL_FILE_INFO* FileInfo)
+    PVOID                              FileContext,
+    PVOID                              Buffer,
+    UINT64                             Offset,
+    ULONG                              Length,
+    BOOLEAN                            WriteToEndOfFile,
+    BOOLEAN                            ConstrainedIo,
+    PULONG                             PBytesTransferred,
+    FSP_FSCTL_FILE_INFO*               FileInfo)
 {
     HANDLE        Handle = HandleFromContext(FileContext);
     LARGE_INTEGER FileSize;
@@ -368,9 +415,13 @@ static NTSTATUS GetFileInfo(FSP_FILE_SYSTEM* FileSystem,
 }
 
 static NTSTATUS SetBasicInfo(FSP_FILE_SYSTEM* FileSystem,
-    PVOID FileContext, UINT32 FileAttributes,
-    UINT64 CreationTime, UINT64 LastAccessTime, UINT64 LastWriteTime, UINT64 ChangeTime,
-    FSP_FSCTL_FILE_INFO* FileInfo)
+    PVOID                                     FileContext,
+    UINT32                                    FileAttributes,
+    UINT64                                    CreationTime,
+    UINT64                                    LastAccessTime,
+    UINT64                                    LastWriteTime,
+    UINT64                                    ChangeTime,
+    FSP_FSCTL_FILE_INFO*                      FileInfo)
 {
     HANDLE          Handle    = HandleFromContext(FileContext);
     FILE_BASIC_INFO BasicInfo = {0};
@@ -387,15 +438,19 @@ static NTSTATUS SetBasicInfo(FSP_FILE_SYSTEM* FileSystem,
     //BasicInfo.ChangeTime = ChangeTime;
 
     if (!SetFileInformationByHandle(Handle,
-            FileBasicInfo, &BasicInfo, sizeof BasicInfo))
+            FileBasicInfo,
+            &BasicInfo,
+            sizeof BasicInfo))
         return FspNtStatusFromWin32(GetLastError());
 
     return GetFileInfoInternal(Handle, FileInfo);
 }
 
 static NTSTATUS SetFileSize(FSP_FILE_SYSTEM* FileSystem,
-    PVOID FileContext, UINT64 NewSize, BOOLEAN SetAllocationSize,
-    FSP_FSCTL_FILE_INFO* FileInfo)
+    PVOID                                    FileContext,
+    UINT64                                   NewSize,
+    BOOLEAN                                  SetAllocationSize,
+    FSP_FSCTL_FILE_INFO*                     FileInfo)
 {
     HANDLE                Handle = HandleFromContext(FileContext);
     FILE_ALLOCATION_INFO  AllocationInfo;
@@ -416,13 +471,17 @@ static NTSTATUS SetFileSize(FSP_FILE_SYSTEM* FileSystem,
         AllocationInfo.AllocationSize.QuadPart = NewSize;
 
         if (!SetFileInformationByHandle(Handle,
-                FileAllocationInfo, &AllocationInfo, sizeof AllocationInfo))
+                FileAllocationInfo,
+                &AllocationInfo,
+                sizeof AllocationInfo))
             return FspNtStatusFromWin32(GetLastError());
     } else {
         EndOfFileInfo.EndOfFile.QuadPart = NewSize;
 
         if (!SetFileInformationByHandle(Handle,
-                FileEndOfFileInfo, &EndOfFileInfo, sizeof EndOfFileInfo))
+                FileEndOfFileInfo,
+                &EndOfFileInfo,
+                sizeof EndOfFileInfo))
             return FspNtStatusFromWin32(GetLastError());
     }
 
@@ -431,7 +490,9 @@ static NTSTATUS SetFileSize(FSP_FILE_SYSTEM* FileSystem,
 
 static NTSTATUS Rename(FSP_FILE_SYSTEM* FileSystem,
     PVOID                               FileContext,
-    PWSTR FileName, PWSTR NewFileName, BOOLEAN ReplaceIfExists)
+    PWSTR                               FileName,
+    PWSTR                               NewFileName,
+    BOOLEAN                             ReplaceIfExists)
 {
     PTFS* Ptfs = (PTFS*)FileSystem->UserContext;
     WCHAR FullPath[FULLPATH_SIZE], NewFullPath[FULLPATH_SIZE];
@@ -450,14 +511,17 @@ static NTSTATUS Rename(FSP_FILE_SYSTEM* FileSystem,
 
 static NTSTATUS GetSecurity(FSP_FILE_SYSTEM* FileSystem,
     PVOID                                    FileContext,
-    PSECURITY_DESCRIPTOR SecurityDescriptor, SIZE_T* PSecurityDescriptorSize)
+    PSECURITY_DESCRIPTOR                     SecurityDescriptor,
+    SIZE_T*                                  PSecurityDescriptorSize)
 {
     HANDLE Handle = HandleFromContext(FileContext);
     DWORD  SecurityDescriptorSizeNeeded;
 
     if (!GetKernelObjectSecurity(Handle,
             OWNER_SECURITY_INFORMATION | GROUP_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
-            SecurityDescriptor, (DWORD)*PSecurityDescriptorSize, &SecurityDescriptorSizeNeeded)) {
+            SecurityDescriptor,
+            (DWORD)*PSecurityDescriptorSize,
+            &SecurityDescriptorSizeNeeded)) {
         *PSecurityDescriptorSize = SecurityDescriptorSizeNeeded;
         return FspNtStatusFromWin32(GetLastError());
     }
@@ -469,7 +533,8 @@ static NTSTATUS GetSecurity(FSP_FILE_SYSTEM* FileSystem,
 
 static NTSTATUS SetSecurity(FSP_FILE_SYSTEM* FileSystem,
     PVOID                                    FileContext,
-    SECURITY_INFORMATION SecurityInformation, PSECURITY_DESCRIPTOR ModificationDescriptor)
+    SECURITY_INFORMATION                     SecurityInformation,
+    PSECURITY_DESCRIPTOR                     ModificationDescriptor)
 {
     HANDLE Handle = HandleFromContext(FileContext);
 
@@ -480,8 +545,12 @@ static NTSTATUS SetSecurity(FSP_FILE_SYSTEM* FileSystem,
 }
 
 static NTSTATUS ReadDirectory(FSP_FILE_SYSTEM* FileSystem,
-    PVOID FileContext0, PWSTR Pattern, PWSTR Marker,
-    PVOID Buffer, ULONG BufferLength, PULONG PBytesTransferred)
+    PVOID                                      FileContext0,
+    PWSTR                                      Pattern,
+    PWSTR                                      Marker,
+    PVOID                                      Buffer,
+    ULONG                                      BufferLength,
+    PULONG                                     PBytesTransferred)
 {
     PTFS*              Ptfs        = (PTFS*)FileSystem->UserContext;
     PTFS_FILE_CONTEXT* FileContext = (PTFS_FILE_CONTEXT*)FileContext0;
@@ -551,13 +620,18 @@ static NTSTATUS ReadDirectory(FSP_FILE_SYSTEM* FileSystem,
         return DirBufferResult;
 
     FspFileSystemReadDirectoryBuffer(&FileContext->DirBuffer,
-        Marker, Buffer, BufferLength, PBytesTransferred);
+        Marker,
+        Buffer,
+        BufferLength,
+        PBytesTransferred);
 
     return STATUS_SUCCESS;
 }
 
 static NTSTATUS SetDelete(FSP_FILE_SYSTEM* FileSystem,
-    PVOID FileContext, PWSTR FileName, BOOLEAN DeleteFile)
+    PVOID                                  FileContext,
+    PWSTR                                  FileName,
+    BOOLEAN                                DeleteFile)
 {
     HANDLE                Handle = HandleFromContext(FileContext);
     FILE_DISPOSITION_INFO DispositionInfo;
@@ -565,13 +639,16 @@ static NTSTATUS SetDelete(FSP_FILE_SYSTEM* FileSystem,
     DispositionInfo.DeleteFile = DeleteFile;
 
     if (!SetFileInformationByHandle(Handle,
-            FileDispositionInfo, &DispositionInfo, sizeof DispositionInfo))
+            FileDispositionInfo,
+            &DispositionInfo,
+            sizeof DispositionInfo))
         return FspNtStatusFromWin32(GetLastError());
 
     return STATUS_SUCCESS;
 }
 
-static FSP_FILE_SYSTEM_INTERFACE init_interface() {
+static FSP_FILE_SYSTEM_INTERFACE init_interface()
+{
     FSP_FILE_SYSTEM_INTERFACE si;
     memset((void*)&si, 0, sizeof(si));
     si.GetVolumeInfo     = GetVolumeInfo;
@@ -601,8 +678,7 @@ static FSP_FILE_SYSTEM_INTERFACE PtfsInterface = init_interface();
 
 static VOID PtfsDelete(PTFS* Ptfs);
 
-static NTSTATUS PtfsCreate(PWSTR Path, PWSTR VolumePrefix, PWSTR MountPoint, UINT32 DebugFlags,
-    PTFS** PPtfs)
+static NTSTATUS PtfsCreate(PWSTR Path, PWSTR VolumePrefix, PWSTR MountPoint, UINT32 DebugFlags, PTFS** PPtfs)
 {
     WCHAR                   FullPath[MAX_PATH];
     ULONG                   Length;
@@ -616,8 +692,7 @@ static NTSTATUS PtfsCreate(PWSTR Path, PWSTR VolumePrefix, PWSTR MountPoint, UIN
     *PPtfs = 0;
 
     Handle = CreateFileW(
-        Path, FILE_READ_ATTRIBUTES, 0, 0,
-        OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, 0);
+        Path, FILE_READ_ATTRIBUTES, 0, 0, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, 0);
     if (INVALID_HANDLE_VALUE == Handle)
         return FspNtStatusFromWin32(GetLastError());
 
@@ -671,8 +746,7 @@ static NTSTATUS PtfsCreate(PWSTR Path, PWSTR VolumePrefix, PWSTR MountPoint, UIN
     VolumeParams.UmFileContextIsUserContext2 = 1;
     if (0 != VolumePrefix)
         wcscpy_s(VolumeParams.Prefix, sizeof VolumeParams.Prefix / sizeof(WCHAR), VolumePrefix);
-    wcscpy_s(VolumeParams.FileSystemName, sizeof VolumeParams.FileSystemName / sizeof(WCHAR),
-        L"" PROGNAME);
+    wcscpy_s(VolumeParams.FileSystemName, sizeof VolumeParams.FileSystemName / sizeof(WCHAR), L"" PROGNAME);
 
     Result = FspFileSystemCreate(
         VolumeParams.Prefix[0] ? L"" FSP_FSCTL_NET_DEVICE_NAME : L"" FSP_FSCTL_DISK_DEVICE_NAME,
