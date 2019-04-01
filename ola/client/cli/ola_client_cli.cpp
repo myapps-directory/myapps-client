@@ -414,14 +414,54 @@ void handle_list_apps(istream& _ris, Engine &_reng){
         std::shared_ptr<ListAppsResponse>& _rrecv_msg_ptr,
         ErrorConditionT const&                  _rerror
     ){
-        if(_rrecv_msg_ptr){
+        if(_rrecv_msg_ptr && _rrecv_msg_ptr->error_ == 0){
             cout<<"{\n";
             for(const auto& app_id: _rrecv_msg_ptr->app_id_vec_){
                 cout<<'\t'<<utility::base64_encode(app_id)<<endl;
             }
             cout<<"}"<<endl;
-        }else{
+        }else if(!_rrecv_msg_ptr){
             cout<<"Error - no response: "<<_rerror.message()<<endl;
+        }else{
+            cout<<"Error received from server: "<<_rrecv_msg_ptr->error_ <<endl;
+        }
+        prom.set_value();
+    };
+    _reng.rpcService().sendRequest(_reng.serverEndpoint().c_str(), req_ptr, lambda);
+    
+    solid_check(prom.get_future().wait_for(chrono::seconds(100)) == future_status::ready, "Taking too long - waited 100 secs");
+    
+}
+
+//-----------------------------------------------------------------------------
+
+void handle_list_store(istream& _ris, Engine &_reng){
+    auto req_ptr = make_shared<ListStoreRequest>();
+    
+    _ris>>req_ptr->storage_id_;
+    _ris>>req_ptr->path_;
+    
+    req_ptr->storage_id_ = utility::base64_decode(req_ptr->storage_id_);
+    
+    
+    promise<void> prom;
+    
+    auto lambda = [&prom](
+        frame::mprpc::ConnectionContext&        _rctx,
+        std::shared_ptr<ListStoreRequest>&  _rsent_msg_ptr,
+        std::shared_ptr<ListStoreResponse>& _rrecv_msg_ptr,
+        ErrorConditionT const&                  _rerror
+    ){
+        if(_rrecv_msg_ptr && _rrecv_msg_ptr->error_ == 0){
+            cout<<"{\n";
+            for(const auto& node: _rrecv_msg_ptr->node_dq_){
+                cout<<'\t'<<node.name_<<endl;
+            }
+            cout<<"}"<<endl;
+        }else if(!_rrecv_msg_ptr){
+            cout<<"Error - no response: "<<_rerror.message()<<endl;
+        }else{
+            cout<<"Error received from server: "<<_rrecv_msg_ptr->error_ <<endl;
         }
         prom.set_value();
     };
@@ -441,6 +481,8 @@ void handle_list(istream& _ris, Engine &_reng){
         handle_list_oses(_ris, _reng);
     }else if(what == "apps"){
         handle_list_apps(_ris, _reng);
+    }else if(what == "store"){
+        handle_list_store(_ris, _reng);
     }
 }
 
@@ -476,7 +518,7 @@ void handle_fetch_app(istream& _ris, Engine &_reng){
         std::shared_ptr<FetchAppResponse>& _rrecv_msg_ptr,
         ErrorConditionT const&                  _rerror
     ){
-        if(_rrecv_msg_ptr){
+        if(_rrecv_msg_ptr && _rrecv_msg_ptr->error_ == 0){
             cout<<"{\n";
             cout<<"Builds: ";
             for(const auto& build_id: _rrecv_msg_ptr->build_id_vec_){
@@ -486,8 +528,10 @@ void handle_fetch_app(istream& _ris, Engine &_reng){
             cout<<_rrecv_msg_ptr->config_;
             cout<<endl;
             cout<<"}"<<endl;
-        }else{
+        }else if(!_rrecv_msg_ptr){
             cout<<"Error - no response: "<<_rerror.message()<<endl;
+        }else{
+            cout<<"Error received from server: "<<_rrecv_msg_ptr->error_ <<endl;
         }
         prom.set_value();
     };
@@ -501,7 +545,7 @@ void handle_fetch_app(istream& _ris, Engine &_reng){
 ostream& operator<<(ostream &_ros, const utility::BuildConfig &_cfg){
     _ros<<"Name : "<<_cfg.name_<<endl;
     _ros<<"Tag: "<<_cfg.tag_<<endl;
-    _ros<<"Components: {";
+    _ros<<"Components: {\n";
     for(const auto& c: _cfg.component_vec_){
         _ros<<"Name: "<<c.name_<<endl;
         _ros<<"Oses: ";
@@ -519,7 +563,7 @@ ostream& operator<<(ostream &_ros, const utility::BuildConfig &_cfg){
             _ros<<e<<' ';
         }
         _ros<<endl;
-        _ros<<"Shortcuts: {"<<endl;
+        _ros<<"Shortcuts: {\n";
         for(const auto &s: c.shortcut_vec_){
             _ros<<"Name:   "<<s.name_<<endl;
             _ros<<"Command:"<<s.command_<<endl;
@@ -527,7 +571,7 @@ ostream& operator<<(ostream &_ros, const utility::BuildConfig &_cfg){
             _ros<<"Icon:   "<<s.icon_<<endl;
             _ros<<endl;
         }
-        _ros<<"}"<<endl;
+        _ros<<"}\n";
     }
     _ros<<'}'<<endl;
     return _ros;
@@ -552,14 +596,16 @@ void handle_fetch_build(istream& _ris, Engine &_reng){
         std::shared_ptr<FetchBuildResponse>& _rrecv_msg_ptr,
         ErrorConditionT const&                  _rerror
     ){
-        if(_rrecv_msg_ptr){
+        if(_rrecv_msg_ptr && _rrecv_msg_ptr->error_ == 0){
             cout<<"{\n";
-            cout<<"Remote Root: "<<_rrecv_msg_ptr->remote_root_<<endl;
+            cout<<"Remote Root: "<<utility::base64_encode(_rrecv_msg_ptr->storage_id_)<<endl;
             cout<<_rrecv_msg_ptr->config_;
             cout<<endl;
             cout<<"}"<<endl;
-        }else{
+        }else if(!_rrecv_msg_ptr){
             cout<<"Error - no response: "<<_rerror.message()<<endl;
+        }else{
+            cout<<"Error received from server: "<<_rrecv_msg_ptr->error_ <<endl;
         }
         prom.set_value();
     };
@@ -848,7 +894,7 @@ void handle_generate_buid(istream& _ris, Engine &_reng){
                     {
                         "Bubbles",
                         "bin/bubbles.exe",
-                        "bin"
+                        "bin",
                         "bubbles_icon"
                     }
                 }
@@ -862,7 +908,7 @@ void handle_generate_buid(istream& _ris, Engine &_reng){
                     {
                         "Bubbles",
                         "bin/bubbles.exe",
-                        "bin"
+                        "bin",
                         "bubbles_icon"
                     }
                 }
