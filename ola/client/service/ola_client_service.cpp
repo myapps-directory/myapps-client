@@ -17,11 +17,14 @@
 #include "boost/program_options.hpp"
 
 #include "ola/client/service/engine.hpp"
+#include "ola/client/utility/locale.hpp"
+
 #include <iostream>
 #include <sstream>
 
 #include "solid/system/log.hpp"
 
+#include <aclapi.h>
 #include <wtsapi32.h>
 #pragma comment(lib, "wtsapi32.lib")
 #include <userenv.h>
@@ -32,9 +35,9 @@
 #define ALLOCATION_UNIT 4096
 #define FULLPATH_SIZE (MAX_PATH + FSP_FSCTL_TRANSACT_PATH_SIZEMAX / sizeof(WCHAR))
 
-#define info(format, ...) Service::Log(EVENTLOG_INFORMATION_TYPE, format, __VA_ARGS__)
-#define warn(format, ...) Service::Log(EVENTLOG_WARNING_TYPE, format, __VA_ARGS__)
-#define fail(format, ...) Service::Log(EVENTLOG_ERROR_TYPE, format, __VA_ARGS__)
+#define log_info(format, ...) Service::Log(EVENTLOG_INFORMATION_TYPE, format, __VA_ARGS__)
+#define log_warn(format, ...) Service::Log(EVENTLOG_WARNING_TYPE, format, __VA_ARGS__)
+#define log_fail(format, ...) Service::Log(EVENTLOG_ERROR_TYPE, format, __VA_ARGS__)
 
 #define ConcatPath(FN, FP) (0 == StringCbPrintfW(FP, sizeof FP, L"%s%s", _Path, FN))
 #define HandleFromFileDesc(FD) ((FileDesc*)(FD))->Handle
@@ -64,6 +67,9 @@ struct Parameters {
 
 class FileSystem final : public FileSystemBase {
     ola::client::service::Engine& rengine_;
+    DWORD                         security_size_  = 0;
+    char*                         psecurity_data_ = nullptr;
+    int64_t                       base_time_      = 0;
 
 public:
     FileSystem(ola::client::service::Engine& _rengine);
@@ -74,6 +80,8 @@ private:
     {
         return rengine_;
     }
+
+    NTSTATUS InitSecurityDescriptor();
 
     static NTSTATUS GetFileInfoInternal(HANDLE Handle, FileInfo* FileInfo);
     NTSTATUS        Init(PVOID Host) override;
@@ -191,6 +199,15 @@ private:
         PWSTR    Marker,
         PVOID*   PContext,
         DirInfo* DirInfo) override;
+
+private:
+    friend class RootDescriptor;
+    NTSTATUS rootInfo(FileInfo&);
+    NTSTATUS rootEntry(
+        PWSTR    Pattern,
+        PWSTR    Marker,
+        PVOID*   PContext,
+        DirInfo* DirInfo);
 };
 
 class FileSystemService final : public Service {
@@ -243,6 +260,18 @@ string envConfigPathPrefix()
     string r = v;
     r += "\\OLA";
     return r;
+}
+
+string envAppDataPath()
+{
+    const char* v = getenv("APPDATA");
+    if (v == nullptr) {
+        v = getenv("LOCALAPPDATA");
+        if (v == nullptr) {
+            v = "c:\\";
+        }
+    }
+    return v;
 }
 
 //TODO: find a better name
@@ -333,134 +362,6 @@ bool Parameters::parse(ULONG argc, PWSTR* argv)
 FileSystemService::FileSystemService() : Service(L"" PROGNAME), fs_(engine_), host_(fs_)
 {
 }
-#if 0
-NTSTATUS FileSystemService::OnStart(ULONG argc, PWSTR *argv)
-{
-#define argtos(v)                       if (arge > ++argp) v = *argp; else goto usage
-#define argtol(v)                       if (arge > ++argp) v = wcstol_deflt(*argp, v); else goto usage
-
-    wchar_t **argp, **arge;
-    PWSTR DebugLogFile = 0;
-    ULONG DebugFlags = 0;
-    PWSTR VolumePrefix = 0;
-    PWSTR PassThrough = 0;
-    PWSTR MountPoint = 0;
-    HANDLE DebugLogHandle = INVALID_HANDLE_VALUE;
-    WCHAR PassThroughBuf[MAX_PATH];
-    NTSTATUS Result;
-
-    for (argp = argv + 1, arge = argv + argc; arge > argp; argp++)
-    {
-        if (L'-' != argp[0][0])
-            break;
-        switch (argp[0][1])
-        {
-        case L'?':
-            goto usage;
-        case L'd':
-            argtol(DebugFlags);
-            break;
-        case L'D':
-            argtos(DebugLogFile);
-            break;
-        case L'm':
-            argtos(MountPoint);
-            break;
-        case L'p':
-            argtos(PassThrough);
-            break;
-        case L'u':
-            argtos(VolumePrefix);
-            break;
-        default:
-            goto usage;
-        }
-    }
-
-    if (arge > argp)
-        goto usage;
-
-    if (0 == PassThrough && 0 != VolumePrefix)
-    {
-        PWSTR P;
-
-        P = wcschr(VolumePrefix, L'\\');
-        if (0 != P && L'\\' != P[1])
-        {
-            P = wcschr(P + 1, L'\\');
-            if (0 != P &&
-                (
-                (L'A' <= P[1] && P[1] <= L'Z') ||
-                (L'a' <= P[1] && P[1] <= L'z')
-                ) &&
-                L'$' == P[2])
-            {
-                StringCbPrintf(PassThroughBuf, sizeof PassThroughBuf, L"%c:%s", P[1], P + 3);
-                PassThrough = PassThroughBuf;
-            }
-        }
-    }
-
-    if (0 == PassThrough || 0 == MountPoint)
-        goto usage;
-
-    EnableBackupRestorePrivileges();
-
-    if (0 != DebugLogFile)
-    {
-        Result = FileSystemHost::SetDebugLogFile(DebugLogFile);
-        if (!NT_SUCCESS(Result))
-        {
-            fail(L"cannot open debug log file");
-            goto usage;
-        }
-    }
-
-    Result = fs_.SetPath(PassThrough);
-    if (!NT_SUCCESS(Result))
-    {
-        fail(L"cannot create file system");
-        return Result;
-    }
-
-    host_.SetPrefix(VolumePrefix);
-    Result = host_.Mount(MountPoint, 0, FALSE, DebugFlags);
-    if (!NT_SUCCESS(Result))
-    {
-        fail(L"cannot mount file system");
-        return Result;
-    }
-
-    MountPoint = host_.MountPoint();
-    info(L"%s%s%s -p %s -m %s",
-        L"" PROGNAME,
-        0 != VolumePrefix && L'\0' != VolumePrefix[0] ? L" -u " : L"",
-            0 != VolumePrefix && L'\0' != VolumePrefix[0] ? VolumePrefix : L"",
-        PassThrough,
-        MountPoint);
-
-    return STATUS_SUCCESS;
-
-usage:
-    static wchar_t usage[] = L""
-        "usage: %s OPTIONS\n"
-        "\n"
-        "options:\n"
-        "    -d DebugFlags       [-1: enable all debug logs]\n"
-        "    -D DebugLogFile     [file path; use - for stderr]\n"
-        "    -u \\Server\\Share    [UNC prefix (single backslash)]\n"
-        "    -p Directory        [directory to expose as pass through file system]\n"
-        "    -m MountPoint       [X:|*|directory]\n";
-
-    fail(usage, L"" PROGNAME);
-
-    return STATUS_UNSUCCESSFUL;
-
-#undef argtos
-#undef argtol
-}
-
-#else
 
 DWORD GetSessionIdOfUser(PCWSTR pszUserName,  
                          PCWSTR pszDomain) 
@@ -561,123 +462,6 @@ BOOL DisplayInteractiveMessage(DWORD dwSessionId,
         ); 
 }
 
-#if 0
-BOOL CreateInteractiveProcess(DWORD dwSessionId,
-                              PWSTR pszCommandLine, 
-                              BOOL fWait, 
-                              DWORD dwTimeout, 
-                              DWORD *pExitCode)
-{
-    DWORD dwError = ERROR_SUCCESS;
-    HANDLE hToken = NULL;
-    LPVOID lpvEnv = NULL;
-    wchar_t szUserProfileDir[MAX_PATH];
-    DWORD cchUserProfileDir = ARRAYSIZE(szUserProfileDir);
-    STARTUPINFO si = { sizeof(si) };
-    PROCESS_INFORMATION pi = { 0 };
-    DWORD dwWaitResult;
-
-    // Obtain the primary access token of the logged-on user specified by the 
-    // session ID.
-    if (!WTSQueryUserToken(dwSessionId, &hToken))
-    {
-        dwError = GetLastError();
-        goto Cleanup;
-    }
-
-    // Run the command line in the session that we found by using the default 
-    // values for working directory and desktop.
-
-    // This creates the default environment block for the user.
-    if (!CreateEnvironmentBlock(&lpvEnv, hToken, TRUE))
-    {
-        dwError = GetLastError();
-        goto Cleanup;
-    }
-
-    // Retrieve the path to the root directory of the user's profile.
-    if (!GetUserProfileDirectory(hToken, szUserProfileDir, 
-        &cchUserProfileDir))
-    {
-        dwError = GetLastError();
-        goto Cleanup;
-    }
-
-    // Specify that the process runs in the interactive desktop.
-    si.lpDesktop = L"winsta0\\default";
-
-    // Launch the process.
-    if (!CreateProcessAsUser(hToken, NULL, pszCommandLine, NULL, NULL, FALSE, 
-        CREATE_UNICODE_ENVIRONMENT, lpvEnv, szUserProfileDir, &si, &pi))
-    {
-        dwError = GetLastError();
-        goto Cleanup;
-    }
-
-    if (fWait)
-    {
-        // Wait for the exit of the process.
-        dwWaitResult = WaitForSingleObject(pi.hProcess, dwTimeout);
-        if (dwWaitResult == WAIT_OBJECT_0)
-        {
-            // If the process exits before timeout, get the exit code.
-            GetExitCodeProcess(pi.hProcess, pExitCode);
-        }
-        else if (dwWaitResult == WAIT_TIMEOUT)
-        {
-            // If it times out, terminiate the process.
-            TerminateProcess(pi.hProcess, IDTIMEOUT);
-            *pExitCode = IDTIMEOUT;
-        }
-        else
-        {
-            dwError = GetLastError();
-            goto Cleanup;
-        }
-    }
-    else
-    {
-        *pExitCode = IDASYNC;
-    }
-
-Cleanup:
-
-    // Centralized cleanup for all allocated resources.
-    if (hToken)
-    {
-        CloseHandle(hToken);
-        hToken = NULL;
-    }
-    if (lpvEnv)
-    {
-        DestroyEnvironmentBlock(lpvEnv);
-        lpvEnv = NULL;
-    }
-    if (pi.hProcess)
-    {
-        CloseHandle(pi.hProcess);
-        pi.hProcess = NULL;
-    }
-    if (pi.hThread)
-    {
-        CloseHandle(pi.hThread);
-        pi.hThread = NULL;
-    }
-
-    // Set the last error if something failed in the function.
-    if (dwError != ERROR_SUCCESS)
-    {
-        SetLastError(dwError);
-        return FALSE;
-    }
-    else
-    {
-        return TRUE;
-    }
-}
-
-#endif
-
 bool CreateInteractiveProcess(const wstring &_cmd_line, 
                               BOOL fWait, 
                               DWORD dwTimeout, 
@@ -746,6 +530,7 @@ void WriteErrorLogEntry(PWSTR pszFunction, DWORD dwError)
 
 NTSTATUS FileSystemService::OnStart(ULONG argc, PWSTR *argv)
 {
+
     try {
         if(params_.parse(argc, argv)){
             return STATUS_UNSUCCESSFUL;
@@ -789,32 +574,19 @@ NTSTATUS FileSystemService::OnStart(ULONG argc, PWSTR *argv)
 		onGuiStart(_port);
 	};
     engine_.start(cfg);
-#if 0
-	DWORD dwSessionId = GetSessionIdOfUser(NULL, NULL); 
-    if (dwSessionId == 0xFFFFFFFF) 
-    { 
-        // Log the error and exit. 
-        WriteErrorLogEntry(L"GetSessionIdOfUser", GetLastError()); 
-        return STATUS_UNSUCCESSFUL; 
-    } 
- 
-    // Display an interactive message in the session. 
-    wchar_t szTitle[] = L"CppInteractiveWindowsService"; 
-    wchar_t szMessage[] = L"Do you want to start Notepad?"; 
-    DWORD dwResponse; 
-    if (!DisplayInteractiveMessage(dwSessionId, szTitle, szMessage, MB_YESNO,  
-        TRUE, 5 /*5 seconds*/, &dwResponse)) 
-    { 
-        // Log the error and exit. 
-        WriteErrorLogEntry(L"DisplayInteractiveMessage", GetLastError()); 
-        return STATUS_UNSUCCESSFUL;
-    } 
+	NTSTATUS  Result = STATUS_SUCCESS;
+	ULONG     DebugFlags     = 0;
+	
+	EnableBackupRestorePrivileges();
 
-	this->Stop();
-#endif
-    return STATUS_SUCCESS;
+	Result = host_.Mount(const_cast<PWSTR>(params_.mount_point_.c_str()), 0, FALSE, DebugFlags);
+	if (!NT_SUCCESS(Result)) {
+		log_fail(L"cannot mount file system");
+		return Result;
+	}
+	
+    return Result;
 }
-#endif
 
 NTSTATUS FileSystemService::OnStop()
 {
@@ -877,19 +649,168 @@ void FileSystemService::onGuiFail(){
 
 // -- FileSystem --------------------------------------------------------------
 
-struct FileDesc
-{
-    FileDesc() : Handle(INVALID_HANDLE_VALUE), DirBuffer()
-    {
-    }
-    ~FileDesc()
-    {
-        CloseHandle(Handle);
-        FileSystem::DeleteDirectoryBuffer(&DirBuffer);
-    }
-    HANDLE Handle;
-    PVOID DirBuffer;
+enum struct ErrorE {
+	Success = 0,
 };
+
+NTSTATUS error_to_status(const ErrorE _err) {
+	switch(_err){
+		case ErrorE::Success:
+			return STATUS_SUCCESS;
+		default:
+			return STATUS_UNSUCCESSFUL;
+	};
+}
+
+struct Descriptor
+{
+    virtual ~Descriptor(){}
+
+	virtual NTSTATUS info(FileSystem&, FileSystem::FileInfo&) = 0;
+	
+	virtual NTSTATUS read(
+		FileSystem &,
+		PVOID Buffer,
+		UINT64 Offset,
+		ULONG Length,
+		PULONG PBytesTransferred)
+	{
+		solid_throw("invalid call");
+		return STATUS_UNSUCCESSFUL;
+	}
+	
+	virtual NTSTATUS readDirectory(
+		FileSystem &,
+		PVOID FileNode,
+		PWSTR Pattern,
+		PWSTR Marker,
+		PVOID Buffer,
+		ULONG Length,
+		PULONG PBytesTransferred)
+	{
+		solid_throw("invalid call");
+		return STATUS_UNSUCCESSFUL;
+	}
+
+	virtual NTSTATUS readDirectoryEntry(
+		FileSystem &,
+		PWSTR Pattern,
+		PWSTR Marker,
+		PVOID *PContext,
+		FileSystem::DirInfo *DirInfo)
+	{
+		solid_throw("invalid call");
+		return STATUS_UNSUCCESSFUL;
+	}
+};
+
+class DirectoryDescriptor : Descriptor {
+	PVOID  DirBuffer;
+private:
+	NTSTATUS readDirectory(
+		FileSystem &_rfs,
+		PVOID FileNode,
+		PWSTR Pattern,
+		PWSTR Marker,
+		PVOID Buffer,
+		ULONG Length,
+		PULONG PBytesTransferred) override
+	{
+		return _rfs.BufferedReadDirectory(&DirBuffer,
+		    FileNode, this, Pattern, Marker, Buffer, Length, PBytesTransferred);
+	}
+};
+
+class RootDescriptor final : DirectoryDescriptor {
+	NTSTATUS info(FileSystem&_rfs, FileSystem::FileInfo& _rfi) override{
+		return _rfs.rootInfo(_rfi);
+	}
+
+	NTSTATUS readDirectoryEntry(
+		FileSystem &_rfs,
+		PWSTR Pattern,
+		PWSTR Marker,
+		PVOID *PContext,
+		FileSystem::DirInfo *DirInfo)
+	{
+		return _rfs.rootEntry(Pattern, Marker,PContext, DirInfo);
+	}
+};
+
+class ApplicationDescriptor final : DirectoryDescriptor {
+	NTSTATUS info(FileSystem&, FileSystem::FileInfo&) override{
+		solid_throw("TODO");
+		return STATUS_UNSUCCESSFUL;
+	}
+
+	NTSTATUS readDirectoryEntry(
+		FileSystem &,
+		PWSTR Pattern,
+		PWSTR Marker,
+		PVOID *PContext,
+		FileSystem::DirInfo *DirInfo)
+	{
+		
+	}
+};
+
+class SubDirectoryDescriptor final : DirectoryDescriptor {
+	NTSTATUS info(FileSystem&, FileSystem::FileInfo&) override{
+		solid_throw("TODO");
+		return STATUS_UNSUCCESSFUL;
+	}
+
+	NTSTATUS readDirectoryEntry(
+		FileSystem &,
+		PWSTR Pattern,
+		PWSTR Marker,
+		PVOID *PContext,
+		FileSystem::DirInfo *DirInfo)
+	{
+		solid_throw("TODO");
+		return STATUS_UNSUCCESSFUL;
+	}
+};
+
+
+
+class ShortcutDescriptor final : Descriptor {
+	NTSTATUS info(FileSystem&, FileSystem::FileInfo&) override{
+		solid_throw("TODO");
+		return STATUS_UNSUCCESSFUL;
+	}
+	
+	NTSTATUS read(
+		FileSystem &,
+		PVOID Buffer,
+		UINT64 Offset,
+		ULONG Length,
+		PULONG PBytesTransferred) override
+	{
+		solid_throw("TODO");
+		return STATUS_UNSUCCESSFUL;
+	}
+};
+
+class FileDescriptor final : Descriptor {
+	NTSTATUS info(FileSystem&, FileSystem::FileInfo&) override{
+		solid_throw("TODO");
+		return STATUS_UNSUCCESSFUL;
+	}
+	
+	NTSTATUS read(
+		FileSystem &,
+		PVOID Buffer,
+		UINT64 Offset,
+		ULONG Length,
+		PULONG PBytesTransferred) override
+	{
+		solid_throw("TODO");
+		return STATUS_UNSUCCESSFUL;
+	}
+};
+
+//-----------------------------------------------------------------------------
 
 FileSystem::FileSystem(ola::client::service::Engine &_rengine) :  rengine_(_rengine)
 {
@@ -897,6 +818,36 @@ FileSystem::FileSystem(ola::client::service::Engine &_rengine) :  rengine_(_reng
 
 FileSystem::~FileSystem()
 {
+
+	delete []psecurity_data_;
+}
+
+NTSTATUS FileSystem::InitSecurityDescriptor(){
+	DWORD sz= 0;
+	auto path = ola::client::utility::widen(envAppDataPath());
+	GetFileSecurity(
+		path.c_str(),
+		OWNER_SECURITY_INFORMATION | GROUP_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
+		nullptr,
+		0,
+		&sz
+	);
+
+	if(sz){
+		psecurity_data_ = new char[sz];
+		if(GetFileSecurity(
+			path.c_str(),
+			OWNER_SECURITY_INFORMATION | GROUP_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
+			(PSECURITY_DESCRIPTOR)psecurity_data_,
+			sz,
+			&sz)
+		){
+			security_size_ = sz;
+			return STATUS_SUCCESS;
+		}
+	}
+
+	return STATUS_MEMORY_NOT_ALLOCATED;
 }
 
 NTSTATUS FileSystem::GetFileInfoInternal(HANDLE Handle, FileInfo *FileInfo)
@@ -925,6 +876,9 @@ NTSTATUS FileSystem::GetFileInfoInternal(HANDLE Handle, FileInfo *FileInfo)
 NTSTATUS FileSystem::Init(PVOID Host0)
 {
     FileSystemHost *Host = (FileSystemHost *)Host0;
+
+	base_time_ = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now().time_since_epoch()).count() * 10 + 116444736000000000;
+
     Host->SetSectorSize(ALLOCATION_UNIT);
     Host->SetSectorsPerAllocationUnit(1);
     Host->SetFileInfoTimeout(1000);
@@ -934,9 +888,10 @@ NTSTATUS FileSystem::Init(PVOID Host0)
     Host->SetPersistentAcls(TRUE);
     Host->SetPostCleanupWhenModifiedOnly(TRUE);
     Host->SetPassQueryDirectoryPattern(TRUE);
-    //Host->SetVolumeCreationTime(_CreationTime);
+    Host->SetVolumeCreationTime(base_time_);
     Host->SetVolumeSerialNumber(0);
-    return STATUS_SUCCESS;
+
+	return InitSecurityDescriptor();
 }
 
 NTSTATUS FileSystem::GetVolumeInfo(
@@ -945,14 +900,8 @@ NTSTATUS FileSystem::GetVolumeInfo(
     WCHAR Root[MAX_PATH];
     ULARGE_INTEGER TotalSize, FreeSize;
 
-    //if (!GetVolumePathName(_Path, Root, MAX_PATH))
-    //    return NtStatusFromWin32(GetLastError());
-
-    if (!GetDiskFreeSpaceEx(Root, 0, &TotalSize, &FreeSize))
-        return NtStatusFromWin32(GetLastError());
-
-    VolumeInfo->TotalSize = TotalSize.QuadPart;
-    VolumeInfo->FreeSize = FreeSize.QuadPart;
+    VolumeInfo->TotalSize = 1024;
+    VolumeInfo->FreeSize = 0;
 
     return STATUS_SUCCESS;
 }
@@ -963,6 +912,28 @@ NTSTATUS FileSystem::GetSecurityByName(
     PSECURITY_DESCRIPTOR SecurityDescriptor,
     SIZE_T *PSecurityDescriptorSize)
 {
+	if(PFileAttributes != nullptr){
+		if(FileName[0] == L'\\' && FileName[1] == L'\0'){
+			*PFileAttributes = FILE_ATTRIBUTE_DIRECTORY;
+		}
+
+		*PFileAttributes |= FILE_ATTRIBUTE_READONLY;
+	}
+	
+	if(PSecurityDescriptorSize != nullptr){
+
+		if (this->security_size_ > *PSecurityDescriptorSize)
+        {
+            *PSecurityDescriptorSize = this->security_size_;
+            return STATUS_BUFFER_OVERFLOW;
+        }
+		*PSecurityDescriptorSize = this->security_size_;
+	}
+
+	if(SecurityDescriptor != nullptr){
+		solid_check(IsValidSecurityDescriptor((PSECURITY_DESCRIPTOR )psecurity_data_));
+		memcpy(SecurityDescriptor, this->psecurity_data_, this->security_size_);
+	}
     return STATUS_SUCCESS;
 }
 
@@ -977,7 +948,7 @@ NTSTATUS FileSystem::Create(
     PVOID *PFileDesc,
     OpenFileInfo *OpenFileInfo)
 {
-    return STATUS_SUCCESS;
+    return STATUS_UNSUCCESSFUL;
 }
 
 NTSTATUS FileSystem::Open(
@@ -988,7 +959,22 @@ NTSTATUS FileSystem::Open(
     PVOID *PFileDesc,
     OpenFileInfo *OpenFileInfo)
 {
-    return STATUS_SUCCESS;
+	Descriptor *pdesc = nullptr;
+	if(FileName[0] == L'\\' && FileName[1] == L'\0'){
+		pdesc = new RootDescriptor;
+	}else if(){
+	}
+
+	const auto stat = pdesc->info(*this, OpenFileInfo->FileInfo);
+
+	if(stat != STATUS_SUCCESS){
+		delete pdesc;
+		pdesc = nullptr;
+	}
+
+	*PFileDesc = pdesc;
+
+    return stat;
 }
 
 NTSTATUS FileSystem::Overwrite(
@@ -1008,24 +994,14 @@ VOID FileSystem::Cleanup(
     PWSTR FileName,
     ULONG Flags)
 {
-    HANDLE Handle = HandleFromFileDesc(pFileDesc);
-
-    if (Flags & CleanupDelete)
-    {
-        CloseHandle(Handle);
-
-        /* this will make all future uses of Handle to fail with STATUS_INVALID_HANDLE */
-        HandleFromFileDesc(pFileDesc) = INVALID_HANDLE_VALUE;
-    }
+    
 }
 
 VOID FileSystem::Close(
     PVOID pFileNode,
-    PVOID pFileDesc0)
+    PVOID pFileDesc)
 {
-    FileDesc *pFileDesc = (FileDesc *)pFileDesc0;
-
-    delete pFileDesc;
+	delete static_cast<Descriptor*>(pFileDesc);
 }
 
 NTSTATUS FileSystem::Read(
@@ -1036,16 +1012,7 @@ NTSTATUS FileSystem::Read(
     ULONG Length,
     PULONG PBytesTransferred)
 {
-    HANDLE Handle = HandleFromFileDesc(pFileDesc);
-    OVERLAPPED Overlapped = { 0 };
-
-    Overlapped.Offset = (DWORD)Offset;
-    Overlapped.OffsetHigh = (DWORD)(Offset >> 32);
-
-    if (!ReadFile(Handle, Buffer, Length, PBytesTransferred, &Overlapped))
-        return NtStatusFromWin32(GetLastError());
-
-    return STATUS_SUCCESS;
+    return static_cast<Descriptor*>(pFileDesc)->read(*this, Buffer, Offset, Length, PBytesTransferred);
 }
 
 NTSTATUS FileSystem::Write(
@@ -1059,28 +1026,7 @@ NTSTATUS FileSystem::Write(
     PULONG PBytesTransferred,
     FileInfo *FileInfo)
 {
-    HANDLE Handle = HandleFromFileDesc(pFileDesc);
-    LARGE_INTEGER FileSize;
-    OVERLAPPED Overlapped = { 0 };
-
-    if (ConstrainedIo)
-    {
-        if (!GetFileSizeEx(Handle, &FileSize))
-            return NtStatusFromWin32(GetLastError());
-
-        if (Offset >= (UINT64)FileSize.QuadPart)
-            return STATUS_SUCCESS;
-        if (Offset + Length > (UINT64)FileSize.QuadPart)
-            Length = (ULONG)((UINT64)FileSize.QuadPart - Offset);
-    }
-
-    Overlapped.Offset = (DWORD)Offset;
-    Overlapped.OffsetHigh = (DWORD)(Offset >> 32);
-
-    if (!WriteFile(Handle, Buffer, Length, PBytesTransferred, &Overlapped))
-        return NtStatusFromWin32(GetLastError());
-
-    return GetFileInfoInternal(Handle, FileInfo);
+    return STATUS_UNSUCCESSFUL;
 }
 
 NTSTATUS FileSystem::Flush(
@@ -1088,16 +1034,7 @@ NTSTATUS FileSystem::Flush(
     PVOID pFileDesc,
     FileInfo *FileInfo)
 {
-    HANDLE Handle = HandleFromFileDesc(pFileDesc);
-
-    /* we do not flush the whole volume, so just return SUCCESS */
-    if (0 == Handle)
-        return STATUS_SUCCESS;
-
-    if (!FlushFileBuffers(Handle))
-        return NtStatusFromWin32(GetLastError());
-
-    return GetFileInfoInternal(Handle, FileInfo);
+    return STATUS_UNSUCCESSFUL;
 }
 
 NTSTATUS FileSystem::GetFileInfo(
@@ -1105,9 +1042,7 @@ NTSTATUS FileSystem::GetFileInfo(
     PVOID pFileDesc,
     FileInfo *FileInfo)
 {
-    HANDLE Handle = HandleFromFileDesc(pFileDesc);
-
-    return GetFileInfoInternal(Handle, FileInfo);
+    return static_cast<Descriptor*>(pFileDesc)->info(*this, *FileInfo);
 }
 
 NTSTATUS FileSystem::SetBasicInfo(
@@ -1120,25 +1055,7 @@ NTSTATUS FileSystem::SetBasicInfo(
     UINT64 ChangeTime,
     FileInfo *FileInfo)
 {
-    HANDLE Handle = HandleFromFileDesc(pFileDesc);
-    FILE_BASIC_INFO BasicInfo = { 0 };
-
-    if (INVALID_FILE_ATTRIBUTES == FileAttributes)
-        FileAttributes = 0;
-    else if (0 == FileAttributes)
-        FileAttributes = FILE_ATTRIBUTE_NORMAL;
-
-    BasicInfo.FileAttributes = FileAttributes;
-    BasicInfo.CreationTime.QuadPart = CreationTime;
-    BasicInfo.LastAccessTime.QuadPart = LastAccessTime;
-    BasicInfo.LastWriteTime.QuadPart = LastWriteTime;
-    //BasicInfo.ChangeTime = ChangeTime;
-
-    if (!SetFileInformationByHandle(Handle,
-        FileBasicInfo, &BasicInfo, sizeof BasicInfo))
-        return NtStatusFromWin32(GetLastError());
-
-    return GetFileInfoInternal(Handle, FileInfo);
+    return STATUS_UNSUCCESSFUL;
 }
 
 NTSTATUS FileSystem::SetFileSize(
@@ -1148,39 +1065,7 @@ NTSTATUS FileSystem::SetFileSize(
     BOOLEAN SetAllocationSize,
     FileInfo *FileInfo)
 {
-    HANDLE Handle = HandleFromFileDesc(pFileDesc);
-    FILE_ALLOCATION_INFO AllocationInfo;
-    FILE_END_OF_FILE_INFO EndOfFileInfo;
-
-    if (SetAllocationSize)
-    {
-        /*
-         * This file system does not maintain AllocationSize, although NTFS clearly can.
-         * However it must always be FileSize <= AllocationSize and NTFS will make sure
-         * to truncate the FileSize if it sees an AllocationSize < FileSize.
-         *
-         * If OTOH a very large AllocationSize is passed, the call below will increase
-         * the AllocationSize of the underlying file, although our file system does not
-         * expose this fact. This AllocationSize is only temporary as NTFS will reset
-         * the AllocationSize of the underlying file when it is closed.
-         */
-
-        AllocationInfo.AllocationSize.QuadPart = NewSize;
-
-        if (!SetFileInformationByHandle(Handle,
-            FileAllocationInfo, &AllocationInfo, sizeof AllocationInfo))
-            return NtStatusFromWin32(GetLastError());
-    }
-    else
-    {
-        EndOfFileInfo.EndOfFile.QuadPart = NewSize;
-
-        if (!SetFileInformationByHandle(Handle,
-            FileEndOfFileInfo, &EndOfFileInfo, sizeof EndOfFileInfo))
-            return NtStatusFromWin32(GetLastError());
-    }
-
-    return GetFileInfoInternal(Handle, FileInfo);
+    return STATUS_UNSUCCESSFUL;
 }
 
 NTSTATUS FileSystem::CanDelete(
@@ -1188,16 +1073,7 @@ NTSTATUS FileSystem::CanDelete(
     PVOID pFileDesc,
     PWSTR FileName)
 {
-    HANDLE Handle = HandleFromFileDesc(pFileDesc);
-    FILE_DISPOSITION_INFO DispositionInfo;
-
-    DispositionInfo.DeleteFile = TRUE;
-
-    if (!SetFileInformationByHandle(Handle,
-        FileDispositionInfo, &DispositionInfo, sizeof DispositionInfo))
-        return NtStatusFromWin32(GetLastError());
-
-    return STATUS_SUCCESS;
+    return STATUS_UNSUCCESSFUL;
 }
 
 NTSTATUS FileSystem::Rename(
@@ -1207,7 +1083,7 @@ NTSTATUS FileSystem::Rename(
     PWSTR NewFileName,
     BOOLEAN ReplaceIfExists)
 {
-    return STATUS_SUCCESS;
+    return STATUS_UNSUCCESSFUL;
 }
 
 NTSTATUS FileSystem::GetSecurity(
@@ -1216,18 +1092,20 @@ NTSTATUS FileSystem::GetSecurity(
     PSECURITY_DESCRIPTOR SecurityDescriptor,
     SIZE_T *PSecurityDescriptorSize)
 {
-    HANDLE Handle = HandleFromFileDesc(pFileDesc);
-    DWORD SecurityDescriptorSizeNeeded;
+    if(PSecurityDescriptorSize != nullptr){
 
-    if (!GetKernelObjectSecurity(Handle,
-        OWNER_SECURITY_INFORMATION | GROUP_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
-        SecurityDescriptor, (DWORD)*PSecurityDescriptorSize, &SecurityDescriptorSizeNeeded))
-    {
-        *PSecurityDescriptorSize = SecurityDescriptorSizeNeeded;
-        return NtStatusFromWin32(GetLastError());
-    }
+		if (this->security_size_ > *PSecurityDescriptorSize)
+        {
+            *PSecurityDescriptorSize = this->security_size_;
+            return STATUS_BUFFER_OVERFLOW;
+        }
+		*PSecurityDescriptorSize = this->security_size_;
+	}
 
-    *PSecurityDescriptorSize = SecurityDescriptorSizeNeeded;
+	if(SecurityDescriptor != nullptr){
+		solid_check(IsValidSecurityDescriptor((PSECURITY_DESCRIPTOR )psecurity_data_));
+		memcpy(SecurityDescriptor, this->psecurity_data_, this->security_size_);
+	}
 
     return STATUS_SUCCESS;
 }
@@ -1238,28 +1116,49 @@ NTSTATUS FileSystem::SetSecurity(
     SECURITY_INFORMATION SecurityInformation,
     PSECURITY_DESCRIPTOR ModificationDescriptor)
 {
-    HANDLE Handle = HandleFromFileDesc(pFileDesc);
-
-    if (!SetKernelObjectSecurity(Handle, SecurityInformation, ModificationDescriptor))
-        return NtStatusFromWin32(GetLastError());
-
-    return STATUS_SUCCESS;
+    return STATUS_UNSUCCESSFUL;
 }
 
 NTSTATUS FileSystem::ReadDirectory(
     PVOID FileNode,
-    PVOID FileDesc0,
+    PVOID pFileDesc,
     PWSTR Pattern,
     PWSTR Marker,
     PVOID Buffer,
     ULONG Length,
     PULONG PBytesTransferred)
 {
-    FileDesc *pFileDesc = (FileDesc *)FileDesc0;
-    return BufferedReadDirectory(&pFileDesc->DirBuffer,
-        FileNode, pFileDesc, Pattern, Marker, Buffer, Length, PBytesTransferred);
+    return static_cast<Descriptor*>(pFileDesc)->readDirectory(*this,  FileNode, Pattern, Marker, Buffer, Length, PBytesTransferred);
 }
 
+NTSTATUS FileSystem::ReadDirectoryEntry(
+    PVOID FileNode,
+    PVOID pFileDesc,
+    PWSTR Pattern,
+    PWSTR Marker,
+    PVOID *PContext,
+    DirInfo *DirInfo)
+{
+	return static_cast<Descriptor*>(pFileDesc)->readDirectoryEntry(*this, Pattern, Marker, PContext, DirInfo);
+}
+
+//-----------------------------------------------------------------------------
+
+NTSTATUS FileSystem::rootInfo(FileInfo& _rinfo){
+}
+
+NTSTATUS FileSystem::rootEntry(
+    PWSTR    Pattern,
+    PWSTR    Marker,
+    PVOID*   PContext,
+    DirInfo* DirInfo)
+{
+
+}
+
+//-----------------------------------------------------------------------------
+
+#if 0
 NTSTATUS FileSystem::ReadDirectoryEntry(
     PVOID FileNode,
     PVOID FileDesc0,
@@ -1327,5 +1226,5 @@ NTSTATUS FileSystem::ReadDirectoryEntry(
 
     return STATUS_SUCCESS;
 }
-
+#endif
 }//namespace

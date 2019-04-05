@@ -5,6 +5,12 @@ set(CMAKE_AUTOMOC ON)
 # Create code from a list of Qt designer ui files
 set(CMAKE_AUTOUIC ON)
 
+set(Qt5Widgets_DIR ${QT5PREFIX_DIR}/Qt5Widgets)
+set(Qt5Core_DIR ${QT5PREFIX_DIR}/Qt5Core)
+set(Qt5Gui_DIR ${QT5PREFIX_DIR}/Qt5Gui)
+
+message("Finding Qt5 from ${Qt5Widgets_DIR}")
+
 find_package (Qt5Core)
 find_package (Qt5Gui)
 find_package (Qt5Widgets)

@@ -22,8 +22,11 @@ endif()
 
 string(TOLOWER "${CMAKE_BUILD_TYPE}" CMAKE_BUILD_TYPE)
 
+set(QT5PREFIX_DIR "" CACHE PATH "QT Prefix directory")
 set(CMAKE_CONFIGURATION_TYPES "release" CACHE STRING "" FORCE)
 set(CONFIGURATION_TYPE "release")
+
+message("project build type: ${CMAKE_BUILD_TYPE}")
 
 if(CMAKE_BUILD_TYPE STREQUAL "debug")
     #force a single configuration type on Windows builds
