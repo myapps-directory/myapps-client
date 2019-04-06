@@ -455,7 +455,7 @@ void handle_list_store(istream& _ris, Engine &_reng){
         if(_rrecv_msg_ptr && _rrecv_msg_ptr->error_ == 0){
             cout<<"{\n";
             for(const auto& node: _rrecv_msg_ptr->node_dq_){
-                cout<<'\t'<<node.name_<<endl;
+                cout<<'\t'<<node.name_<<'\t'<<node.size_<<endl;
             }
             cout<<"}"<<endl;
         }else if(!_rrecv_msg_ptr){
