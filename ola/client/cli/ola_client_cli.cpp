@@ -187,8 +187,8 @@ int main(int argc, char* argv[])
     }
     AioSchedulerT          scheduler;
     frame::Manager         manager;
-    FunctionWorkPool<>     fwp{WorkPoolConfiguration()};
-    frame::aio::Resolver   resolver(fwp);
+    CallPool<void()>       cwp{WorkPoolConfiguration(), 1};
+    frame::aio::Resolver   resolver(cwp);
     frame::mprpc::ServiceT rpc_service(manager);
     Engine                 engine(rpc_service, params);
 
