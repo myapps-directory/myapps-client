@@ -490,15 +490,17 @@ void handle_list(istream& _ris, Engine &_reng){
 //  Fetch
 //-----------------------------------------------------------------------------
 
-ostream& operator<<(ostream &_ros, const utility::AppConfig &_cfg){
-    _ros<<"Name : "<<_cfg.name_<<endl;
-    _ros<<"Short: "<<_cfg.short_description_<<endl;
-    _ros<<"Desc : "<<_cfg.description_<<endl;
-    _ros<<"Names: ";
-    for(const auto& p: _cfg.name_vec_){
+ostream& operator<<(ostream &_ros, const utility::Application &_cfg){
+    _ros<<"Dictionary:{";
+    for(const auto& p: _cfg.dictionary_dq_){
         _ros<<"{["<<p.first<<"]["<<p.second<<"]} ";
     }
-    _ros<<endl;
+    _ros<<'}'<<endl;
+    _ros<<"Properties:{";
+    for(const auto& p: _cfg.property_vec_){
+        _ros<<"{["<<p.first<<"]["<<p.second<<"]} ";
+    }
+    _ros<<'}'<<endl;
     return _ros;
 }
 
@@ -525,7 +527,7 @@ void handle_fetch_app(istream& _ris, Engine &_reng){
                 cout<<utility::base64_encode(build_id)<<endl;
             }
             cout<<endl;
-            cout<<_rrecv_msg_ptr->config_;
+            cout<<_rrecv_msg_ptr->application_;
             cout<<endl;
             cout<<"}"<<endl;
         }else if(!_rrecv_msg_ptr){
@@ -542,11 +544,16 @@ void handle_fetch_app(istream& _ris, Engine &_reng){
 
 //-----------------------------------------------------------------------------
 
-ostream& operator<<(ostream &_ros, const utility::BuildConfig &_cfg){
+ostream& operator<<(ostream &_ros, const utility::Build &_cfg){
     _ros<<"Name : "<<_cfg.name_<<endl;
     _ros<<"Tag: "<<_cfg.tag_<<endl;
+    _ros<<"Properties:{";
+    for(const auto& p: _cfg.property_vec_){
+        _ros<<"{["<<p.first<<"]["<<p.second<<"]} ";
+    }
+    _ros<<'}'<<endl;
     _ros<<"Components: {\n";
-    for(const auto& c: _cfg.component_vec_){
+    for(const auto& c: _cfg.configuration_vec_){
         _ros<<"Name: "<<c.name_<<endl;
         _ros<<"Oses: ";
         for(const auto &o: c.os_vec_){
@@ -572,6 +579,11 @@ ostream& operator<<(ostream &_ros, const utility::BuildConfig &_cfg){
             _ros<<endl;
         }
         _ros<<"}\n";
+        _ros<<"Properties:{";
+        for(const auto& p: _cfg.property_vec_){
+            _ros<<"{["<<p.first<<"]["<<p.second<<"]} ";
+        }
+        _ros<<"}\n";
     }
     _ros<<'}'<<endl;
     return _ros;
@@ -582,8 +594,6 @@ void handle_fetch_build(istream& _ris, Engine &_reng){
     
     _ris>>req_ptr->app_id_;
     _ris>>req_ptr->build_id_;
-    _ris>>req_ptr->lang_;
-    _ris>>req_ptr->os_id_;
     
     req_ptr->app_id_ = utility::base64_decode(req_ptr->app_id_);
     req_ptr->build_id_ = utility::base64_decode(req_ptr->build_id_);
@@ -599,7 +609,7 @@ void handle_fetch_build(istream& _ris, Engine &_reng){
         if(_rrecv_msg_ptr && _rrecv_msg_ptr->error_ == 0){
             cout<<"{\n";
             cout<<"Remote Root: "<<utility::base64_encode(_rrecv_msg_ptr->storage_id_)<<endl;
-            cout<<_rrecv_msg_ptr->config_;
+            cout<<_rrecv_msg_ptr->build_;
             cout<<endl;
             cout<<"}"<<endl;
         }else if(!_rrecv_msg_ptr){
@@ -631,8 +641,8 @@ void handle_fetch(istream& _ris, Engine& _reng){
 //  Create
 //-----------------------------------------------------------------------------
 
-bool load_app_config(ola::utility::AppConfig &_rcfg, const string &_path);
-bool store_app_config(const ola::utility::AppConfig &_rcfg, const string &_path);
+bool load_app_config(ola::utility::Application &_rcfg, const string &_path);
+bool store_app_config(const ola::utility::Application &_rcfg, const string &_path);
 string generate_temp_name();
 
 void handle_create_app ( istream& _ris, Engine &_reng){
@@ -641,7 +651,7 @@ void handle_create_app ( istream& _ris, Engine &_reng){
     
     auto req_ptr = make_shared<CreateAppRequest>();
     
-    if(!load_app_config(req_ptr->config_, path(config_path))){
+    if(!load_app_config(req_ptr->application_, path(config_path))){
         return;
     }
     
@@ -674,8 +684,8 @@ void handle_create_app ( istream& _ris, Engine &_reng){
 
 //-----------------------------------------------------------------------------
 
-bool load_build_config(ola::utility::BuildConfig &_rbuild_cfg, const string &_path);
-bool store_build_config(const ola::utility::BuildConfig &_rbuild_cfg, const string &_path);
+bool load_build_config(ola::utility::Build &_rbuild_cfg, const string &_path);
+bool store_build_config(const ola::utility::Build &_rbuild_cfg, const string &_path);
 
 bool zip_create(const string &_zip_path, string _root, uint64_t &_rsize);
 
@@ -752,7 +762,7 @@ void handle_create_build(istream& _ris, Engine &_reng){
     
     req_ptr->app_id_ = ola::utility::base64_decode(req_ptr->app_id_);
     
-    if(!load_build_config(req_ptr->config_, path(config_path))){
+    if(!load_build_config(req_ptr->build_, path(config_path))){
         return;
     }
     
@@ -860,14 +870,21 @@ void handle_generate_app(istream& _ris, Engine &_reng){
     string config_path;
     _ris>>config_path;
     
-    ola::utility::AppConfig cfg;
-    cfg.name_ = "generic_name";
-    cfg.description_ = "multi-line app description";
-    cfg.short_description_ = "short single line app description";
-    cfg.name_vec_.emplace_back(make_pair("name_en", "generic_name"));
+    ola::utility::Application cfg;
+    
+    cfg.dictionary_dq_ = {
+        {"", "en-US"},
+        {"NAME", "bubbles"},
+        {"", "ro-RO"},
+        {"NAME", "bule"}
+    };
+    
+    cfg.property_vec_ = {
+        {"name", "${NAME}"}
+    };
     store_app_config(cfg, path(config_path));
     {
-        ola::utility::AppConfig cfg_check;
+        ola::utility::Application cfg_check;
         load_app_config(cfg_check, path(config_path));
         solid_check(cfg == cfg_check);
     }
@@ -879,14 +896,26 @@ void handle_generate_buid(istream& _ris, Engine &_reng){
     string config_path;
     _ris>>config_path;
     
-    ola::utility::BuildConfig cfg;
+    ola::utility::Build cfg;
     
     cfg.name_ = "windows";
     cfg.tag_ = "r1.3";
-    cfg.component_vec_ = ola::utility::BuildConfig::ComponentVectorT{
+    
+    cfg.dictionary_dq_ = {
+        {"", "en-US"},
+        {"NAME", "Bubbles"},
+        {"", "ro-RO"},
+        {"NAME", "Bule"}
+    };
+    
+    cfg.property_vec_ = {
+        {"name", "${NAME}"}
+    };
+    cfg.configuration_vec_ = ola::utility::Build::ConfigurationVectorT{
         {
             {
                 "windows32bit",
+                "${NAME}",//directory
                 {"Windows10x86_32", "Windows10x86_64"},
                 {{"bin", "bin32"}, {"lib", "lib32"}},
                 {"bin/bubbles.exe"},
@@ -897,10 +926,12 @@ void handle_generate_buid(istream& _ris, Engine &_reng){
                         "bin",
                         "bubbles_icon"
                     }
-                }
+                },
+                {{"prop1", "prop1 value"}}//properties
             },
             {
                 "windows64bit",
+                "${NAME}",
                 {"Windows10x86_64"},
                 {{"bin", "bin64"}, {"lib", "lib64"}},
                 {"bin/bubbles.exe"},
@@ -911,14 +942,15 @@ void handle_generate_buid(istream& _ris, Engine &_reng){
                         "bin",
                         "bubbles_icon"
                     }
-                }
+                },
+                {{"prop1", "prop1 value"}}//properties
             }
         }
     };
     
     store_build_config(cfg, path(config_path));
     {
-        ola::utility::BuildConfig cfg_check;
+        ola::utility::Build cfg_check;
         load_build_config(cfg_check, path(config_path));
         solid_check(cfg == cfg_check);
     }
@@ -1189,7 +1221,7 @@ bool read(string& _rs, istream& _ris, size_t _sz)
 
 //-----------------------------------------------------------------------------
 
-bool load_app_config(ola::utility::AppConfig &_rcfg, const string &_path){
+bool load_app_config(ola::utility::Application &_rcfg, const string &_path){
     using namespace libconfig;
     Config cfg;
     cfg.setOptions(Config::OptionFsync
@@ -1214,24 +1246,19 @@ bool load_app_config(ola::utility::AppConfig &_rcfg, const string &_path){
     
     Setting &root = cfg.getRoot();
     
-    if(!root.lookupValue("name", _rcfg.name_)){
-        cout<<"Error: app name not found in configuration"<<endl;
-        return false;
-    }
-    if(!root.lookupValue("description", _rcfg.description_)){
-        cout<<"Error: app description not found in configuration"<<endl;
-        return false;
-    }
-    if(!root.lookupValue("short_description", _rcfg.short_description_)){
-        cout<<"Error: app short_description not found in configuration"<<endl;
-        return false;
-    }
-    
-    if(root.exists("names")){
-        Setting &names = root.lookup("names");
+    if(root.exists("dictionary")){
+        Setting &names = root.lookup("dictionary");
         
         for(auto it = names.begin(); it != names.end(); ++it){
-            _rcfg.name_vec_.emplace_back(it->getName(), *it);
+            _rcfg.dictionary_dq_.emplace_back(it->getName(), *it);
+        }
+    }
+    
+    if(root.exists("properties")){
+        Setting &names = root.lookup("properties");
+        
+        for(auto it = names.begin(); it != names.end(); ++it){
+            _rcfg.property_vec_.emplace_back(it->getName(), *it);
         }
     }
 
@@ -1240,7 +1267,7 @@ bool load_app_config(ola::utility::AppConfig &_rcfg, const string &_path){
 
 //-----------------------------------------------------------------------------
 
-bool store_app_config(const ola::utility::AppConfig &_rcfg, const string &_path){
+bool store_app_config(const ola::utility::Application &_rcfg, const string &_path){
     using namespace libconfig;
     Config cfg;
     
@@ -1251,14 +1278,20 @@ bool store_app_config(const ola::utility::AppConfig &_rcfg, const string &_path)
     
     Setting &root = cfg.getRoot();
     
-    root.add("name", Setting::TypeString) = _rcfg.name_;
-    root.add("description", Setting::TypeString) = _rcfg.description_;
-    root.add("short_description", Setting::TypeString) = _rcfg.short_description_;
+    {
+        Setting &names = root.add("dictionary", Setting::TypeGroup);
+        
+        for(auto v: _rcfg.dictionary_dq_){
+            names.add(v.first, Setting::TypeString) = v.second;
+        }
+    }
     
-    Setting &names = root.add("names", Setting::TypeGroup);
-    
-    for(auto v: _rcfg.name_vec_){
-        names.add(v.first, Setting::TypeString) = v.second;
+    {
+        Setting &names = root.add("properties", Setting::TypeGroup);
+        
+        for(auto v: _rcfg.property_vec_){
+            names.add(v.first, Setting::TypeString) = v.second;
+        }
     }
     
     try
@@ -1276,7 +1309,7 @@ bool store_app_config(const ola::utility::AppConfig &_rcfg, const string &_path)
 
 //-----------------------------------------------------------------------------
 
-bool load_build_config(ola::utility::BuildConfig &_rcfg, const string &_path){
+bool load_build_config(ola::utility::Build &_rcfg, const string &_path){
     using namespace libconfig;
     Config cfg;
     cfg.setOptions(Config::OptionFsync
@@ -1314,7 +1347,7 @@ bool load_build_config(ola::utility::BuildConfig &_rcfg, const string &_path){
     if(root.exists("components")){
         Setting &components = root.lookup("components");
         for(auto it = components.begin(); it != components.end(); ++it){
-            ola::utility::BuildConfig::Component c;
+            ola::utility::Build::Configuration c;
             
             if(!it->lookupValue("name", c.name_)){
                 cout<<"Error: component name not found in configuration"<<endl;
@@ -1362,7 +1395,7 @@ bool load_build_config(ola::utility::BuildConfig &_rcfg, const string &_path){
                 Setting &shortcuts = it->lookup("shortcuts");
                 
                 for(auto it = shortcuts.begin(); it != shortcuts.end(); ++it){
-                    ola::utility::BuildConfig::Shortcut s;
+                    ola::utility::Build::Shortcut s;
                     
                     it->lookupValue("name", s.name_);
                     it->lookupValue("command", s.command_);
@@ -1376,7 +1409,7 @@ bool load_build_config(ola::utility::BuildConfig &_rcfg, const string &_path){
                 return false;
             }
             
-            _rcfg.component_vec_.emplace_back(std::move(c));
+            _rcfg.configuration_vec_.emplace_back(std::move(c));
         }
     }else{
         cout<<"Error: no component found"<<endl;
@@ -1387,7 +1420,7 @@ bool load_build_config(ola::utility::BuildConfig &_rcfg, const string &_path){
 
 //-----------------------------------------------------------------------------
 
-bool store_build_config(const ola::utility::BuildConfig &_rcfg, const string &_path){
+bool store_build_config(const ola::utility::Build &_rcfg, const string &_path){
     using namespace libconfig;
     Config cfg;
     
@@ -1403,7 +1436,7 @@ bool store_build_config(const ola::utility::BuildConfig &_rcfg, const string &_p
     
     Setting &os_specific = root.add("components", Setting::TypeList);
     
-    for(const auto &component: _rcfg.component_vec_){
+    for(const auto &component: _rcfg.configuration_vec_){
         Setting &cmp_g = os_specific.add(Setting::TypeGroup);
         {
             cmp_g.add("name", Setting::TypeString) = component.name_;
