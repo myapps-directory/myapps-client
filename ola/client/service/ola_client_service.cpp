@@ -199,15 +199,6 @@ private:
         PWSTR    Marker,
         PVOID*   PContext,
         DirInfo* DirInfo) override;
-
-private:
-    friend class RootDescriptor;
-    NTSTATUS rootInfo(FileInfo&);
-    NTSTATUS rootEntry(
-        PWSTR    Pattern,
-        PWSTR    Marker,
-        PVOID*   PContext,
-        DirInfo* DirInfo);
 };
 
 class FileSystemService final : public Service {
@@ -662,151 +653,33 @@ NTSTATUS error_to_status(const ErrorE _err) {
 	};
 }
 
+uint32_t entry_type_to_attributes(ola::client::service::EntryTypeE _entry_type){
+	using ola::client::service::EntryTypeE;
+	uint32_t attr = 0;
+	switch(_entry_type){
+		case EntryTypeE::Directory:
+			attr |= FILE_ATTRIBUTE_DIRECTORY;
+			break;
+		case EntryTypeE::File:
+			attr |= FILE_ATTRIBUTE_NORMAL;
+			break;
+	}
+	return attr;
+}
+
 struct Descriptor
 {
-    virtual ~Descriptor(){}
+	using EntryIdT = ola::client::service::EntryIdT;
 
-	virtual NTSTATUS info(FileSystem&, FileSystem::FileInfo&) = 0;
-	
-	virtual NTSTATUS read(
-		FileSystem &,
-		PVOID Buffer,
-		UINT64 Offset,
-		ULONG Length,
-		PULONG PBytesTransferred)
-	{
-		solid_throw("invalid call");
-		return STATUS_UNSUCCESSFUL;
-	}
-	
-	virtual NTSTATUS readDirectory(
-		FileSystem &,
-		PVOID FileNode,
-		PWSTR Pattern,
-		PWSTR Marker,
-		PVOID Buffer,
-		ULONG Length,
-		PULONG PBytesTransferred)
-	{
-		solid_throw("invalid call");
-		return STATUS_UNSUCCESSFUL;
+    PVOID  DirBuffer = nullptr;
+	EntryIdT	entry_id_;
+
+	~Descriptor(){
+		FileSystem::DeleteDirectoryBuffer(&DirBuffer);
 	}
 
-	virtual NTSTATUS readDirectoryEntry(
-		FileSystem &,
-		PWSTR Pattern,
-		PWSTR Marker,
-		PVOID *PContext,
-		FileSystem::DirInfo *DirInfo)
-	{
-		solid_throw("invalid call");
-		return STATUS_UNSUCCESSFUL;
-	}
-};
-
-class DirectoryDescriptor : Descriptor {
-	PVOID  DirBuffer;
-private:
-	NTSTATUS readDirectory(
-		FileSystem &_rfs,
-		PVOID FileNode,
-		PWSTR Pattern,
-		PWSTR Marker,
-		PVOID Buffer,
-		ULONG Length,
-		PULONG PBytesTransferred) override
-	{
-		return _rfs.BufferedReadDirectory(&DirBuffer,
-		    FileNode, this, Pattern, Marker, Buffer, Length, PBytesTransferred);
-	}
-};
-
-class RootDescriptor final : DirectoryDescriptor {
-	NTSTATUS info(FileSystem&_rfs, FileSystem::FileInfo& _rfi) override{
-		return _rfs.rootInfo(_rfi);
-	}
-
-	NTSTATUS readDirectoryEntry(
-		FileSystem &_rfs,
-		PWSTR Pattern,
-		PWSTR Marker,
-		PVOID *PContext,
-		FileSystem::DirInfo *DirInfo)
-	{
-		return _rfs.rootEntry(Pattern, Marker,PContext, DirInfo);
-	}
-};
-
-class ApplicationDescriptor final : DirectoryDescriptor {
-	NTSTATUS info(FileSystem&, FileSystem::FileInfo&) override{
-		solid_throw("TODO");
-		return STATUS_UNSUCCESSFUL;
-	}
-
-	NTSTATUS readDirectoryEntry(
-		FileSystem &,
-		PWSTR Pattern,
-		PWSTR Marker,
-		PVOID *PContext,
-		FileSystem::DirInfo *DirInfo)
-	{
-		
-	}
-};
-
-class SubDirectoryDescriptor final : DirectoryDescriptor {
-	NTSTATUS info(FileSystem&, FileSystem::FileInfo&) override{
-		solid_throw("TODO");
-		return STATUS_UNSUCCESSFUL;
-	}
-
-	NTSTATUS readDirectoryEntry(
-		FileSystem &,
-		PWSTR Pattern,
-		PWSTR Marker,
-		PVOID *PContext,
-		FileSystem::DirInfo *DirInfo)
-	{
-		solid_throw("TODO");
-		return STATUS_UNSUCCESSFUL;
-	}
-};
-
-
-
-class ShortcutDescriptor final : Descriptor {
-	NTSTATUS info(FileSystem&, FileSystem::FileInfo&) override{
-		solid_throw("TODO");
-		return STATUS_UNSUCCESSFUL;
-	}
-	
-	NTSTATUS read(
-		FileSystem &,
-		PVOID Buffer,
-		UINT64 Offset,
-		ULONG Length,
-		PULONG PBytesTransferred) override
-	{
-		solid_throw("TODO");
-		return STATUS_UNSUCCESSFUL;
-	}
-};
-
-class FileDescriptor final : Descriptor {
-	NTSTATUS info(FileSystem&, FileSystem::FileInfo&) override{
-		solid_throw("TODO");
-		return STATUS_UNSUCCESSFUL;
-	}
-	
-	NTSTATUS read(
-		FileSystem &,
-		PVOID Buffer,
-		UINT64 Offset,
-		ULONG Length,
-		PULONG PBytesTransferred) override
-	{
-		solid_throw("TODO");
-		return STATUS_UNSUCCESSFUL;
+	void clear(){
+		entry_id_.clear();
 	}
 };
 
@@ -959,22 +832,15 @@ NTSTATUS FileSystem::Open(
     PVOID *PFileDesc,
     OpenFileInfo *OpenFileInfo)
 {
-	Descriptor *pdesc = nullptr;
-	if(FileName[0] == L'\\' && FileName[1] == L'\0'){
-		pdesc = new RootDescriptor;
-	}else if(){
-	}
+	Descriptor *pdesc = new Descriptor;
 
-	const auto stat = pdesc->info(*this, OpenFileInfo->FileInfo);
-
-	if(stat != STATUS_SUCCESS){
+	if(engine().entry(FileName, pdesc->entry_id_)){
+		*PFileDesc = pdesc;
+		return GetFileInfo(PFileNode, pdesc, &OpenFileInfo->FileInfo);
+	}else{
 		delete pdesc;
-		pdesc = nullptr;
+		return STATUS_OBJECT_NAME_INVALID;
 	}
-
-	*PFileDesc = pdesc;
-
-    return stat;
 }
 
 NTSTATUS FileSystem::Overwrite(
@@ -994,7 +860,10 @@ VOID FileSystem::Cleanup(
     PWSTR FileName,
     ULONG Flags)
 {
-    
+    if (Flags & CleanupDelete) {
+		auto pdesc = static_cast<Descriptor*>(pFileDesc);
+        pdesc->clear();
+    }
 }
 
 VOID FileSystem::Close(
@@ -1012,7 +881,7 @@ NTSTATUS FileSystem::Read(
     ULONG Length,
     PULONG PBytesTransferred)
 {
-    return static_cast<Descriptor*>(pFileDesc)->read(*this, Buffer, Offset, Length, PBytesTransferred);
+    return STATUS_UNSUCCESSFUL;
 }
 
 NTSTATUS FileSystem::Write(
@@ -1042,7 +911,27 @@ NTSTATUS FileSystem::GetFileInfo(
     PVOID pFileDesc,
     FileInfo *FileInfo)
 {
-    return static_cast<Descriptor*>(pFileDesc)->info(*this, *FileInfo);
+	using ola::client::service::EntryTypeE;
+	auto pdesc = static_cast<Descriptor*>(pFileDesc);
+	EntryTypeE entry_type;
+	uint64_t size = 0;
+	wstring  name;
+
+	engine().entry(pdesc->entry_id_, size, entry_type);
+
+	FileInfo->FileAttributes = FILE_ATTRIBUTE_READONLY | entry_type_to_attributes(entry_type);
+    FileInfo->ReparseTag     = 0;
+    FileInfo->FileSize       = size;
+    FileInfo->AllocationSize = (FileInfo->FileSize + ALLOCATION_UNIT - 1)
+        / ALLOCATION_UNIT * ALLOCATION_UNIT;
+    FileInfo->CreationTime   = base_time_;
+    FileInfo->LastAccessTime = base_time_;
+    FileInfo->LastWriteTime  = base_time_;
+    FileInfo->ChangeTime     = FileInfo->LastWriteTime;
+    FileInfo->IndexNumber    = 0;
+    FileInfo->HardLinks      = 0;
+
+    return STATUS_SUCCESS;
 }
 
 NTSTATUS FileSystem::SetBasicInfo(
@@ -1128,7 +1017,10 @@ NTSTATUS FileSystem::ReadDirectory(
     ULONG Length,
     PULONG PBytesTransferred)
 {
-    return static_cast<Descriptor*>(pFileDesc)->readDirectory(*this,  FileNode, Pattern, Marker, Buffer, Length, PBytesTransferred);
+	auto pdesc = static_cast<Descriptor*>(pFileDesc);
+    //return static_cast<Descriptor*>(pFileDesc)->readDirectory(*this,  FileNode, Pattern, Marker, Buffer, Length, PBytesTransferred);
+	return BufferedReadDirectory(&pdesc->DirBuffer,
+		    FileNode, pdesc, Pattern, Marker, Buffer, Length, PBytesTransferred);
 }
 
 NTSTATUS FileSystem::ReadDirectoryEntry(
@@ -1139,22 +1031,52 @@ NTSTATUS FileSystem::ReadDirectoryEntry(
     PVOID *PContext,
     DirInfo *DirInfo)
 {
-	return static_cast<Descriptor*>(pFileDesc)->readDirectoryEntry(*this, Pattern, Marker, PContext, DirInfo);
+	using namespace ola::client::service;
+	PVOID &rvctx = *PContext;
+	size_t &rctx = reinterpret_cast<size_t&>(rvctx);
+	wstring	  name;
+	uint64_t	  size = 0;
+	uint32_t  attributes = FILE_ATTRIBUTE_READONLY;
+	auto pdesc = static_cast<Descriptor*>(pFileDesc);
+	EntryTypeE	entry_type;
+
+	if(rctx == 0){
+		//.
+		name = L".";
+		attributes |= FILE_ATTRIBUTE_DIRECTORY;
+		++rctx;
+	}else if(rctx == 1){
+		name = L"..";
+		attributes |= FILE_ATTRIBUTE_DIRECTORY;
+		++rctx;
+	}else if(engine().entry(pdesc->entry_id_ , rctx -= 2, name, size, entry_type)){
+		rctx += 2;
+
+		attributes |= entry_type_to_attributes(entry_type);
+	}else{
+		rctx += 2;
+		return STATUS_NO_MORE_FILES;
+	}
+
+	memset(DirInfo, 0, sizeof *DirInfo);
+    
+    DirInfo->Size = (UINT16)(FIELD_OFFSET(FileSystem::DirInfo, FileNameBuf) + name.size() * sizeof(WCHAR));
+    DirInfo->FileInfo.FileAttributes = attributes;
+    DirInfo->FileInfo.ReparseTag = 0;
+    DirInfo->FileInfo.FileSize = size;
+    DirInfo->FileInfo.AllocationSize = (size + ALLOCATION_UNIT - 1) / ALLOCATION_UNIT * ALLOCATION_UNIT;
+    DirInfo->FileInfo.CreationTime = base_time_;
+    DirInfo->FileInfo.LastAccessTime = base_time_;
+    DirInfo->FileInfo.LastWriteTime = base_time_;
+    DirInfo->FileInfo.ChangeTime = DirInfo->FileInfo.LastWriteTime;
+    DirInfo->FileInfo.IndexNumber = 0;
+    DirInfo->FileInfo.HardLinks = 0;
+    memcpy(DirInfo->FileNameBuf, name.c_str(), name.size() * sizeof(WCHAR));
+	return STATUS_SUCCESS;
 }
+
 
 //-----------------------------------------------------------------------------
-
-NTSTATUS FileSystem::rootInfo(FileInfo& _rinfo){
-}
-
-NTSTATUS FileSystem::rootEntry(
-    PWSTR    Pattern,
-    PWSTR    Marker,
-    PVOID*   PContext,
-    DirInfo* DirInfo)
-{
-
-}
 
 //-----------------------------------------------------------------------------
 

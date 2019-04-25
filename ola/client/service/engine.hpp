@@ -3,10 +3,18 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include "ola/client/utility/arrvec.hpp"
 
 namespace ola {
 namespace client {
 namespace service {
+
+using EntryIdT = ola::client::utility::ArrVec<16, size_t>;
+
+enum struct EntryTypeE {
+	Directory,
+	File
+};
 
 struct GuiProtocolSetup;
 
@@ -38,6 +46,10 @@ public:
     ~Engine();
     void start(const Configuration& _rcfg);
     void stop();
+
+	bool entry(const EntryIdT& _entry_id, size_t& _rcrt, std::wstring& _rname, uint64_t& _rsize, EntryTypeE& _rentry_type);
+    bool entry(const wchar_t* _path, EntryIdT& _entry_id);
+    bool entry(const EntryIdT& _entry_id, uint64_t& _rsize, EntryTypeE& _rentry_type);
 };
 
 } //namespace service

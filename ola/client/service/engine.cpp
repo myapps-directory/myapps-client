@@ -79,11 +79,15 @@ public:
         frame::mprpc::ConnectionContext& _rctx,
         gui::RegisterRequest&            _rmsg);
     void loadAuthData();
+    
+	void onFrontListAppsResponse(
+        frame::mprpc::ConnectionContext&          _ctx,
+        std::shared_ptr<front::ListAppsResponse>& _rrecv_msg_ptr);
 
 private:
-    void getAuthToken(const frame::mprpc::RecipientId& _recipient_id, string& _rtoken, const string const* _ptoken = nullptr);
+    void getAuthToken(const frame::mprpc::RecipientId& _recipient_id, string& _rtoken, const string* const _ptoken = nullptr);
 
-    void tryAuthenticate(frame::mprpc::ConnectionContext& _ctx, const string const* _ptoken = nullptr);
+    void tryAuthenticate(frame::mprpc::ConnectionContext& _ctx, const string* const _ptoken = nullptr);
 
     bf::path authDataDirectoryPath() const
     {
@@ -209,6 +213,23 @@ void Engine::start(const Configuration& _rcfg)
 
     auto err = pimpl_->front_rpc_service_.createConnectionPool(_rcfg.front_endpoint_.c_str(), 1);
     solid_check(!err, "creating connection pool: " << err.message());
+
+    if (!err) {
+        auto lambda = [pimpl = pimpl_.get()](
+                          frame::mprpc::ConnectionContext&          _rctx,
+                          std::shared_ptr<front::ListAppsRequest>&  _rsent_msg_ptr,
+                          std::shared_ptr<front::ListAppsResponse>& _rrecv_msg_ptr,
+                          ErrorConditionT const&                    _rerror) {
+            if (_rrecv_msg_ptr) {
+                pimpl->onFrontListAppsResponse(_rctx, _rrecv_msg_ptr);
+            }
+        };
+
+        auto req_ptr     = make_shared<ListAppsRequest>();
+        req_ptr->choice_ = 'o';
+
+        pimpl_->front_rpc_service_.sendRequest(_rcfg.front_endpoint_.c_str(), req_ptr, lambda);
+    }
 }
 
 void Engine::stop()
@@ -216,9 +237,35 @@ void Engine::stop()
     pimpl_.reset(nullptr);
 }
 
+bool Engine::entry(const EntryIdT& _entry_id, size_t& _rcrt, std::wstring& _rname, uint64_t& _rsize, EntryTypeE& _rentry_type)
+{
+
+    return false;
+}
+bool Engine::entry(const wchar_t* _path, EntryIdT& _entry_id)
+{
+    if (_path[0] == L'\\' && _path[1] == L'\0') {
+        return true;
+    }
+    return false;
+}
+bool Engine::entry(const EntryIdT& _entry_id, uint64_t& _rsize, EntryTypeE& _rentry_type)
+{
+    if (_entry_id.empty()) {
+        //root
+        _rentry_type = EntryTypeE::Directory;
+        _rsize       = 0;
+        return true;
+    } else if (_entry_id.size() == 1) {
+
+    } else {
+    }
+    return false;
+}
+
 // -- Implementation --------------------------------------------------------------------
 
-void Engine::Implementation::getAuthToken(const frame::mprpc::RecipientId& _recipient_id, string& _rtoken, const string const* _ptoken)
+void Engine::Implementation::getAuthToken(const frame::mprpc::RecipientId& _recipient_id, string& _rtoken, const string* const _ptoken)
 {
     bool start_gui = false;
     {
@@ -240,7 +287,7 @@ void Engine::Implementation::getAuthToken(const frame::mprpc::RecipientId& _reci
     }
 }
 
-void Engine::Implementation::tryAuthenticate(frame::mprpc::ConnectionContext& _ctx, const string const* _ptoken)
+void Engine::Implementation::tryAuthenticate(frame::mprpc::ConnectionContext& _ctx, const string* const _ptoken)
 {
     string auth_token;
     getAuthToken(_ctx.recipientId(), auth_token, _ptoken);
@@ -384,6 +431,13 @@ void Engine::Implementation::storeAuthData(const string& _user, const string& _t
     } else {
         solid_log(logger, Error, "Failed storing auth data to: " << path.generic_string());
     }
+}
+
+void Engine::Implementation::onFrontListAppsResponse(
+    frame::mprpc::ConnectionContext&          _ctx,
+    std::shared_ptr<front::ListAppsResponse>& _rrecv_msg_ptr)
+{
+
 }
 
 } //namespace service
