@@ -357,7 +357,11 @@ void handle_help(istream& _ris, Engine &_reng){
     cout<<"> generate app ~/path/to/app.cfg\n\n";
     cout<<"> generate build ~/path/to/build.cfg\n\n";
     cout<<"> create app ~/path/to/app.cfg\n\n";
-    cout<<"> create build APP_ID BUILD_TAG ~/path/to/build.cfg ~/path/to/build_folder\r\n";
+    cout<<"> create build APP_ID BUILD_TAG ~/path/to/build.cfg ~/path/to/build_folder\n";
+    cout<<"\nExamples:\n:";
+    cout<<"> create app bubbles.app\n";
+    cout<<"> create build l/AQPpeZWqoR1Fcngt3t2w== first bubbles.bld ~/tmp/bubbles_client\n";
+    cout<<"> fetch config l/AQPpeZWqoR1Fcngt3t2w== en-US Windows10x86_64 desc\n";
     cout<<endl;
 }
 
