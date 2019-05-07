@@ -44,6 +44,7 @@
 
 using namespace Fsp;
 using namespace std;
+using namespace ola::client;
 
 namespace {
 
@@ -653,20 +654,21 @@ NTSTATUS error_to_status(const ErrorE _err) {
 	};
 }
 
-uint32_t entry_type_to_attributes(ola::client::service::EntryTypeE _entry_type){
-	using ola::client::service::EntryTypeE;
+uint32_t node_type_to_attributes(ola::client::service::NodeTypeE _node_type){
+	using ola::client::service::NodeTypeE;
 	uint32_t attr = 0;
-	switch(_entry_type){
-		case EntryTypeE::Directory:
+	switch(_node_type){
+		case NodeTypeE::Directory:
 			attr |= FILE_ATTRIBUTE_DIRECTORY;
 			break;
-		case EntryTypeE::File:
+		case NodeTypeE::File:
 			attr |= FILE_ATTRIBUTE_NORMAL;
 			break;
 	}
 	return attr;
 }
 
+#if 0
 struct Descriptor
 {
 	using EntryIdT = ola::client::service::EntryIdT;
@@ -682,7 +684,7 @@ struct Descriptor
 		entry_id_.clear();
 	}
 };
-
+#endif
 //-----------------------------------------------------------------------------
 
 FileSystem::FileSystem(ola::client::service::Engine &_rengine) :  rengine_(_rengine)
@@ -832,15 +834,14 @@ NTSTATUS FileSystem::Open(
     PVOID *PFileDesc,
     OpenFileInfo *OpenFileInfo)
 {
-	Descriptor *pdesc = new Descriptor;
 
-	if(engine().entry(FileName, pdesc->entry_id_)){
-		*PFileDesc = pdesc;
-		return GetFileInfo(PFileNode, pdesc, &OpenFileInfo->FileInfo);
-	}else{
-		delete pdesc;
-		return STATUS_OBJECT_NAME_INVALID;
-	}
+    *PFileNode = engine().open(FileName);
+
+    if(*PFileNode != nullptr){
+        return GetFileInfo(*PFileNode, *PFileDesc, &OpenFileInfo->FileInfo);
+    }else{
+        return STATUS_OBJECT_NAME_INVALID;
+    }
 }
 
 NTSTATUS FileSystem::Overwrite(
@@ -855,14 +856,14 @@ NTSTATUS FileSystem::Overwrite(
 }
 
 VOID FileSystem::Cleanup(
-    PVOID FileNode,
+    PVOID /*pFileNode*/,
     PVOID pFileDesc,
     PWSTR FileName,
     ULONG Flags)
 {
     if (Flags & CleanupDelete) {
-		auto pdesc = static_cast<Descriptor*>(pFileDesc);
-        pdesc->clear();
+		//NOTE: it might never be called for read-only filesystems
+        engine().cleanup(static_cast<service::Descriptor*>(pFileDesc));
     }
 }
 
@@ -870,7 +871,10 @@ VOID FileSystem::Close(
     PVOID pFileNode,
     PVOID pFileDesc)
 {
-	delete static_cast<Descriptor*>(pFileDesc);
+    PVOID &dir_buf = engine().buffer(*static_cast<service::Descriptor*>(pFileDesc));
+    FileSystem::DeleteDirectoryBuffer(&dir_buf);
+    dir_buf = nullptr;
+	engine().close(static_cast<service::Descriptor*>(pFileDesc));
 }
 
 NTSTATUS FileSystem::Read(
@@ -881,7 +885,11 @@ NTSTATUS FileSystem::Read(
     ULONG Length,
     PULONG PBytesTransferred)
 {
-    return STATUS_UNSUCCESSFUL;
+    if(engine().read(static_cast<service::Descriptor*>(pFileDesc), Buffer, Offset, Length, *PBytesTransferred)){
+        return STATUS_SUCCESS;
+    }else{
+        return STATUS_UNSUCCESSFUL;
+    }
 }
 
 NTSTATUS FileSystem::Write(
@@ -907,19 +915,17 @@ NTSTATUS FileSystem::Flush(
 }
 
 NTSTATUS FileSystem::GetFileInfo(
-    PVOID FileNode,
+    PVOID /*pFileNode*/,
     PVOID pFileDesc,
     FileInfo *FileInfo)
 {
-	using ola::client::service::EntryTypeE;
-	auto pdesc = static_cast<Descriptor*>(pFileDesc);
-	EntryTypeE entry_type;
+	using ola::client::service::NodeTypeE;
+    NodeTypeE node_type;
 	uint64_t size = 0;
-	wstring  name;
+    
+	engine().info(static_cast<service::Descriptor*>(pFileDesc), size, node_type);
 
-	engine().entry(pdesc->entry_id_, size, entry_type);
-
-	FileInfo->FileAttributes = FILE_ATTRIBUTE_READONLY | entry_type_to_attributes(entry_type);
+	FileInfo->FileAttributes = FILE_ATTRIBUTE_READONLY | node_type_to_attributes(node_type);
     FileInfo->ReparseTag     = 0;
     FileInfo->FileSize       = size;
     FileInfo->AllocationSize = (FileInfo->FileSize + ALLOCATION_UNIT - 1)
@@ -1009,7 +1015,7 @@ NTSTATUS FileSystem::SetSecurity(
 }
 
 NTSTATUS FileSystem::ReadDirectory(
-    PVOID FileNode,
+    PVOID pFileNode,
     PVOID pFileDesc,
     PWSTR Pattern,
     PWSTR Marker,
@@ -1017,29 +1023,29 @@ NTSTATUS FileSystem::ReadDirectory(
     ULONG Length,
     PULONG PBytesTransferred)
 {
-	auto pdesc = static_cast<Descriptor*>(pFileDesc);
-    //return static_cast<Descriptor*>(pFileDesc)->readDirectory(*this,  FileNode, Pattern, Marker, Buffer, Length, PBytesTransferred);
-	return BufferedReadDirectory(&pdesc->DirBuffer,
-		    FileNode, pdesc, Pattern, Marker, Buffer, Length, PBytesTransferred);
+	//return static_cast<Descriptor*>(pFileDesc)->readDirectory(*this,  FileNode, Pattern, Marker, Buffer, Length, PBytesTransferred);
+    return BufferedReadDirectory(&engine().buffer(*static_cast<service::Descriptor*>(pFileDesc)),
+		    pFileNode, pFileDesc, Pattern, Marker, Buffer, Length, PBytesTransferred);
 }
 
 NTSTATUS FileSystem::ReadDirectoryEntry(
-    PVOID FileNode,
+    PVOID pFileNode,
     PVOID pFileDesc,
     PWSTR Pattern,
     PWSTR Marker,
-    PVOID *PContext,
+    PVOID *pContext,
     DirInfo *DirInfo)
 {
 	using namespace ola::client::service;
-	PVOID &rvctx = *PContext;
-	size_t &rctx = reinterpret_cast<size_t&>(rvctx);
+	
 	wstring	  name;
 	uint64_t	  size = 0;
 	uint32_t  attributes = FILE_ATTRIBUTE_READONLY;
-	auto pdesc = static_cast<Descriptor*>(pFileDesc);
-	EntryTypeE	entry_type;
+	NodeTypeE	node_type;
 
+#if 0
+    PVOID &rvctx = *pContext;
+	size_t &rctx = reinterpret_cast<size_t&>(rvctx);
 	if(rctx == 0){
 		//.
 		name = L".";
@@ -1049,12 +1055,16 @@ NTSTATUS FileSystem::ReadDirectoryEntry(
 		name = L"..";
 		attributes |= FILE_ATTRIBUTE_DIRECTORY;
 		++rctx;
-	}else if(engine().entry(pdesc->entry_id_ , rctx -= 2, name, size, entry_type)){
-		rctx += 2;
-
+	}else if(engine().node(pFileNode, pFileDesc, pContext, name, size, entry_type)){
 		attributes |= entry_type_to_attributes(entry_type);
 	}else{
-		rctx += 2;
+		return STATUS_NO_MORE_FILES;
+	}
+#endif
+
+    if(engine().node(static_cast<service::Descriptor*>(pFileDesc), *pContext, name, size, node_type)){
+		attributes |= node_type_to_attributes(node_type);
+	}else{
 		return STATUS_NO_MORE_FILES;
 	}
 
