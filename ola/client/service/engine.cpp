@@ -38,6 +38,7 @@ const solid::LoggerT logger("ola::client::service::engine");
 enum struct EntryTypeE : uint8_t {
     Unknown,
     Pending,
+    Error,
     Directory,
     File,
     Application,
@@ -64,20 +65,29 @@ struct EntryData {
     {
         return false;
     }
+
+    virtual const std::string& storageId() const
+    {
+        static const string s;
+        solid_throw("should not be called");
+        return s;
+    }
 };
 
 using EntryDataPtrT = std::unique_ptr<EntryData>;
 
 struct Entry {
-    std::mutex&   rmutex_;
-    string        name_;
-    EntryDataPtrT data_ptr_;
-    EntryTypeE    type_    = EntryTypeE::Unknown;
-    Entry*        pparent_ = nullptr;
-    uint64_t      size_    = 0;
+    std::mutex&              rmutex_;
+    std::condition_variable& rcv_;
+    string                   name_;
+    EntryDataPtrT            data_ptr_;
+    EntryTypeE               type_    = EntryTypeE::Unknown;
+    Entry*                   pparent_ = nullptr;
+    uint64_t                 size_    = 0;
 
-    Entry(std::mutex& _rmutex)
+    Entry(std::mutex& _rmutex, std::condition_variable& _rcv)
         : rmutex_(_rmutex)
+        , rcv_(_rcv)
     {
     }
 
@@ -93,6 +103,10 @@ struct Entry {
     std::mutex& mutex() const
     {
         return rmutex_;
+    }
+    std::condition_variable& conditionVariable() const
+    {
+        return rcv_;
     }
 
     void info(uint64_t& _rsize, NodeTypeE& _rnode_type)
@@ -124,9 +138,28 @@ struct Entry {
         solid_check(data_ptr_, "NO entry data");
         return data_ptr_->read(_pbuf, _offset, _length, _rbytes_transfered);
     }
+
+    const std::string& storageId()
+    {
+        if (type_ == EntryTypeE::Application) {
+            return data_ptr_->storageId();
+        } else {
+            solid_check(pparent_ != nullptr);
+            return pparent_->storageId();
+        }
+    }
 };
 
-struct DirectoryData {
+struct DirectoryData : EntryData {
+};
+
+struct ApplicationData : DirectoryData {
+    string storage_id_;
+
+    const std::string& storageId() const override
+    {
+        return storage_id_;
+    }
 };
 
 using AioSchedulerT = frame::Scheduler<frame::aio::Reactor>;
@@ -142,6 +175,8 @@ struct Descriptor {
     {
     }
 };
+
+using ListNodeDequeT = decltype(ola::front::ListStoreResponse::node_dq_);
 
 struct Engine::Implementation {
     using RecipientVectorT = std::vector<frame::mprpc::RecipientId>;
@@ -192,6 +227,10 @@ public:
         std::shared_ptr<front::ListAppsResponse>& _rrecv_msg_ptr);
 
     EntryPointerT createEntry(EntryPointerT& _parent, const fs::path& _path);
+
+    void eraseEntry(EntryPointerT&& _uentry_ptr, unique_lock<mutex>&& _ulock);
+
+    void createEntryData(const EntryPointerT& _rentry_ptr, ListNodeDequeT &_rnode_dq);
 
 private:
     void getAuthToken(const frame::mprpc::RecipientId& _recipient_id, string& _rtoken, const string* const _ptoken = nullptr);
@@ -368,7 +407,43 @@ Descriptor* Engine::open(const fs::path& _path)
         }
     }
 
-    return new Descriptor(std::move(entry_ptr));
+    if (entry_ptr->type_ == EntryTypeE::Unknown) {
+        entry_ptr->type_ = EntryTypeE::Unknown;
+
+        auto lambda = [entry_ptr, this](
+                          frame::mprpc::ConnectionContext&           _rctx,
+                          std::shared_ptr<front::ListStoreRequest>&  _rsent_msg_ptr,
+                          std::shared_ptr<front::ListStoreResponse>& _rrecv_msg_ptr,
+                          ErrorConditionT const&                     _rerror) {
+            auto&             m = entry_ptr->mutex();
+            lock_guard<mutex> lock{m};
+            if (_rrecv_msg_ptr && _rrecv_msg_ptr->error_ == 0) {
+                this->pimpl_->createEntryData(entry_ptr, _rrecv_msg_ptr->node_dq_);
+            } else {
+                entry_ptr->type_ = EntryTypeE::Error;
+            }
+            entry_ptr->conditionVariable().notify_all();
+        };
+
+        auto req_ptr         = make_shared<ListStoreRequest>();
+        req_ptr->path_       = _path.relative_path().generic_string();
+        req_ptr->storage_id_ = entry_ptr->storageId();
+
+        pimpl_->front_rpc_service_.sendRequest(pimpl_->config_.front_endpoint_.c_str(), req_ptr, lambda);
+    }
+
+    if (entry_ptr->type_ == EntryTypeE::Pending) {
+        entry_ptr->conditionVariable().wait(lock, [&entry_ptr]() { return entry_ptr->type_ != EntryTypeE::Pending; });
+    }
+
+    if (entry_ptr->type_ == EntryTypeE::Error) {
+        pimpl_->eraseEntry(std::move(entry_ptr), std::move(lock));
+        return nullptr;
+    } else {
+        solid_check(entry_ptr->type_ > EntryTypeE::Error);
+        //success
+        return new Descriptor(std::move(entry_ptr));
+    }
 }
 
 void Engine::cleanup(Descriptor* _pdesc)
@@ -382,20 +457,25 @@ void Engine::close(Descriptor* _pdesc)
 
 void Engine::info(Descriptor* _pdesc, uint64_t& _rsize, NodeTypeE& _rnode_type)
 {
-    lock_guard<mutex> lock{_pdesc->entry_ptr_->mutex()};
+    auto&             m = _pdesc->entry_ptr_->mutex();
+    lock_guard<mutex> lock(m);
 
     _pdesc->entry_ptr_->info(_rsize, _rnode_type);
 }
 
 bool Engine::node(Descriptor* _pdesc, void*& _rpctx, std::wstring& _rname, uint64_t& _rsize, NodeTypeE& _rnode_type)
 {
-    lock_guard<mutex> lock{_pdesc->entry_ptr_->mutex()};
+    auto&             m = _pdesc->entry_ptr_->mutex();
+    lock_guard<mutex> lock(m);
+
     return _pdesc->entry_ptr_->node(_rpctx, _rname, _rsize, _rnode_type);
 }
 
 bool Engine::read(Descriptor* _pdesc, void* _pbuf, uint64_t _offset, unsigned long _length, unsigned long& _rbytes_transfered)
 {
-    lock_guard<mutex> lock{_pdesc->entry_ptr_->mutex()};
+    auto&             m = _pdesc->entry_ptr_->mutex();
+    lock_guard<mutex> lock(m);
+
     return _pdesc->entry_ptr_->read(_pbuf, _offset, _length, _rbytes_transfered);
 }
 
@@ -580,6 +660,13 @@ EntryPointerT Engine::Implementation::createEntry(EntryPointerT& _parent, const 
     return EntryPointerT{};
 }
 
+void Engine::Implementation::eraseEntry(EntryPointerT&& _uentry_ptr, unique_lock<mutex>&& _ulock) {
+}
+
+void Engine::Implementation::createEntryData(const EntryPointerT& _rentry_ptr, ListNodeDequeT& _rnode_dq)
+{
+
+}
 } //namespace service
 } //namespace client
 } //namespace ola
