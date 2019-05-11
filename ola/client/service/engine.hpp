@@ -26,18 +26,16 @@ struct Configuration {
     using GuiStartFunctionT = std::function<void(int)>;
     using GuiFailFunctionT  = std::function<void()>;
 
-    bool              compress_;
-    bool              secure_;
+    bool              compress_ = true;
+    bool              secure_ = true;
     std::string       front_endpoint_;
     std::string       path_prefix_;
     GuiStartFunctionT gui_start_fnc_;
     GuiFailFunctionT  gui_fail_fnc_;
-
-    Configuration()
-        : compress_(true)
-        , secure_(true)
-    {
-    }
+    size_t            mutex_count_ = 1;
+    size_t            cv_count_ = 1;
+    std::string            os_;
+    std::string            language_;
 };
 
 
