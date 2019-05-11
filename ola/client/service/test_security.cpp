@@ -14,7 +14,7 @@
 #include <strsafe.h>
 
 namespace {
-DWORD                security_size_        = 0;
+DWORD security_size_  = 0;
 char* psecurity_data_ = nullptr;
 
 bool InitSecurityDescriptor()
@@ -24,9 +24,9 @@ bool InitSecurityDescriptor()
     PACL                 pACL         = nullptr;
     PSID                 pEveryoneSID = nullptr;
     PSID                 pAdminSID    = nullptr;
-    bool             rv;
+    bool                 rv;
 
-	SECURITY_ATTRIBUTES sa;
+    SECURITY_ATTRIBUTES sa;
 
     static SID_IDENTIFIER_AUTHORITY SIDAuthWorld = SECURITY_WORLD_SID_AUTHORITY;
     static SID_IDENTIFIER_AUTHORITY SIDAuthNT    = SECURITY_NT_AUTHORITY;
@@ -100,7 +100,7 @@ bool InitSecurityDescriptor()
     psecurity_data_ = new char[security_size_];
     memcpy(psecurity_data_, psecurity_descriptor, security_size_);
     rv = true;
-    
+
     //sa.nLength              = sizeof(SECURITY_ATTRIBUTES);
     //sa.lpSecurityDescriptor = psecurity_descriptor;
     //sa.bInheritHandle       = FALSE;
@@ -130,7 +130,7 @@ int wmain(int argc, wchar_t** argv)
         sa.lpSecurityDescriptor = (PSECURITY_DESCRIPTOR)psecurity_data_;
         sa.bInheritHandle       = FALSE;
 
-		HANDLE hFile = CreateFile(L"test.log", FILE_APPEND_DATA, FILE_SHARE_WRITE, &sa, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, 0);
+        HANDLE hFile = CreateFile(L"test.log", FILE_APPEND_DATA, FILE_SHARE_WRITE, &sa, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, 0);
         wprintf(L"CreateFile Error: %u\n", GetLastError());
         assert(hFile != INVALID_HANDLE_VALUE);
     } else {
@@ -215,13 +215,12 @@ int wmain(int argc, wchar_t** argv)
         sa.lpSecurityDescriptor = pSD;
         sa.bInheritHandle       = FALSE;
 
-		HANDLE hFile = CreateFile(L"test.log", FILE_APPEND_DATA, FILE_SHARE_WRITE, &sa, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, 0);
+        HANDLE hFile = CreateFile(L"test.log", FILE_APPEND_DATA, FILE_SHARE_WRITE, &sa, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, 0);
         wprintf(L"CreateFile Error: %u\n", GetLastError());
         assert(hFile != INVALID_HANDLE_VALUE);
-		Cleanup:
+    Cleanup:
         wprintf(L"fail\n");
-	}
+    }
 
-    
     return 0;
 }

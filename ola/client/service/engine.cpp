@@ -15,6 +15,8 @@
 #include "ola/common/utility/crypto.hpp"
 
 #include "ola/client/gui/gui_protocol.hpp"
+#include "ola/client/utility/locale.hpp"
+
 #include "ola/common/ola_front_protocol.hpp"
 
 #include "boost/filesystem.hpp"
@@ -25,7 +27,6 @@ using namespace solid;
 using namespace std;
 using namespace ola;
 using namespace ola::front;
-namespace bf = boost::filesystem;
 
 namespace ola {
 namespace client {
@@ -34,8 +35,148 @@ namespace service {
 namespace {
 const solid::LoggerT logger("ola::client::service::engine");
 
+enum struct EntryTypeE : uint8_t {
+    Unknown,
+    Pending,
+    Error,
+    Directory,
+    File,
+    Application,
+    Shortcut
+};
+
+struct Entry;
+using EntryPointerT = std::shared_ptr<Entry>;
+
+struct EntryData {
+    virtual ~EntryData() {}
+
+    virtual EntryPointerT find(const fs::path& _path)
+    {
+        return EntryPointerT{};
+    }
+
+    virtual bool read(void* _pbuf, uint64_t _offset, unsigned long _length, unsigned long& _rbytes_transfered)
+    {
+        return false;
+    }
+
+    virtual bool node(void*& _rpctx, std::wstring& _rname, uint64_t& _rsize, NodeTypeE& _rnode_type)
+    {
+        return false;
+    }
+
+    virtual const std::string& storageId() const
+    {
+        static const string s;
+        solid_throw("should not be called");
+        return s;
+    }
+};
+
+using EntryDataPtrT = std::unique_ptr<EntryData>;
+
+struct Entry {
+    std::mutex&              rmutex_;
+    std::condition_variable& rcv_;
+    string                   name_;
+    EntryDataPtrT            data_ptr_;
+    EntryTypeE               type_    = EntryTypeE::Unknown;
+    Entry*                   pparent_ = nullptr;
+    uint64_t                 size_    = 0;
+
+    Entry(std::mutex& _rmutex, std::condition_variable& _rcv)
+        : rmutex_(_rmutex)
+        , rcv_(_rcv)
+    {
+    }
+
+    EntryPointerT find(const fs::path& _path)
+    {
+        EntryPointerT entry_ptr;
+        if (data_ptr_) {
+            entry_ptr = data_ptr_->find(_path);
+        }
+        return entry_ptr;
+    }
+
+    std::mutex& mutex() const
+    {
+        return rmutex_;
+    }
+    std::condition_variable& conditionVariable() const
+    {
+        return rcv_;
+    }
+
+    void info(uint64_t& _rsize, NodeTypeE& _rnode_type)
+    {
+        _rsize = size_;
+        switch (type_) {
+        case EntryTypeE::Unknown:
+        case EntryTypeE::Pending:
+            solid_throw("Unknown entry type");
+            break;
+        case EntryTypeE::File:
+            _rnode_type = NodeTypeE::File;
+            break;
+        case EntryTypeE::Application:
+        case EntryTypeE::Directory:
+            _rnode_type = NodeTypeE::Directory;
+            break;
+        }
+    }
+
+    bool node(void*& _rpctx, std::wstring& _rname, uint64_t& _rsize, NodeTypeE& _rnode_type)
+    {
+        solid_check(data_ptr_, "NO entry data");
+        return data_ptr_->node(_rpctx, _rname, _rsize, _rnode_type);
+    }
+
+    bool read(void* _pbuf, uint64_t _offset, unsigned long _length, unsigned long& _rbytes_transfered)
+    {
+        solid_check(data_ptr_, "NO entry data");
+        return data_ptr_->read(_pbuf, _offset, _length, _rbytes_transfered);
+    }
+
+    const std::string& storageId()
+    {
+        if (type_ == EntryTypeE::Application) {
+            return data_ptr_->storageId();
+        } else {
+            solid_check(pparent_ != nullptr);
+            return pparent_->storageId();
+        }
+    }
+};
+
+struct DirectoryData : EntryData {
+};
+
+struct ApplicationData : DirectoryData {
+    string storage_id_;
+
+    const std::string& storageId() const override
+    {
+        return storage_id_;
+    }
+};
+
 using AioSchedulerT = frame::Scheduler<frame::aio::Reactor>;
+
 } //namespace
+
+struct Descriptor {
+    void*         pdirectory_buffer_ = nullptr;
+    EntryPointerT entry_ptr_;
+
+    Descriptor(EntryPointerT&& _entry_ptr)
+        : entry_ptr_(std::move(_entry_ptr))
+    {
+    }
+};
+
+using ListNodeDequeT = decltype(ola::front::ListStoreResponse::node_dq_);
 
 struct Engine::Implementation {
     using RecipientVectorT = std::vector<frame::mprpc::RecipientId>;
@@ -43,7 +184,7 @@ struct Engine::Implementation {
     Configuration             config_;
     AioSchedulerT             scheduler_;
     frame::Manager            manager_;
-    FunctionWorkPool<>        workpool_;
+    CallPool<void()>          workpool_;
     frame::aio::Resolver      resolver_;
     frame::mprpc::ServiceT    front_rpc_service_;
     frame::mprpc::ServiceT    gui_rpc_service_;
@@ -52,12 +193,13 @@ struct Engine::Implementation {
     string                    auth_token_;
     RecipientVectorT          auth_recipient_v_;
     frame::mprpc::RecipientId gui_recipient_id_;
+    EntryPointerT             root_entry_ptr_;
 
 public:
     Implementation(
         const Configuration& _rcfg)
         : config_(_rcfg)
-        , workpool_{WorkPoolConfiguration()}
+        , workpool_{WorkPoolConfiguration{}, 1}
         , resolver_{workpool_}
         , front_rpc_service_{manager_}
         , gui_rpc_service_{manager_}
@@ -80,19 +222,29 @@ public:
         gui::RegisterRequest&            _rmsg);
     void loadAuthData();
 
+    void onFrontListAppsResponse(
+        frame::mprpc::ConnectionContext&          _ctx,
+        std::shared_ptr<front::ListAppsResponse>& _rrecv_msg_ptr);
+
+    EntryPointerT createEntry(EntryPointerT& _parent, const fs::path& _path);
+
+    void eraseEntry(EntryPointerT&& _uentry_ptr, unique_lock<mutex>&& _ulock);
+
+    void createEntryData(const EntryPointerT& _rentry_ptr, ListNodeDequeT &_rnode_dq);
+
 private:
-    void getAuthToken(const frame::mprpc::RecipientId& _recipient_id, string& _rtoken, const string const* _ptoken = nullptr);
+    void getAuthToken(const frame::mprpc::RecipientId& _recipient_id, string& _rtoken, const string* const _ptoken = nullptr);
 
-    void tryAuthenticate(frame::mprpc::ConnectionContext& _ctx, const string const* _ptoken = nullptr);
+    void tryAuthenticate(frame::mprpc::ConnectionContext& _ctx, const string* const _ptoken = nullptr);
 
-    bf::path authDataDirectoryPath() const
+    fs::path authDataDirectoryPath() const
     {
-        bf::path p = config_.path_prefix_;
+        fs::path p = config_.path_prefix_;
         p /= "config";
         return p;
     }
 
-    bf::path authDataFilePath() const
+    fs::path authDataFilePath() const
     {
 
         return authDataDirectoryPath() / "auth.data";
@@ -102,6 +254,7 @@ private:
 };
 
 Engine::Engine() {}
+
 Engine::~Engine() {}
 
 namespace {
@@ -209,6 +362,23 @@ void Engine::start(const Configuration& _rcfg)
 
     auto err = pimpl_->front_rpc_service_.createConnectionPool(_rcfg.front_endpoint_.c_str(), 1);
     solid_check(!err, "creating connection pool: " << err.message());
+
+    if (!err) {
+        auto lambda = [pimpl = pimpl_.get()](
+                          frame::mprpc::ConnectionContext&          _rctx,
+                          std::shared_ptr<front::ListAppsRequest>&  _rsent_msg_ptr,
+                          std::shared_ptr<front::ListAppsResponse>& _rrecv_msg_ptr,
+                          ErrorConditionT const&                    _rerror) {
+            if (_rrecv_msg_ptr) {
+                pimpl->onFrontListAppsResponse(_rctx, _rrecv_msg_ptr);
+            }
+        };
+
+        auto req_ptr     = make_shared<ListAppsRequest>();
+        req_ptr->choice_ = 'o';
+
+        pimpl_->front_rpc_service_.sendRequest(_rcfg.front_endpoint_.c_str(), req_ptr, lambda);
+    }
 }
 
 void Engine::stop()
@@ -216,9 +386,102 @@ void Engine::stop()
     pimpl_.reset(nullptr);
 }
 
+void*& Engine::buffer(Descriptor& _rdesc)
+{
+    return _rdesc.pdirectory_buffer_;
+}
+
+Descriptor* Engine::open(const fs::path& _path)
+{
+    EntryPointerT      entry_ptr = pimpl_->root_entry_ptr_;
+    unique_lock<mutex> lock{entry_ptr->mutex()};
+
+    for (const auto& e : _path) {
+        EntryPointerT ep = entry_ptr->find(e);
+
+        if (!ep) {
+            entry_ptr = pimpl_->createEntry(entry_ptr, e);
+        } else {
+            entry_ptr = std::move(ep);
+            lock      = unique_lock<mutex>(entry_ptr->mutex());
+        }
+    }
+
+    if (entry_ptr->type_ == EntryTypeE::Unknown) {
+        entry_ptr->type_ = EntryTypeE::Unknown;
+
+        auto lambda = [entry_ptr, this](
+                          frame::mprpc::ConnectionContext&           _rctx,
+                          std::shared_ptr<front::ListStoreRequest>&  _rsent_msg_ptr,
+                          std::shared_ptr<front::ListStoreResponse>& _rrecv_msg_ptr,
+                          ErrorConditionT const&                     _rerror) {
+            auto&             m = entry_ptr->mutex();
+            lock_guard<mutex> lock{m};
+            if (_rrecv_msg_ptr && _rrecv_msg_ptr->error_ == 0) {
+                this->pimpl_->createEntryData(entry_ptr, _rrecv_msg_ptr->node_dq_);
+            } else {
+                entry_ptr->type_ = EntryTypeE::Error;
+            }
+            entry_ptr->conditionVariable().notify_all();
+        };
+
+        auto req_ptr         = make_shared<ListStoreRequest>();
+        req_ptr->path_       = _path.relative_path().generic_string();
+        req_ptr->storage_id_ = entry_ptr->storageId();
+
+        pimpl_->front_rpc_service_.sendRequest(pimpl_->config_.front_endpoint_.c_str(), req_ptr, lambda);
+    }
+
+    if (entry_ptr->type_ == EntryTypeE::Pending) {
+        entry_ptr->conditionVariable().wait(lock, [&entry_ptr]() { return entry_ptr->type_ != EntryTypeE::Pending; });
+    }
+
+    if (entry_ptr->type_ == EntryTypeE::Error) {
+        pimpl_->eraseEntry(std::move(entry_ptr), std::move(lock));
+        return nullptr;
+    } else {
+        solid_check(entry_ptr->type_ > EntryTypeE::Error);
+        //success
+        return new Descriptor(std::move(entry_ptr));
+    }
+}
+
+void Engine::cleanup(Descriptor* _pdesc)
+{
+}
+
+void Engine::close(Descriptor* _pdesc)
+{
+    delete _pdesc;
+}
+
+void Engine::info(Descriptor* _pdesc, uint64_t& _rsize, NodeTypeE& _rnode_type)
+{
+    auto&             m = _pdesc->entry_ptr_->mutex();
+    lock_guard<mutex> lock(m);
+
+    _pdesc->entry_ptr_->info(_rsize, _rnode_type);
+}
+
+bool Engine::node(Descriptor* _pdesc, void*& _rpctx, std::wstring& _rname, uint64_t& _rsize, NodeTypeE& _rnode_type)
+{
+    auto&             m = _pdesc->entry_ptr_->mutex();
+    lock_guard<mutex> lock(m);
+
+    return _pdesc->entry_ptr_->node(_rpctx, _rname, _rsize, _rnode_type);
+}
+
+bool Engine::read(Descriptor* _pdesc, void* _pbuf, uint64_t _offset, unsigned long _length, unsigned long& _rbytes_transfered)
+{
+    auto&             m = _pdesc->entry_ptr_->mutex();
+    lock_guard<mutex> lock(m);
+
+    return _pdesc->entry_ptr_->read(_pbuf, _offset, _length, _rbytes_transfered);
+}
+
 // -- Implementation --------------------------------------------------------------------
 
-void Engine::Implementation::getAuthToken(const frame::mprpc::RecipientId& _recipient_id, string& _rtoken, const string const* _ptoken)
+void Engine::Implementation::getAuthToken(const frame::mprpc::RecipientId& _recipient_id, string& _rtoken, const string* const _ptoken)
 {
     bool start_gui = false;
     {
@@ -240,7 +503,7 @@ void Engine::Implementation::getAuthToken(const frame::mprpc::RecipientId& _reci
     }
 }
 
-void Engine::Implementation::tryAuthenticate(frame::mprpc::ConnectionContext& _ctx, const string const* _ptoken)
+void Engine::Implementation::tryAuthenticate(frame::mprpc::ConnectionContext& _ctx, const string* const _ptoken)
 {
     string auth_token;
     getAuthToken(_ctx.recipientId(), auth_token, _ptoken);
@@ -373,7 +636,7 @@ void Engine::Implementation::loadAuthData()
 
 void Engine::Implementation::storeAuthData(const string& _user, const string& _token)
 {
-    bf::create_directories(authDataDirectoryPath());
+    fs::create_directories(authDataDirectoryPath());
     const auto path = authDataFilePath();
 
     ofstream ofs(path.generic_string());
@@ -386,6 +649,24 @@ void Engine::Implementation::storeAuthData(const string& _user, const string& _t
     }
 }
 
+void Engine::Implementation::onFrontListAppsResponse(
+    frame::mprpc::ConnectionContext&          _ctx,
+    std::shared_ptr<front::ListAppsResponse>& _rrecv_msg_ptr)
+{
+}
+
+EntryPointerT Engine::Implementation::createEntry(EntryPointerT& _parent, const fs::path& _path)
+{
+    return EntryPointerT{};
+}
+
+void Engine::Implementation::eraseEntry(EntryPointerT&& _uentry_ptr, unique_lock<mutex>&& _ulock) {
+}
+
+void Engine::Implementation::createEntryData(const EntryPointerT& _rentry_ptr, ListNodeDequeT& _rnode_dq)
+{
+
+}
 } //namespace service
 } //namespace client
 } //namespace ola
