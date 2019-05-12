@@ -566,7 +566,8 @@ void Engine::start(const Configuration& _rcfg)
         auto req_ptr     = make_shared<ListAppsRequest>();
         req_ptr->choice_ = 'o';
 
-        pimpl_->front_rpc_service_.sendRequest(_rcfg.front_endpoint_.c_str(), req_ptr, lambda);
+        err = pimpl_->front_rpc_service_.sendRequest(_rcfg.front_endpoint_.c_str(), req_ptr, lambda);
+        solid_check(!err);
     }
 }
 
@@ -585,13 +586,15 @@ Descriptor* Engine::open(const fs::path& _path)
     EntryPointerT      entry_ptr = pimpl_->root_entry_ptr_;
     mutex&             rmutex    = entry_ptr->mutex();
     unique_lock<mutex> lock{rmutex};
-    auto               generic_path_str = _path.relative_path().generic_string();
+    auto               generic_path_str = _path.generic_string();
     string             remote_path;
     string             storage_id;
 
     for (const auto& e : _path) {
         string        s  = e.generic_string();
         EntryPointerT ep = entry_ptr->find(s);
+
+        solid_log(logger, Verbose, "\t"<<s);
 
         if (!ep) {
             entry_ptr = pimpl_->tryInsertUnknownEntry(entry_ptr, s);
@@ -616,6 +619,8 @@ Descriptor* Engine::open(const fs::path& _path)
             }
         }
     }
+
+    solid_log(logger, Info, "Open (generic_path = " << generic_path_str<<" remote_path = "<<remote_path<<")");
 
     if (entry_ptr->status_ == EntryStatusE::FetchRequired) {
         entry_ptr->status_ = EntryStatusE::FetchPending;
@@ -785,8 +790,19 @@ void Engine::Implementation::onGuiAuthRequest(
             auth_user_  = _rrecv_msg_ptr->user_;
             auth_token_ = _rrecv_msg_ptr->token_;
         }
+
+        auto lambda = [this](
+                          frame::mprpc::ConnectionContext&      _rctx,
+                          std::shared_ptr<front::AuthRequest>&  _rsent_msg_ptr,
+                          std::shared_ptr<front::AuthResponse>& _rrecv_msg_ptr,
+                          ErrorConditionT const&                _rerror) {
+            if (_rrecv_msg_ptr) {
+                onFrontAuthResponse(_rctx, *_rsent_msg_ptr, _rrecv_msg_ptr);
+            }
+        };
+
         for (const auto& recipient_id : recipient_v) {
-            front_rpc_service_.sendMessage(recipient_id, req_ptr, {frame::mprpc::MessageFlagsE::AwaitResponse});
+            front_rpc_service_.sendRequest(recipient_id, req_ptr, lambda);
         }
         storeAuthData(_rrecv_msg_ptr->user_, _rrecv_msg_ptr->token_);
     } else {
@@ -873,13 +889,15 @@ void Engine::Implementation::insertApplicationEntry(std::shared_ptr<front::Fetch
     entry_ptr->data_ptr_ = make_unique<ApplicationData>();
 
     if (!_rrecv_msg_ptr->build_configuration_.mount_vec_.empty()) {
-        entry_ptr->status_ = EntryStatusE::Fetched;
-
+        //entry_ptr->status_ = EntryStatusE::Fetched;
+        entry_ptr->status_ = EntryStatusE::FetchRequired;
         //TODO:...
 
     } else {
         entry_ptr->status_ = EntryStatusE::FetchRequired;
     }
+
+    solid_log(logger, Info, entry_ptr->name_);
 
     auto&             rm = root_entry_ptr_->mutex();
     lock_guard<mutex> lock{rm};
@@ -892,6 +910,8 @@ void Engine::Implementation::remoteFetchApplication(
     std::shared_ptr<front::FetchBuildConfigurationRequest>& _rsent_msg_ptr,
     size_t                                                  _app_index)
 {
+    _rsent_msg_ptr->app_id_ = _apps_response->app_id_vec_[_app_index];
+
     auto lambda = [this, _app_index, apps_response = std::move(_apps_response)](
                       frame::mprpc::ConnectionContext&                         _rctx,
                       std::shared_ptr<front::FetchBuildConfigurationRequest>&  _rsent_msg_ptr,
@@ -906,8 +926,6 @@ void Engine::Implementation::remoteFetchApplication(
         }
     };
 
-    _rsent_msg_ptr->app_id_ = _apps_response->app_id_vec_[_app_index];
-
     front_rpc_service_.sendRequest(config_.front_endpoint_.c_str(), _rsent_msg_ptr, lambda);
 }
 
@@ -920,7 +938,9 @@ void Engine::Implementation::onFrontListAppsResponse(
     }
 
     auto req_ptr    = make_shared<front::FetchBuildConfigurationRequest>();
-    req_ptr->lang_  = "";
+    
+    //TODO: 
+    req_ptr->lang_  = "US_en";
     req_ptr->os_id_ = "Windows10x86_64";
 
     remoteFetchApplication(_rrecv_msg_ptr, req_ptr, 0);
@@ -934,12 +954,15 @@ void Engine::Implementation::createRootEntry()
 
 EntryPointerT Engine::Implementation::createEntry(EntryPointerT& _parent, const string& _name, const EntryTypeE _type, const uint64_t _size)
 {
+    solid_log(logger, Info, _parent->name_ << " " << _name << " " << _size);
     const size_t index = current_mutex_index_.fetch_add(1);
     return make_shared<Entry>(_type, _parent, mutex_dq_[index % mutex_dq_.size()], cv_dq_[index % cv_dq_.size()], _name, _size);
 }
 
 void Engine::Implementation::insertDirectoryEntry(EntryPointerT& _parent_ptr, const string& _name)
 {
+    solid_log(logger, Info, _parent_ptr->name_ << " " << _name);
+
     solid_check(_parent_ptr->data_ptr_ && _parent_ptr->data_ptr_->isDirectory());
     auto entry_ptr = _parent_ptr->data_ptr_->find(_name);
 
@@ -958,6 +981,8 @@ void Engine::Implementation::insertDirectoryEntry(EntryPointerT& _parent_ptr, co
 
 void Engine::Implementation::insertFileEntry(EntryPointerT& _parent_ptr, const string& _name, uint64_t _size)
 {
+    solid_log(logger, Info, _parent_ptr->name_ << " " << _name<< " "<<_size);
+    
     solid_check(_parent_ptr->data_ptr_ && !_parent_ptr->data_ptr_->isDirectory());
     auto entry_ptr = _parent_ptr->data_ptr_->find(_name);
 
@@ -977,6 +1002,8 @@ void Engine::Implementation::insertFileEntry(EntryPointerT& _parent_ptr, const s
 
 EntryPointerT Engine::Implementation::tryInsertUnknownEntry(EntryPointerT& _parent, const string& _name)
 {
+    solid_log(logger, Info, _parent->name_<<"->"<<_name);
+
     if (!_parent->canInsertUnkownEntry()) {
         return EntryPointerT{};
     }
@@ -995,6 +1022,8 @@ EntryPointerT Engine::Implementation::tryInsertUnknownEntry(EntryPointerT& _pare
 
 void Engine::Implementation::eraseEntryFromParent(EntryPointerT&& _uentry_ptr, unique_lock<mutex>&& _ulock)
 {
+    solid_log(logger, Info, _uentry_ptr->name_);
+
     EntryPointerT entry_ptr{std::move(_uentry_ptr)};
     EntryPointerT parent_ptr;
 
@@ -1016,18 +1045,21 @@ void Engine::Implementation::eraseEntryFromParent(EntryPointerT&& _uentry_ptr, u
 
 void Engine::Implementation::createFileEntryData(EntryPointerT& _rentry_ptr, const std::string& _path_str)
 {
+    solid_log(logger, Info, _path_str);
     //TODO: implement chaching
     _rentry_ptr->data_ptr_ = make_unique<FileData>();
 }
 
 void Engine::Implementation::createDirectoryEntryData(EntryPointerT& _rentry_ptr, const std::string& _path_str)
 {
+    solid_log(logger, Info, _path_str);
     //TODO: implement chaching
     _rentry_ptr->data_ptr_ = make_unique<DirectoryData>();
 }
 
 void Engine::Implementation::createEntryData(EntryPointerT& _rentry_ptr, const std::string& _path_str, ListNodeDequeT& _rnode_dq)
 {
+    solid_log(logger, Info, _path_str);
     if (_rnode_dq.size() == 1 && _rnode_dq.front().name_.empty()) {
         _rentry_ptr->type_ = EntryTypeE::File;
         _rentry_ptr->size_ = _rnode_dq.front().size_;

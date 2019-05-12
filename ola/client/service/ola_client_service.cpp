@@ -834,7 +834,8 @@ NTSTATUS FileSystem::Open(
     PVOID *PFileDesc,
     OpenFileInfo *OpenFileInfo)
 {
-
+    //skip the first separator
+    ++FileName;
     *PFileNode = engine().open(FileName);
 
     if(*PFileNode != nullptr){
