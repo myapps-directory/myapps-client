@@ -39,12 +39,17 @@ const solid::LoggerT logger("ola::client::service::engine");
 
 enum struct EntryTypeE : uint8_t {
     Unknown,
-    Pending,
-    Error,
     Directory,
-    File,
     Application,
+    File,
     Shortcut
+};
+
+enum struct EntryStatusE : uint8_t {
+    FetchRequired,
+    FetchPending,
+    FetchError,
+    Fetched
 };
 
 struct Entry;
@@ -83,15 +88,12 @@ struct EntryData {
         return false;
     }
 
-    virtual const std::string& storageId() const
-    {
-        static const string s;
-        solid_throw("should not be called");
-        return s;
-    }
-
     virtual void insertEntry(EntryPointerT&& _entry)
     {
+    }
+
+    virtual bool empty() const {
+        return false;
     }
 };
 
@@ -101,8 +103,10 @@ struct Entry {
     std::mutex&              rmutex_;
     std::condition_variable& rcv_;
     string                   name_;
+    string                   remote_;
     EntryDataPtrT            data_ptr_;
-    EntryTypeE               type_ = EntryTypeE::Unknown;
+    EntryTypeE               type_   = EntryTypeE::Unknown;
+    EntryStatusE             status_ = EntryStatusE::FetchRequired;
     std::weak_ptr<Entry>     parent_;
     uint64_t                 size_ = 0;
 
@@ -158,10 +162,10 @@ struct Entry {
         _rsize = size_;
         switch (type_) {
         case EntryTypeE::Unknown:
-        case EntryTypeE::Pending:
             solid_throw("Unknown entry type");
             break;
         case EntryTypeE::File:
+        case EntryTypeE::Shortcut:
             _rnode_type = NodeTypeE::File;
             break;
         case EntryTypeE::Application:
@@ -183,16 +187,18 @@ struct Entry {
         return data_ptr_->read(_pbuf, _offset, _length, _rbytes_transfered);
     }
 
-    const std::string& storageId()
+    bool canInsertUnkownEntry() const
     {
-        static const std::string s;
-        if (type_ == EntryTypeE::Application) {
-            return data_ptr_->storageId();
-        } else if (auto parent_ptr = parent_.lock()) {
-            return parent_ptr->storageId();
-        } else {
-            return s;
+        if (
+            status_ == EntryStatusE::Fetched || status_ == EntryStatusE::FetchError || type_ == EntryTypeE::File || type_ == EntryTypeE::Shortcut) {
+            return false;
         }
+        return true;
+    }
+
+    bool isErasable() const
+    {
+        return (status_ == EntryStatusE::FetchRequired || status_ == EntryStatusE::FetchError) && (!data_ptr_ || data_ptr_->empty());
     }
 };
 
@@ -268,16 +274,34 @@ struct DirectoryData : EntryData {
             _rnode_type = NodeTypeE::Directory;
             ++pctx->first;
             return true;
-        } else if (pctx->second != entry_map_.end()) {
-            _rname       = utility::widen(pctx->second->second->name_);
-            _rsize       = pctx->second->second->size_;
-            const auto t = pctx->second->second->type_;
-            _rnode_type  = t == EntryTypeE::Application || t == EntryTypeE::Directory ? NodeTypeE::Directory : NodeTypeE::File;
-            ++pctx->second;
-            return true;
+        } else {
+
+            while (pctx->second != entry_map_.end()) {
+                const EntryPointerT& rentry_ptr = pctx->second->second;
+
+                if (rentry_ptr->type_ == EntryTypeE::Unknown) {
+                    ++pctx->second;
+                    continue;
+                }
+
+                _rname       = utility::widen(pctx->second->second->name_);
+                _rsize       = pctx->second->second->size_;
+                const auto t = pctx->second->second->type_;
+                _rnode_type  = t == EntryTypeE::Application || t == EntryTypeE::Directory ? NodeTypeE::Directory : NodeTypeE::File;
+                ++pctx->second;
+                return true;
+            }
+
+            delete pctx;
+            _rpctx = nullptr;
         }
 
         return false;
+    }
+
+    bool empty() const
+    {
+        return entry_map_.empty();
     }
 };
 
@@ -289,16 +313,9 @@ struct FileData : EntryData {
 };
 
 struct ApplicationData : DirectoryData {
-    string storage_id_;
-
     EntryTypeE type() const override
     {
         return EntryTypeE::Application;
-    }
-
-    const std::string& storageId() const override
-    {
-        return storage_id_;
     }
 };
 
@@ -331,6 +348,7 @@ struct Engine::Implementation {
     frame::mprpc::ServiceT    front_rpc_service_;
     frame::mprpc::ServiceT    gui_rpc_service_;
     mutex                     mutex_;
+    mutex                     root_mutex_;
     string                    auth_user_;
     string                    auth_token_;
     RecipientVectorT          auth_recipient_v_;
@@ -568,6 +586,8 @@ Descriptor* Engine::open(const fs::path& _path)
     mutex&             rmutex    = entry_ptr->mutex();
     unique_lock<mutex> lock{rmutex};
     auto               generic_path_str = _path.relative_path().generic_string();
+    string             remote_path;
+    string             storage_id;
 
     for (const auto& e : _path) {
         string        s  = e.generic_string();
@@ -575,17 +595,30 @@ Descriptor* Engine::open(const fs::path& _path)
 
         if (!ep) {
             entry_ptr = pimpl_->tryInsertUnknownEntry(entry_ptr, s);
+            remote_path += '/';
+            remote_path += s;
         } else {
             entry_ptr     = std::move(ep);
             mutex& rmutex = entry_ptr->mutex();
             lock.unlock(); //no overlapping locks
             unique_lock<mutex> tlock{rmutex};
             lock.swap(tlock);
+
+            if (entry_ptr->type_ == EntryTypeE::Application) {
+                remote_path.clear();
+                storage_id = entry_ptr->remote_;
+            } else if (!entry_ptr->remote_.empty()) {
+                remote_path += '/';
+                remote_path += entry_ptr->remote_;
+            } else {
+                remote_path += '/';
+                remote_path += s;
+            }
         }
     }
 
-    if (entry_ptr->type_ == EntryTypeE::Unknown) {
-        entry_ptr->type_ = EntryTypeE::Unknown;
+    if (entry_ptr->status_ == EntryStatusE::FetchRequired) {
+        entry_ptr->status_ = EntryStatusE::FetchPending;
 
         auto lambda = [entry_ptr, &generic_path_str, this](
                           frame::mprpc::ConnectionContext&           _rctx,
@@ -595,29 +628,33 @@ Descriptor* Engine::open(const fs::path& _path)
             auto&             m = entry_ptr->mutex();
             lock_guard<mutex> lock{m};
             if (_rrecv_msg_ptr && _rrecv_msg_ptr->error_ == 0) {
+                entry_ptr->status_ = EntryStatusE::Fetched;
                 this->pimpl_->createEntryData(entry_ptr, generic_path_str, _rrecv_msg_ptr->node_dq_);
             } else {
-                entry_ptr->type_ = EntryTypeE::Error;
+                entry_ptr->status_ = EntryStatusE::FetchError;
             }
             entry_ptr->conditionVariable().notify_all();
         };
 
         auto req_ptr         = make_shared<ListStoreRequest>();
-        req_ptr->path_       = generic_path_str;
-        req_ptr->storage_id_ = entry_ptr->storageId();
+        req_ptr->path_       = remote_path;
+        req_ptr->storage_id_ = storage_id;
 
         pimpl_->front_rpc_service_.sendRequest(pimpl_->config_.front_endpoint_.c_str(), req_ptr, lambda);
     }
 
-    if (entry_ptr->type_ == EntryTypeE::Pending) {
-        entry_ptr->conditionVariable().wait(lock, [&entry_ptr]() { return entry_ptr->type_ != EntryTypeE::Pending; });
+    if (entry_ptr->status_ == EntryStatusE::FetchPending) {
+        entry_ptr->conditionVariable().wait(lock, [&entry_ptr]() { return entry_ptr->status_ != EntryStatusE::FetchPending; });
     }
 
-    if (entry_ptr->type_ == EntryTypeE::Error) {
-        pimpl_->eraseEntryFromParent(std::move(entry_ptr), std::move(lock));
+    if (entry_ptr->status_ == EntryStatusE::FetchError) {
+        if (entry_ptr->type_ == EntryTypeE::Unknown) {
+            pimpl_->eraseEntryFromParent(std::move(entry_ptr), std::move(lock));
+        }
+
         return nullptr;
     } else {
-        solid_check(entry_ptr->type_ > EntryTypeE::Error);
+        solid_check(entry_ptr->type_ > EntryTypeE::Unknown);
         //success
         return new Descriptor(std::move(entry_ptr));
     }
@@ -828,7 +865,26 @@ void Engine::Implementation::storeAuthData(const string& _user, const string& _t
 
 void Engine::Implementation::insertApplicationEntry(std::shared_ptr<front::FetchBuildConfigurationResponse>& _rrecv_msg_ptr)
 {
+    auto entry_ptr = createEntry(
+        root_entry_ptr_, _rrecv_msg_ptr->build_configuration_.directory_,
+        EntryTypeE::Application);
 
+    entry_ptr->remote_   = _rrecv_msg_ptr->storage_id_;
+    entry_ptr->data_ptr_ = make_unique<ApplicationData>();
+
+    if (!_rrecv_msg_ptr->build_configuration_.mount_vec_.empty()) {
+        entry_ptr->status_ = EntryStatusE::Fetched;
+
+        //TODO:...
+
+    } else {
+        entry_ptr->status_ = EntryStatusE::FetchRequired;
+    }
+
+    auto&             rm = root_entry_ptr_->mutex();
+    lock_guard<mutex> lock{rm};
+    //TODO: also create coresponding shortcuts
+    root_entry_ptr_->data_ptr_->insertEntry(std::move(entry_ptr));
 }
 
 void Engine::Implementation::remoteFetchApplication(
@@ -872,7 +928,7 @@ void Engine::Implementation::onFrontListAppsResponse(
 
 void Engine::Implementation::createRootEntry()
 {
-    root_entry_ptr_            = make_shared<Entry>(EntryTypeE::Directory, mutex_dq_[0], cv_dq_[0], "");
+    root_entry_ptr_            = make_shared<Entry>(EntryTypeE::Directory, root_mutex_, cv_dq_[0], "");
     root_entry_ptr_->data_ptr_ = make_unique<DirectoryData>();
 }
 
@@ -921,15 +977,18 @@ void Engine::Implementation::insertFileEntry(EntryPointerT& _parent_ptr, const s
 
 EntryPointerT Engine::Implementation::tryInsertUnknownEntry(EntryPointerT& _parent, const string& _name)
 {
-    if (_parent->type_ >= EntryTypeE::Error) {
+    if (!_parent->canInsertUnkownEntry()) {
         return EntryPointerT{};
     }
+
     if (!_parent->data_ptr_) {
         _parent->data_ptr_ = make_unique<DirectoryData>();
-    } else if (_parent->data_ptr_->isDirectory()) {
-        return EntryPointerT{};
     }
-    auto entry_ptr = createEntry(_parent, _name);
+
+    solid_check(_parent->data_ptr_->isDirectory());
+
+    auto entry_ptr     = createEntry(_parent, _name);
+    entry_ptr->status_ = EntryStatusE::FetchRequired;
     _parent->data_ptr_->insertEntry(EntryPointerT(entry_ptr));
     return entry_ptr;
 }
@@ -942,11 +1001,16 @@ void Engine::Implementation::eraseEntryFromParent(EntryPointerT&& _uentry_ptr, u
     {
         unique_lock<mutex> lock{std::move(_ulock)};
         parent_ptr = entry_ptr->parent_.lock();
+        entry_ptr->parent_.reset();
     }
 
     if (parent_ptr) {
         unique_lock<mutex> lock{parent_ptr->mutex()};
         parent_ptr->erase(entry_ptr);
+
+        if (parent_ptr->isErasable()) {
+            eraseEntryFromParent(std::move(parent_ptr), std::move(lock));
+        }
     }
 }
 
