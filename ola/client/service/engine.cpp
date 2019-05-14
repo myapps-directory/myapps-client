@@ -83,7 +83,7 @@ struct EntryData {
         return false;
     }
 
-    virtual bool node(void*& _rpctx, std::wstring& _rname, uint64_t& _rsize, NodeTypeE& _rnode_type)
+    virtual bool node(void*& _rpctx, std::wstring& _rname, NodeTypeE& _rnode_type, uint64_t& _rsize) const
     {
         return false;
     }
@@ -92,7 +92,8 @@ struct EntryData {
     {
     }
 
-    virtual bool empty() const {
+    virtual bool empty() const
+    {
         return false;
     }
 };
@@ -132,7 +133,7 @@ struct Entry {
     {
     }
 
-    EntryPointerT find(const string& _path)
+    EntryPointerT find(const string& _path) const
     {
         EntryPointerT entry_ptr;
         if (data_ptr_) {
@@ -157,7 +158,7 @@ struct Entry {
         return rcv_;
     }
 
-    void info(uint64_t& _rsize, NodeTypeE& _rnode_type)
+    void info(NodeTypeE& _rnode_type, uint64_t& _rsize) const
     {
         _rsize = size_;
         switch (type_) {
@@ -175,10 +176,10 @@ struct Entry {
         }
     }
 
-    bool node(void*& _rpctx, std::wstring& _rname, uint64_t& _rsize, NodeTypeE& _rnode_type)
+    bool node(void*& _rpctx, std::wstring& _rname, NodeTypeE& _rnode_type, uint64_t& _rsize)
     {
         solid_check(data_ptr_, "NO entry data");
-        return data_ptr_->node(_rpctx, _rname, _rsize, _rnode_type);
+        return data_ptr_->node(_rpctx, _rname, _rnode_type, _rsize);
     }
 
     bool read(void* _pbuf, uint64_t _offset, unsigned long _length, unsigned long& _rbytes_transfered)
@@ -249,7 +250,7 @@ struct DirectoryData : EntryData {
         entry_map_.emplace(_entry_ptr->name_, std::move(_entry_ptr));
     }
 
-    bool node(void*& _rpctx, std::wstring& _rname, uint64_t& _rsize, NodeTypeE& _rnode_type) override
+    bool node(void*& _rpctx, std::wstring& _rname, NodeTypeE& _rnode_type, uint64_t& _rsize) const override
     {
         using ContextT = pair<int, EntryMapT::const_iterator>;
         ContextT* pctx = nullptr;
@@ -407,6 +408,8 @@ public:
 
     void createRootEntry();
 
+    bool entry(const fs::path& _path, EntryPointerT& _rentry_ptr, unique_lock<mutex>& _rlock);
+
 private:
     void getAuthToken(const frame::mprpc::RecipientId& _recipient_id, string& _rtoken, const string* const _ptoken = nullptr);
 
@@ -428,6 +431,7 @@ private:
     void storeAuthData(const string& _user, const string& _token);
 
     void insertApplicationEntry(std::shared_ptr<front::FetchBuildConfigurationResponse>& _rrecv_msg_ptr);
+    void Implementation::insertMountEntry(EntryPointerT& _rparent_ptr, const fs::path& _local, const string& _remote);
 
     void remoteFetchApplication(
         std::shared_ptr<front::ListAppsResponse>&               _apps_response,
@@ -581,88 +585,30 @@ void*& Engine::buffer(Descriptor& _rdesc)
     return _rdesc.pdirectory_buffer_;
 }
 
-Descriptor* Engine::open(const fs::path& _path)
+bool Engine::info(const fs::path& _path, NodeTypeE& _rnode_type, uint64_t& _rsize)
 {
     EntryPointerT      entry_ptr = pimpl_->root_entry_ptr_;
     mutex&             rmutex    = entry_ptr->mutex();
     unique_lock<mutex> lock{rmutex};
-    auto               generic_path_str = _path.generic_string();
-    string             remote_path;
-    string             storage_id;
 
-    for (const auto& e : _path) {
-        string        s  = e.generic_string();
-        EntryPointerT ep = entry_ptr->find(s);
-
-        solid_log(logger, Verbose, "\t"<<s);
-
-        if (!ep) {
-            entry_ptr = pimpl_->tryInsertUnknownEntry(entry_ptr, s);
-            remote_path += '/';
-            remote_path += s;
-        } else {
-            entry_ptr     = std::move(ep);
-            mutex& rmutex = entry_ptr->mutex();
-            lock.unlock(); //no overlapping locks
-            unique_lock<mutex> tlock{rmutex};
-            lock.swap(tlock);
-
-            if (entry_ptr->type_ == EntryTypeE::Application) {
-                remote_path.clear();
-                storage_id = entry_ptr->remote_;
-            } else if (!entry_ptr->remote_.empty()) {
-                remote_path += '/';
-                remote_path += entry_ptr->remote_;
-            } else {
-                remote_path += '/';
-                remote_path += s;
-            }
-        }
+    if (pimpl_->entry(_path, entry_ptr, lock)) {
+        entry_ptr->info(_rnode_type, _rsize);
+        return true;
     }
+    return false;
+}
 
-    solid_log(logger, Info, "Open (generic_path = " << generic_path_str<<" remote_path = "<<remote_path<<")");
+Descriptor* Engine::open(const fs::path& _path)
+{
 
-    if (entry_ptr->status_ == EntryStatusE::FetchRequired) {
-        entry_ptr->status_ = EntryStatusE::FetchPending;
+    EntryPointerT      entry_ptr = pimpl_->root_entry_ptr_;
+    mutex&             rmutex    = entry_ptr->mutex();
+    unique_lock<mutex> lock{rmutex};
 
-        auto lambda = [entry_ptr, &generic_path_str, this](
-                          frame::mprpc::ConnectionContext&           _rctx,
-                          std::shared_ptr<front::ListStoreRequest>&  _rsent_msg_ptr,
-                          std::shared_ptr<front::ListStoreResponse>& _rrecv_msg_ptr,
-                          ErrorConditionT const&                     _rerror) mutable {
-            auto&             m = entry_ptr->mutex();
-            lock_guard<mutex> lock{m};
-            if (_rrecv_msg_ptr && _rrecv_msg_ptr->error_ == 0) {
-                entry_ptr->status_ = EntryStatusE::Fetched;
-                this->pimpl_->createEntryData(entry_ptr, generic_path_str, _rrecv_msg_ptr->node_dq_);
-            } else {
-                entry_ptr->status_ = EntryStatusE::FetchError;
-            }
-            entry_ptr->conditionVariable().notify_all();
-        };
-
-        auto req_ptr         = make_shared<ListStoreRequest>();
-        req_ptr->path_       = remote_path;
-        req_ptr->storage_id_ = storage_id;
-
-        pimpl_->front_rpc_service_.sendRequest(pimpl_->config_.front_endpoint_.c_str(), req_ptr, lambda);
-    }
-
-    if (entry_ptr->status_ == EntryStatusE::FetchPending) {
-        entry_ptr->conditionVariable().wait(lock, [&entry_ptr]() { return entry_ptr->status_ != EntryStatusE::FetchPending; });
-    }
-
-    if (entry_ptr->status_ == EntryStatusE::FetchError) {
-        if (entry_ptr->type_ == EntryTypeE::Unknown) {
-            pimpl_->eraseEntryFromParent(std::move(entry_ptr), std::move(lock));
-        }
-
-        return nullptr;
-    } else {
-        solid_check(entry_ptr->type_ > EntryTypeE::Unknown);
-        //success
+    if (pimpl_->entry(_path, entry_ptr, lock)) {
         return new Descriptor(std::move(entry_ptr));
     }
+    return nullptr;
 }
 
 void Engine::cleanup(Descriptor* _pdesc)
@@ -674,20 +620,105 @@ void Engine::close(Descriptor* _pdesc)
     delete _pdesc;
 }
 
-void Engine::info(Descriptor* _pdesc, uint64_t& _rsize, NodeTypeE& _rnode_type)
+bool Engine::Implementation::entry(const fs::path& _path, EntryPointerT& _rentry_ptr, unique_lock<mutex>& _rlock)
 {
-    auto&             m = _pdesc->entry_ptr_->mutex();
-    lock_guard<mutex> lock(m);
+    auto   generic_path_str = _path.generic_string();
+    string remote_path;
+    string storage_id;
 
-    _pdesc->entry_ptr_->info(_rsize, _rnode_type);
+    for (const auto& e : _path) {
+        string        s  = e.generic_string();
+        EntryPointerT ep = _rentry_ptr->find(s);
+
+        solid_log(logger, Verbose, "\t" << s);
+
+        if (!ep) {
+            _rentry_ptr = tryInsertUnknownEntry(_rentry_ptr, s);
+            if (_rentry_ptr) {
+                remote_path += '/';
+                remote_path += s;
+            } else {
+                return false;
+            }
+        } else {
+            _rentry_ptr   = std::move(ep);
+            mutex& rmutex = _rentry_ptr->mutex();
+            _rlock.unlock(); //no overlapping locks
+            unique_lock<mutex> tlock{rmutex};
+            _rlock.swap(tlock);
+
+            if (_rentry_ptr->type_ == EntryTypeE::Application) {
+                remote_path.clear();
+                storage_id = _rentry_ptr->remote_;
+            } else if (!_rentry_ptr->remote_.empty()) {
+                remote_path += '/';
+                remote_path += _rentry_ptr->remote_;
+            } else {
+                remote_path += '/';
+                remote_path += s;
+            }
+        }
+    }
+
+    solid_log(logger, Info, "Open (generic_path = " << generic_path_str << " remote_path = " << remote_path << ")");
+
+    if (_rentry_ptr->status_ == EntryStatusE::FetchRequired) {
+        _rentry_ptr->status_ = EntryStatusE::FetchPending;
+
+        auto lambda = [entry_ptr = _rentry_ptr, &generic_path_str, this](
+                          frame::mprpc::ConnectionContext&           _rctx,
+                          std::shared_ptr<front::ListStoreRequest>&  _rsent_msg_ptr,
+                          std::shared_ptr<front::ListStoreResponse>& _rrecv_msg_ptr,
+                          ErrorConditionT const&                     _rerror) mutable {
+            auto&             m = entry_ptr->mutex();
+            lock_guard<mutex> lock{m};
+            if (_rrecv_msg_ptr && _rrecv_msg_ptr->error_ == 0) {
+                entry_ptr->status_ = EntryStatusE::Fetched;
+                createEntryData(entry_ptr, generic_path_str, _rrecv_msg_ptr->node_dq_);
+            } else {
+                entry_ptr->status_ = EntryStatusE::FetchError;
+            }
+            entry_ptr->conditionVariable().notify_all();
+        };
+
+        auto req_ptr         = make_shared<ListStoreRequest>();
+        req_ptr->path_       = remote_path;
+        req_ptr->storage_id_ = storage_id;
+
+        front_rpc_service_.sendRequest(config_.front_endpoint_.c_str(), req_ptr, lambda);
+    }
+
+    if (_rentry_ptr->status_ == EntryStatusE::FetchPending) {
+        _rentry_ptr->conditionVariable().wait(_rlock, [&_rentry_ptr]() { return _rentry_ptr->status_ != EntryStatusE::FetchPending; });
+    }
+
+    if (_rentry_ptr->status_ == EntryStatusE::FetchError) {
+        if (_rentry_ptr->type_ == EntryTypeE::Unknown) {
+            eraseEntryFromParent(std::move(_rentry_ptr), std::move(_rlock));
+        }
+
+        return false;
+    } else {
+        solid_check(_rentry_ptr->type_ > EntryTypeE::Unknown);
+        //success
+        return true;
+    }
 }
 
-bool Engine::node(Descriptor* _pdesc, void*& _rpctx, std::wstring& _rname, uint64_t& _rsize, NodeTypeE& _rnode_type)
+void Engine::info(Descriptor* _pdesc, NodeTypeE& _rnode_type, uint64_t& _rsize)
 {
     auto&             m = _pdesc->entry_ptr_->mutex();
     lock_guard<mutex> lock(m);
 
-    return _pdesc->entry_ptr_->node(_rpctx, _rname, _rsize, _rnode_type);
+    _pdesc->entry_ptr_->info(_rnode_type, _rsize);
+}
+
+bool Engine::node(Descriptor* _pdesc, void*& _rpctx, std::wstring& _rname, NodeTypeE& _rnode_type, uint64_t& _rsize)
+{
+    auto&             m = _pdesc->entry_ptr_->mutex();
+    lock_guard<mutex> lock(m);
+
+    return _pdesc->entry_ptr_->node(_rpctx, _rname, _rnode_type, _rsize);
 }
 
 bool Engine::read(Descriptor* _pdesc, void* _pbuf, uint64_t _offset, unsigned long _length, unsigned long& _rbytes_transfered)
@@ -879,32 +910,6 @@ void Engine::Implementation::storeAuthData(const string& _user, const string& _t
     }
 }
 
-void Engine::Implementation::insertApplicationEntry(std::shared_ptr<front::FetchBuildConfigurationResponse>& _rrecv_msg_ptr)
-{
-    auto entry_ptr = createEntry(
-        root_entry_ptr_, _rrecv_msg_ptr->build_configuration_.directory_,
-        EntryTypeE::Application);
-
-    entry_ptr->remote_   = _rrecv_msg_ptr->storage_id_;
-    entry_ptr->data_ptr_ = make_unique<ApplicationData>();
-
-    if (!_rrecv_msg_ptr->build_configuration_.mount_vec_.empty()) {
-        //entry_ptr->status_ = EntryStatusE::Fetched;
-        entry_ptr->status_ = EntryStatusE::FetchRequired;
-        //TODO:...
-
-    } else {
-        entry_ptr->status_ = EntryStatusE::FetchRequired;
-    }
-
-    solid_log(logger, Info, entry_ptr->name_);
-
-    auto&             rm = root_entry_ptr_->mutex();
-    lock_guard<mutex> lock{rm};
-    //TODO: also create coresponding shortcuts
-    root_entry_ptr_->data_ptr_->insertEntry(std::move(entry_ptr));
-}
-
 void Engine::Implementation::remoteFetchApplication(
     std::shared_ptr<front::ListAppsResponse>&               _apps_response,
     std::shared_ptr<front::FetchBuildConfigurationRequest>& _rsent_msg_ptr,
@@ -921,7 +926,7 @@ void Engine::Implementation::remoteFetchApplication(
             insertApplicationEntry(_rrecv_msg_ptr);
             ++_app_index;
             if (_app_index < apps_response->app_id_vec_.size()) {
-                remoteFetchApplication(apps_response, _rsent_msg_ptr, _app_index + 1);
+                remoteFetchApplication(apps_response, _rsent_msg_ptr, _app_index);
             }
         }
     };
@@ -937,9 +942,9 @@ void Engine::Implementation::onFrontListAppsResponse(
         return;
     }
 
-    auto req_ptr    = make_shared<front::FetchBuildConfigurationRequest>();
-    
-    //TODO: 
+    auto req_ptr = make_shared<front::FetchBuildConfigurationRequest>();
+
+    //TODO:
     req_ptr->lang_  = "US_en";
     req_ptr->os_id_ = "Windows10x86_64";
 
@@ -950,6 +955,67 @@ void Engine::Implementation::createRootEntry()
 {
     root_entry_ptr_            = make_shared<Entry>(EntryTypeE::Directory, root_mutex_, cv_dq_[0], "");
     root_entry_ptr_->data_ptr_ = make_unique<DirectoryData>();
+    root_entry_ptr_->status_   = EntryStatusE::Fetched;
+}
+
+void Engine::Implementation::insertMountEntry(EntryPointerT& _rparent_ptr, const fs::path& _local, const string& _remote)
+{
+    EntryPointerT entry_ptr   = _rparent_ptr;
+    string        remote_path = "./";
+    for (const auto& e : _local) {
+        string        s  = e.generic_string();
+        EntryPointerT ep = entry_ptr->find(s);
+
+        solid_log(logger, Verbose, "\t" << s);
+
+        if (!ep) {
+            entry_ptr->status_ = EntryStatusE::FetchRequired;
+            auto ep = tryInsertUnknownEntry(entry_ptr, s);
+            entry_ptr->status_  = EntryStatusE::Fetched;
+            solid_check(ep);
+            entry_ptr = ep;
+            remote_path += "./";
+            entry_ptr->type_ = EntryTypeE::Directory;
+        } else {
+            entry_ptr = std::move(ep);
+            remote_path += "./";
+        }
+    }
+    remote_path += _remote;
+    entry_ptr->remote_ = std::move(remote_path);
+    entry_ptr->status_ = EntryStatusE::FetchRequired;
+}
+
+
+void Engine::Implementation::insertApplicationEntry(std::shared_ptr<front::FetchBuildConfigurationResponse>& _rrecv_msg_ptr)
+{
+    auto entry_ptr = createEntry(
+        root_entry_ptr_, _rrecv_msg_ptr->build_configuration_.directory_,
+        EntryTypeE::Application);
+
+    entry_ptr->remote_   = _rrecv_msg_ptr->storage_id_;
+    entry_ptr->data_ptr_ = make_unique<ApplicationData>();
+
+    if (!_rrecv_msg_ptr->build_configuration_.mount_vec_.empty()) {
+#if 0
+        entry_ptr->status_ = EntryStatusE::FetchRequired;
+#else
+        entry_ptr->status_ = EntryStatusE::Fetched;
+        for (const auto& me : _rrecv_msg_ptr->build_configuration_.mount_vec_) {
+            insertMountEntry(entry_ptr, me.first, me.second);
+        }
+#endif
+
+    } else {
+        entry_ptr->status_ = EntryStatusE::FetchRequired;
+    }
+
+    solid_log(logger, Info, entry_ptr->name_);
+
+    auto&             rm = root_entry_ptr_->mutex();
+    lock_guard<mutex> lock{rm};
+    //TODO: also create coresponding shortcuts
+    root_entry_ptr_->data_ptr_->insertEntry(std::move(entry_ptr));
 }
 
 EntryPointerT Engine::Implementation::createEntry(EntryPointerT& _parent, const string& _name, const EntryTypeE _type, const uint64_t _size)
@@ -981,9 +1047,9 @@ void Engine::Implementation::insertDirectoryEntry(EntryPointerT& _parent_ptr, co
 
 void Engine::Implementation::insertFileEntry(EntryPointerT& _parent_ptr, const string& _name, uint64_t _size)
 {
-    solid_log(logger, Info, _parent_ptr->name_ << " " << _name<< " "<<_size);
-    
-    solid_check(_parent_ptr->data_ptr_ && !_parent_ptr->data_ptr_->isDirectory());
+    solid_log(logger, Info, _parent_ptr->name_ << " " << _name << " " << _size);
+
+    solid_check(_parent_ptr->data_ptr_ && _parent_ptr->data_ptr_->isDirectory());
     auto entry_ptr = _parent_ptr->data_ptr_->find(_name);
 
     if (!entry_ptr) {
@@ -1002,7 +1068,7 @@ void Engine::Implementation::insertFileEntry(EntryPointerT& _parent_ptr, const s
 
 EntryPointerT Engine::Implementation::tryInsertUnknownEntry(EntryPointerT& _parent, const string& _name)
 {
-    solid_log(logger, Info, _parent->name_<<"->"<<_name);
+    solid_log(logger, Info, _parent->name_ << "->" << _name);
 
     if (!_parent->canInsertUnkownEntry()) {
         return EntryPointerT{};
@@ -1074,7 +1140,9 @@ void Engine::Implementation::createEntryData(EntryPointerT& _rentry_ptr, const s
         //TODO: we do not create the EntryData here
         // so we must handle the situation in open(..)
         if (n.name_.back() == '/') {
-            insertDirectoryEntry(_rentry_ptr, n.name_);
+            string name = n.name_;
+            name.pop_back();
+            insertDirectoryEntry(_rentry_ptr, name);
         } else {
             insertFileEntry(_rentry_ptr, n.name_, n.size_);
         }
