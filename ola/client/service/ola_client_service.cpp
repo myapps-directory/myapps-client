@@ -6,7 +6,7 @@
 #define NOMINMAX
 #endif
 #include <strsafe.h>
-#include <winfsp/winfsp.hpp>
+#include <winfsp.hpp>
 
 #include "solid/system/log.hpp"
 

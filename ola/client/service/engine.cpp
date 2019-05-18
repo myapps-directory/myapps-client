@@ -88,7 +88,7 @@ struct EntryData {
         return false;
     }
 
-    virtual void insertEntry(EntryPointerT&& _entry)
+    virtual void insertEntry(EntryPointerT&& _uentry_ptr)
     {
     }
 
@@ -240,14 +240,14 @@ struct DirectoryData : EntryData {
     {
         auto it = entry_map_.find(_path);
         if (it != entry_map_.end()) {
-            return it->second;
+            return atomic_load(&it->second);
         }
         return EntryPointerT{};
     }
 
-    void insertEntry(EntryPointerT&& _entry_ptr) override
+    void insertEntry(EntryPointerT&& _uentry_ptr) override
     {
-        entry_map_.emplace(_entry_ptr->name_, std::move(_entry_ptr));
+        entry_map_.emplace(_uentry_ptr->name_, std::move(_uentry_ptr));
     }
 
     bool node(void*& _rpctx, std::wstring& _rname, NodeTypeE& _rnode_type, uint64_t& _rsize) const override
@@ -328,8 +328,8 @@ struct Descriptor {
     void*         pdirectory_buffer_ = nullptr;
     EntryPointerT entry_ptr_;
 
-    Descriptor(EntryPointerT&& _entry_ptr)
-        : entry_ptr_(std::move(_entry_ptr))
+    Descriptor(EntryPointerT&& _uentry_ptr)
+        : entry_ptr_(std::move(_uentry_ptr))
     {
     }
 };
@@ -392,16 +392,16 @@ public:
         frame::mprpc::ConnectionContext&          _ctx,
         std::shared_ptr<front::ListAppsResponse>& _rrecv_msg_ptr);
 
-    EntryPointerT createEntry(EntryPointerT& _parent, const string& _name, const EntryTypeE _type = EntryTypeE::Unknown, const uint64_t _size = 0);
+    EntryPointerT createEntry(EntryPointerT& _rparent_ptr, const string& _name, const EntryTypeE _type = EntryTypeE::Unknown, const uint64_t _size = 0);
 
-    EntryPointerT tryInsertUnknownEntry(EntryPointerT& _parent, const string& _path);
+    EntryPointerT tryInsertUnknownEntry(EntryPointerT& _rparent_ptr, const string& _path);
 
     void eraseEntryFromParent(EntryPointerT&& _uentry_ptr, unique_lock<mutex>&& _ulock);
 
     void createEntryData(EntryPointerT& _rentry_ptr, const std::string& _path_str, ListNodeDequeT& _rnode_dq);
 
-    void insertDirectoryEntry(EntryPointerT& _parent, const string& _name);
-    void insertFileEntry(EntryPointerT& _parent, const string& _name, uint64_t _size);
+    void insertDirectoryEntry(EntryPointerT& _rparent_ptr, const string& _name);
+    void insertFileEntry(EntryPointerT& _rparent_ptr, const string& _name, uint64_t _size);
 
     void createFileEntryData(EntryPointerT& _rentry_ptr, const std::string& _path_str);
     void createDirectoryEntryData(EntryPointerT& _rentry_ptr, const std::string& _path_str);
@@ -587,7 +587,7 @@ void*& Engine::buffer(Descriptor& _rdesc)
 
 bool Engine::info(const fs::path& _path, NodeTypeE& _rnode_type, uint64_t& _rsize)
 {
-    EntryPointerT      entry_ptr = pimpl_->root_entry_ptr_;
+    EntryPointerT      entry_ptr = atomic_load(&pimpl_->root_entry_ptr_);
     mutex&             rmutex    = entry_ptr->mutex();
     unique_lock<mutex> lock{rmutex};
 
@@ -601,7 +601,7 @@ bool Engine::info(const fs::path& _path, NodeTypeE& _rnode_type, uint64_t& _rsiz
 Descriptor* Engine::open(const fs::path& _path)
 {
 
-    EntryPointerT      entry_ptr = pimpl_->root_entry_ptr_;
+    EntryPointerT      entry_ptr = atomic_load(&pimpl_->root_entry_ptr_);
     mutex&             rmutex    = entry_ptr->mutex();
     unique_lock<mutex> lock{rmutex};
 
@@ -628,11 +628,11 @@ bool Engine::Implementation::entry(const fs::path& _path, EntryPointerT& _rentry
 
     for (const auto& e : _path) {
         string        s  = e.generic_string();
-        EntryPointerT ep = _rentry_ptr->find(s);
+        EntryPointerT e_ptr = _rentry_ptr->find(s);
 
         solid_log(logger, Verbose, "\t" << s);
 
-        if (!ep) {
+        if (!e_ptr) {
             _rentry_ptr = tryInsertUnknownEntry(_rentry_ptr, s);
             if (_rentry_ptr) {
                 remote_path += '/';
@@ -641,7 +641,7 @@ bool Engine::Implementation::entry(const fs::path& _path, EntryPointerT& _rentry
                 return false;
             }
         } else {
-            _rentry_ptr   = std::move(ep);
+            _rentry_ptr   = std::move(e_ptr);
             mutex& rmutex = _rentry_ptr->mutex();
             _rlock.unlock(); //no overlapping locks
             unique_lock<mutex> tlock{rmutex};
@@ -964,11 +964,11 @@ void Engine::Implementation::insertMountEntry(EntryPointerT& _rparent_ptr, const
     string        remote_path = "./";
     for (const auto& e : _local) {
         string        s  = e.generic_string();
-        EntryPointerT ep = entry_ptr->find(s);
+        EntryPointerT e_ptr = entry_ptr->find(s);
 
         solid_log(logger, Verbose, "\t" << s);
 
-        if (!ep) {
+        if (!e_ptr) {
             entry_ptr->status_ = EntryStatusE::FetchRequired;
             auto ep = tryInsertUnknownEntry(entry_ptr, s);
             entry_ptr->status_  = EntryStatusE::Fetched;
@@ -977,7 +977,7 @@ void Engine::Implementation::insertMountEntry(EntryPointerT& _rparent_ptr, const
             remote_path += "./";
             entry_ptr->type_ = EntryTypeE::Directory;
         } else {
-            entry_ptr = std::move(ep);
+            entry_ptr = std::move(e_ptr);
             remote_path += "./";
         }
     }
@@ -1018,22 +1018,22 @@ void Engine::Implementation::insertApplicationEntry(std::shared_ptr<front::Fetch
     root_entry_ptr_->data_ptr_->insertEntry(std::move(entry_ptr));
 }
 
-EntryPointerT Engine::Implementation::createEntry(EntryPointerT& _parent, const string& _name, const EntryTypeE _type, const uint64_t _size)
+EntryPointerT Engine::Implementation::createEntry(EntryPointerT& _rparent_ptr, const string& _name, const EntryTypeE _type, const uint64_t _size)
 {
-    solid_log(logger, Info, _parent->name_ << " " << _name << " " << _size);
+    solid_log(logger, Info, _rparent_ptr->name_ << " " << _name << " " << _size);
     const size_t index = current_mutex_index_.fetch_add(1);
-    return make_shared<Entry>(_type, _parent, mutex_dq_[index % mutex_dq_.size()], cv_dq_[index % cv_dq_.size()], _name, _size);
+    return make_shared<Entry>(_type, _rparent_ptr, mutex_dq_[index % mutex_dq_.size()], cv_dq_[index % cv_dq_.size()], _name, _size);
 }
 
-void Engine::Implementation::insertDirectoryEntry(EntryPointerT& _parent_ptr, const string& _name)
+void Engine::Implementation::insertDirectoryEntry(EntryPointerT& _rparent_ptr, const string& _name)
 {
-    solid_log(logger, Info, _parent_ptr->name_ << " " << _name);
+    solid_log(logger, Info, _rparent_ptr->name_ << " " << _name);
 
-    solid_check(_parent_ptr->data_ptr_ && _parent_ptr->data_ptr_->isDirectory());
-    auto entry_ptr = _parent_ptr->data_ptr_->find(_name);
+    solid_check(_rparent_ptr->data_ptr_ && _rparent_ptr->data_ptr_->isDirectory());
+    auto entry_ptr = _rparent_ptr->data_ptr_->find(_name);
 
     if (!entry_ptr) {
-        _parent_ptr->data_ptr_->insertEntry(createEntry(_parent_ptr, _name, EntryTypeE::Directory));
+        _rparent_ptr->data_ptr_->insertEntry(createEntry(_rparent_ptr, _name, EntryTypeE::Directory));
     } else {
         //make sure the entry is directory
         auto&             rm = entry_ptr->mutex();
@@ -1045,15 +1045,15 @@ void Engine::Implementation::insertDirectoryEntry(EntryPointerT& _parent_ptr, co
     }
 }
 
-void Engine::Implementation::insertFileEntry(EntryPointerT& _parent_ptr, const string& _name, uint64_t _size)
+void Engine::Implementation::insertFileEntry(EntryPointerT& _rparent_ptr, const string& _name, uint64_t _size)
 {
-    solid_log(logger, Info, _parent_ptr->name_ << " " << _name << " " << _size);
+    solid_log(logger, Info, _rparent_ptr->name_ << " " << _name << " " << _size);
 
-    solid_check(_parent_ptr->data_ptr_ && _parent_ptr->data_ptr_->isDirectory());
-    auto entry_ptr = _parent_ptr->data_ptr_->find(_name);
+    solid_check(_rparent_ptr->data_ptr_ && _rparent_ptr->data_ptr_->isDirectory());
+    auto entry_ptr = _rparent_ptr->data_ptr_->find(_name);
 
     if (!entry_ptr) {
-        _parent_ptr->data_ptr_->insertEntry(createEntry(_parent_ptr, _name, EntryTypeE::File));
+        _rparent_ptr->data_ptr_->insertEntry(createEntry(_rparent_ptr, _name, EntryTypeE::File));
     } else {
         //make sure the entry is file
         auto&             rm = entry_ptr->mutex();
@@ -1066,23 +1066,23 @@ void Engine::Implementation::insertFileEntry(EntryPointerT& _parent_ptr, const s
     }
 }
 
-EntryPointerT Engine::Implementation::tryInsertUnknownEntry(EntryPointerT& _parent, const string& _name)
+EntryPointerT Engine::Implementation::tryInsertUnknownEntry(EntryPointerT& _rparent_ptr, const string& _name)
 {
-    solid_log(logger, Info, _parent->name_ << "->" << _name);
+    solid_log(logger, Info, _rparent_ptr->name_ << "->" << _name);
 
-    if (!_parent->canInsertUnkownEntry()) {
+    if (!_rparent_ptr->canInsertUnkownEntry()) {
         return EntryPointerT{};
     }
 
-    if (!_parent->data_ptr_) {
-        _parent->data_ptr_ = make_unique<DirectoryData>();
+    if (!_rparent_ptr->data_ptr_) {
+        _rparent_ptr->data_ptr_ = make_unique<DirectoryData>();
     }
 
-    solid_check(_parent->data_ptr_->isDirectory());
+    solid_check(_rparent_ptr->data_ptr_->isDirectory());
 
-    auto entry_ptr     = createEntry(_parent, _name);
+    auto entry_ptr     = createEntry(_rparent_ptr, _name);
     entry_ptr->status_ = EntryStatusE::FetchRequired;
-    _parent->data_ptr_->insertEntry(EntryPointerT(entry_ptr));
+    _rparent_ptr->data_ptr_->insertEntry(EntryPointerT(entry_ptr));
     return entry_ptr;
 }
 
