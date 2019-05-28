@@ -1048,7 +1048,7 @@ NTSTATUS FileSystem::ReadDirectoryEntry(
 	}
 #endif
 
-    if(engine().node(static_cast<service::Descriptor*>(pFileDesc), *pContext, name, node_type, size)){
+    if(engine().list(static_cast<service::Descriptor*>(pFileDesc), *pContext, name, node_type, size)){
 		attributes |= node_type_to_attributes(node_type);
 	}else{
 		return STATUS_NO_MORE_FILES;

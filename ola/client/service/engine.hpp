@@ -63,7 +63,7 @@ public:
 
     void info(Descriptor* _pdesc, NodeTypeE& _rnode_type, uint64_t& _rsize);
 
-	bool node(Descriptor* _pdesc, void*& _rpctx, std::wstring& _rname, NodeTypeE& _rentry_type, uint64_t& _rsize);
+	bool list(Descriptor* _pdesc, void*& _rpctx, std::wstring& _rname, NodeTypeE& _rentry_type, uint64_t& _rsize);
 
     bool read(Descriptor* _pdesc, void* _pbuf, uint64_t _offset, unsigned long _length, unsigned long& _rbytes_transfered);
 };
