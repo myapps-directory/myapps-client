@@ -87,7 +87,52 @@ struct DirectoryData {
     }
 };
 
+struct ReadData {
+    size_t    bytes_transfered_ = 0;
+    char*     pbuffer_;
+    uint64_t  offset_;
+    size_t    size_;
+    ReadData* pnext_ = nullptr;
+
+    ReadData(
+        char*  _pbuffer,
+		uint64_t _offset,
+        size_t _size)
+        : pbuffer_(_pbuffer)
+        , offset_(_offset)
+        , size_(_size)
+    {
+    }
+};
+
 struct FileData {
+	enum StatusE {
+		PendingE,
+		ErrorE,
+	};
+    ReadData* pfront_ = nullptr;
+    ReadData* pback_  = nullptr;
+    StatusE   status_ = PendingE;
+
+    bool readFromCache(ReadData& _rdata)
+    {
+        return false;
+    }
+
+    bool readFromResponses(ReadData& _rdata)
+    {
+        return false;
+    }
+
+    void enqueue(ReadData& _rdata)
+    {
+        _rdata.pnext_ = pback_;
+        if (pback_ == nullptr) {
+            pback_ = pfront_ = &_rdata;
+        } else {
+            pback_ = &_rdata;
+        }
+    }
 };
 
 struct ApplicationData : DirectoryData {
@@ -144,7 +189,7 @@ struct Entry {
         return type_ == EntryTypeE::File;
     }
 
-	inline DirectoryData* directoryData() const
+    inline DirectoryData* directoryData() const
     {
         DirectoryData* pdd = nullptr;
         if (auto pd = std::get_if<DirectoryDataPointerT>(&data_var_)) {
@@ -331,13 +376,14 @@ public:
     bool entry(const fs::path& _path, EntryPointerT& _rentry_ptr, unique_lock<mutex>& _rlock);
 
     bool list(
-        unique_lock<mutex>& _rmutex, Entry& _rentry,
-        void*&        _rpctx,
+        EntryPointerT& _rentry_ptr,
+        void*&         _rpctx,
         std::wstring& _rname, NodeTypeE& _rnode_type, uint64_t& _rsize);
     bool read(
-        unique_lock<mutex>& _rmutex, Entry& _rentry,
-        char*    _pbuf,
+        EntryPointerT& _rentry_ptr,
+        char*          _pbuf,
         uint64_t _offset, unsigned long _length, unsigned long& _rbytes_transfered);
+    void asyncFetch(EntryPointerT& _rentry_ptr);
 
 private:
     void getAuthToken(const frame::mprpc::RecipientId& _recipient_id, string& _rtoken, const string* const _ptoken = nullptr);
@@ -645,30 +691,26 @@ void Engine::info(Descriptor* _pdesc, NodeTypeE& _rnode_type, uint64_t& _rsize)
 
 bool Engine::list(Descriptor* _pdesc, void*& _rpctx, std::wstring& _rname, NodeTypeE& _rnode_type, uint64_t& _rsize)
 {
-    auto&              m = _pdesc->entry_ptr_->mutex();
-    unique_lock<mutex> lock(m);
-
-    return pimpl_->list(lock, *_pdesc->entry_ptr_, _rpctx, _rname, _rnode_type, _rsize);
+    return pimpl_->list(_pdesc->entry_ptr_, _rpctx, _rname, _rnode_type, _rsize);
 }
 
 bool Engine::read(Descriptor* _pdesc, void* _pbuf, uint64_t _offset, unsigned long _length, unsigned long& _rbytes_transfered)
 {
-    auto&              m = _pdesc->entry_ptr_->mutex();
-    unique_lock<mutex> lock(m);
-
-    return pimpl_->read(lock, *_pdesc->entry_ptr_, static_cast<char*>(_pbuf), _offset, _length, _rbytes_transfered);
+    return pimpl_->read(_pdesc->entry_ptr_, static_cast<char*>(_pbuf), _offset, _length, _rbytes_transfered);
 }
 
 // -- Implementation --------------------------------------------------------------------
 
 bool Engine::Implementation::list(
-    unique_lock<mutex>& _rmutex, Entry& _rentry,
-    void*&        _rpctx,
+    EntryPointerT& _rentry_ptr,
+    void*&         _rpctx,
     std::wstring& _rname, NodeTypeE& _rnode_type, uint64_t& _rsize)
 {
-    using ContextT      = pair<int, EntryMapT::const_iterator>;
-    ContextT*      pctx = nullptr;
-    DirectoryData* pdd  = _rentry.directoryData();
+    using ContextT       = pair<int, EntryMapT::const_iterator>;
+    auto&              m = _rentry_ptr->mutex();
+    unique_lock<mutex> lock(m);
+    ContextT*          pctx = nullptr;
+    DirectoryData*     pdd  = _rentry_ptr->directoryData();
 
     if (_rpctx) {
         pctx = static_cast<ContextT*>(_rpctx);
@@ -717,11 +759,39 @@ bool Engine::Implementation::list(
 }
 
 bool Engine::Implementation::read(
-    unique_lock<mutex>& _rmutex, Entry& _rentry,
-    char*    _pbuf,
+    EntryPointerT& _rentry_ptr,
+    char*          _pbuf,
     uint64_t _offset, unsigned long _length, unsigned long& _rbytes_transfered)
 {
-    return false;
+    auto&              m = _rentry_ptr->mutex();
+    unique_lock<mutex> lock(m);
+
+    FileData& rfile_data = *get<FileDataPointerT>(_rentry_ptr->data_var_);
+    ReadData  read_data{_pbuf, _offset, _length};
+
+    if (rfile_data.readFromCache(read_data)) {
+        _rbytes_transfered = read_data.bytes_transfered_;
+        return true;
+    }
+
+    if (rfile_data.readFromResponses(read_data)) {
+        _rbytes_transfered = read_data.bytes_transfered_;
+        return true;
+    }
+
+    rfile_data.enqueue(read_data);
+
+    asyncFetch(_rentry_ptr);
+
+    _rentry_ptr->conditionVariable().wait(lock, [&rfile_data]() { return rfile_data.status_ != FileData::PendingE; });
+    if (rfile_data.status_ == FileData::ErrorE)
+        return false;
+    _rbytes_transfered = read_data.bytes_transfered_;
+    return true;
+}
+
+void Engine::Implementation::asyncFetch(EntryPointerT& _rentry_ptr) {
+
 }
 
 void Engine::Implementation::getAuthToken(const frame::mprpc::RecipientId& _recipient_id, string& _rtoken, const string* const _ptoken)
