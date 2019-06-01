@@ -627,7 +627,7 @@ bool Engine::Implementation::entry(const fs::path& _path, EntryPointerT& _rentry
     string storage_id;
 
     for (const auto& e : _path) {
-        string        s  = e.generic_string();
+        string        s     = e.generic_string();
         EntryPointerT e_ptr = _rentry_ptr->find(s);
 
         solid_log(logger, Verbose, "\t" << s);
@@ -963,15 +963,15 @@ void Engine::Implementation::insertMountEntry(EntryPointerT& _rparent_ptr, const
     EntryPointerT entry_ptr   = _rparent_ptr;
     string        remote_path = "./";
     for (const auto& e : _local) {
-        string        s  = e.generic_string();
+        string        s     = e.generic_string();
         EntryPointerT e_ptr = entry_ptr->find(s);
 
         solid_log(logger, Verbose, "\t" << s);
 
         if (!e_ptr) {
             entry_ptr->status_ = EntryStatusE::FetchRequired;
-            auto ep = tryInsertUnknownEntry(entry_ptr, s);
-            entry_ptr->status_  = EntryStatusE::Fetched;
+            auto ep            = tryInsertUnknownEntry(entry_ptr, s);
+            entry_ptr->status_ = EntryStatusE::Fetched;
             solid_check(ep);
             entry_ptr = ep;
             remote_path += "./";
@@ -985,7 +985,6 @@ void Engine::Implementation::insertMountEntry(EntryPointerT& _rparent_ptr, const
     entry_ptr->remote_ = std::move(remote_path);
     entry_ptr->status_ = EntryStatusE::FetchRequired;
 }
-
 
 void Engine::Implementation::insertApplicationEntry(std::shared_ptr<front::FetchBuildConfigurationResponse>& _rrecv_msg_ptr)
 {
