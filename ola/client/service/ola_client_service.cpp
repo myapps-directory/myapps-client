@@ -6,7 +6,7 @@
 #define NOMINMAX
 #endif
 #include <strsafe.h>
-#include <winfsp/winfsp.hpp>
+#include <winfsp.hpp>
 
 #include "solid/system/log.hpp"
 
@@ -725,34 +725,11 @@ NTSTATUS FileSystem::InitSecurityDescriptor(){
 	return STATUS_MEMORY_NOT_ALLOCATED;
 }
 
-NTSTATUS FileSystem::GetFileInfoInternal(HANDLE Handle, FileInfo *FileInfo)
-{
-    BY_HANDLE_FILE_INFORMATION ByHandleFileInfo;
-
-    if (!GetFileInformationByHandle(Handle, &ByHandleFileInfo))
-        return NtStatusFromWin32(GetLastError());
-
-    FileInfo->FileAttributes = ByHandleFileInfo.dwFileAttributes;
-    FileInfo->ReparseTag = 0;
-    FileInfo->FileSize =
-        ((UINT64)ByHandleFileInfo.nFileSizeHigh << 32) | (UINT64)ByHandleFileInfo.nFileSizeLow;
-    FileInfo->AllocationSize = (FileInfo->FileSize + ALLOCATION_UNIT - 1)
-        / ALLOCATION_UNIT * ALLOCATION_UNIT;
-    FileInfo->CreationTime = ((PLARGE_INTEGER)&ByHandleFileInfo.ftCreationTime)->QuadPart;
-    FileInfo->LastAccessTime = ((PLARGE_INTEGER)&ByHandleFileInfo.ftLastAccessTime)->QuadPart;
-    FileInfo->LastWriteTime = ((PLARGE_INTEGER)&ByHandleFileInfo.ftLastWriteTime)->QuadPart;
-    FileInfo->ChangeTime = FileInfo->LastWriteTime;
-    FileInfo->IndexNumber = 0;
-    FileInfo->HardLinks = 0;
-
-    return STATUS_SUCCESS;
-}
-
 NTSTATUS FileSystem::Init(PVOID Host0)
 {
     FileSystemHost *Host = (FileSystemHost *)Host0;
 
-	base_time_ = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now().time_since_epoch()).count() * 10 + 116444736000000000;
+	base_time_ = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count() * 10 + 116444736000000000LL;
 
     Host->SetSectorSize(ALLOCATION_UNIT);
     Host->SetSectorsPerAllocationUnit(1);
@@ -787,12 +764,19 @@ NTSTATUS FileSystem::GetSecurityByName(
     PSECURITY_DESCRIPTOR SecurityDescriptor,
     SIZE_T *PSecurityDescriptorSize)
 {
-	if(PFileAttributes != nullptr){
-		if(FileName[0] == L'\\' && FileName[1] == L'\0'){
-			*PFileAttributes = FILE_ATTRIBUTE_DIRECTORY;
-		}
+    using ola::client::service::NodeTypeE;
 
-		*PFileAttributes |= FILE_ATTRIBUTE_READONLY;
+	if(PFileAttributes != nullptr){
+		++FileName;
+        NodeTypeE node_type;
+	    uint64_t size = 0;
+        if(engine().info(FileName, node_type, size)){
+
+		    *PFileAttributes = FILE_ATTRIBUTE_READONLY | FILE_ATTRIBUTE_NOT_CONTENT_INDEXED | node_type_to_attributes(node_type);
+
+        }else{
+            *PFileAttributes = 0;
+        }
 	}
 	
 	if(PSecurityDescriptorSize != nullptr){
@@ -834,10 +818,11 @@ NTSTATUS FileSystem::Open(
     PVOID *PFileDesc,
     OpenFileInfo *OpenFileInfo)
 {
+    //skip the first separator
+    ++FileName;
+    *PFileDesc = engine().open(FileName);
 
-    *PFileNode = engine().open(FileName);
-
-    if(*PFileNode != nullptr){
+    if(*PFileDesc != nullptr){
         return GetFileInfo(*PFileNode, *PFileDesc, &OpenFileInfo->FileInfo);
     }else{
         return STATUS_OBJECT_NAME_INVALID;
@@ -923,9 +908,9 @@ NTSTATUS FileSystem::GetFileInfo(
     NodeTypeE node_type;
 	uint64_t size = 0;
     
-	engine().info(static_cast<service::Descriptor*>(pFileDesc), size, node_type);
+	engine().info(static_cast<service::Descriptor*>(pFileDesc), node_type, size);
 
-	FileInfo->FileAttributes = FILE_ATTRIBUTE_READONLY | node_type_to_attributes(node_type);
+	FileInfo->FileAttributes = FILE_ATTRIBUTE_READONLY | FILE_ATTRIBUTE_NOT_CONTENT_INDEXED | node_type_to_attributes(node_type);
     FileInfo->ReparseTag     = 0;
     FileInfo->FileSize       = size;
     FileInfo->AllocationSize = (FileInfo->FileSize + ALLOCATION_UNIT - 1)
@@ -936,6 +921,7 @@ NTSTATUS FileSystem::GetFileInfo(
     FileInfo->ChangeTime     = FileInfo->LastWriteTime;
     FileInfo->IndexNumber    = 0;
     FileInfo->HardLinks      = 0;
+
 
     return STATUS_SUCCESS;
 }
@@ -1040,7 +1026,7 @@ NTSTATUS FileSystem::ReadDirectoryEntry(
 	
 	wstring	  name;
 	uint64_t	  size = 0;
-	uint32_t  attributes = FILE_ATTRIBUTE_READONLY;
+	uint32_t  attributes = FILE_ATTRIBUTE_READONLY | FILE_ATTRIBUTE_NOT_CONTENT_INDEXED;
 	NodeTypeE	node_type;
 
 #if 0
@@ -1062,7 +1048,7 @@ NTSTATUS FileSystem::ReadDirectoryEntry(
 	}
 #endif
 
-    if(engine().node(static_cast<service::Descriptor*>(pFileDesc), *pContext, name, size, node_type)){
+    if(engine().node(static_cast<service::Descriptor*>(pFileDesc), *pContext, name, node_type, size)){
 		attributes |= node_type_to_attributes(node_type);
 	}else{
 		return STATUS_NO_MORE_FILES;

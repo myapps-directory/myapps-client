@@ -188,8 +188,8 @@ int main(int argc, char* argv[])
     frame::mprpc::ServiceT front_rpc_service{manager};
     frame::mprpc::ServiceT local_rpc_service{manager};
 
-    FunctionWorkPool<>   fwp{WorkPoolConfiguration()};
-    frame::aio::Resolver resolver(fwp);
+    CallPool<void()>     cwp{WorkPoolConfiguration(), 1};
+    frame::aio::Resolver resolver(cwp);
 
     client::gui::AuthWidget auth_widget;
     Engine                  engine(auth_widget, front_rpc_service, local_rpc_service, params);
@@ -341,6 +341,14 @@ void local_configure_service(const Parameters& _params, frame::mprpc::ServiceT& 
     cfg.client.name_resolve_fnc = frame::mprpc::InternetResolverF(_rres, _params.local_port.c_str());
 
     cfg.client.connection_start_state = frame::mprpc::ConnectionState::Active;
+
+    {
+        auto connection_stop_lambda = [](frame::mprpc::ConnectionContext& _ctx) {
+            QApplication::quit();
+        };
+        
+        cfg.connection_stop_fnc         = std::move(connection_stop_lambda);
+    }
 
     _rsvc.start(std::move(cfg));
 }

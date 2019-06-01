@@ -351,9 +351,11 @@ void handle_help(istream& _ris, Engine &_reng){
     cout<<"> list apps o/a/A\n";
     cout<<"\to - owned applications\n";
     cout<<"\ta - aquired applications\n";
-    cout<<"\tA - All applications\n";
+    cout<<"\tA - All applications\n\n";
+    cout<<"> list store STORAGE_ID PATH\n\n";
     cout<<"> fetch app APP_ID\n\n";
     cout<<"> fetch build APP_ID BUILD_ID\n\n";
+    cout<<"> fetch config APP_ID LANGUAGE_ID OS_ID\n\n"; 
     cout<<"> generate app ~/path/to/app.cfg\n\n";
     cout<<"> generate build ~/path/to/build.cfg\n\n";
     cout<<"> create app ~/path/to/app.cfg\n\n";
@@ -362,6 +364,9 @@ void handle_help(istream& _ris, Engine &_reng){
     cout<<"> create app bubbles.app\n";
     cout<<"> create build l/AQPpeZWqoR1Fcngt3t2w== first bubbles.bld ~/tmp/bubbles_client\n";
     cout<<"> fetch config l/AQPpeZWqoR1Fcngt3t2w== en-US Windows10x86_64 desc\n";
+    cout<<"> fetch config uv0oHriZYsfwec566VTXew== US_en Windows10x86_64\n";
+    cout<<"> list store 82zWrPIuni/1jWA8V53N51AlOYx9q9rRXZcyZm73BGpyesjP5aI0YLfG+bZfwg7LDyMtQnn55CN6o/VzgvWYDzn0GeY57wPDDUViKNVVJcw= bubbles_client.exe\n";
+    
     cout<<endl;
 }
 
