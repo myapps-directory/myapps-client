@@ -36,6 +36,7 @@ struct Configuration {
     size_t            cv_count_    = 1;
     std::string       os_;
     std::string       language_;
+    uint64_t          max_stream_size_ = 100 * 1024;
 };
 
 class Engine {
@@ -61,11 +62,7 @@ public:
 
     void info(Descriptor* _pdesc, NodeTypeE& _rnode_type, uint64_t& _rsize);
 
-<<<<<<< HEAD
 	bool list(Descriptor* _pdesc, void*& _rpctx, std::wstring& _rname, NodeTypeE& _rentry_type, uint64_t& _rsize);
-=======
-    bool node(Descriptor* _pdesc, void*& _rpctx, std::wstring& _rname, NodeTypeE& _rentry_type, uint64_t& _rsize);
->>>>>>> master
 
     bool read(Descriptor* _pdesc, void* _pbuf, uint64_t _offset, unsigned long _length, unsigned long& _rbytes_transfered);
 };

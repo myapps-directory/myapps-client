@@ -106,7 +106,7 @@ struct ReadData {
     }
 };
 
-struct RequestStub {
+struct FetchStub {
     enum StatusE {
         NotUsedE,
         PendingE,
@@ -123,40 +123,40 @@ struct FileData {
         PendingE,
         ErrorE,
     };
-    ReadData*   pfront_ = nullptr;
-    ReadData*   pback_  = nullptr;
-    StatusE     status_ = PendingE;
-    RequestStub request_stubs_[2];
+    ReadData* pfront_ = nullptr;
+    ReadData* pback_  = nullptr;
+    StatusE   status_ = PendingE;
+    FetchStub fetch_stubs_[2];
+    string    storage_id_;
+    string    remote_path_;
+    shared_ptr<FetchStoreRequest> req_ptr_;
+
+    FileData(const string& _storage_id, const string& _remote_path)
+        : storage_id_(_storage_id)
+        , remote_path_(_remote_path)
+    {
+    }
 
     bool readFromCache(ReadData& _rdata)
     {
         return false;
     }
 
-    bool readFromResponses(ReadData& _rdata)
-    {
-        if (request_stubs_[0].offset_ < request_stubs_[1].offset_) {
-            if (readFromResponse(0, _rdata))
-                return true;
-            return readFromResponse(1, _rdata);
-        } else {
-            if (readFromResponse(1, _rdata))
-                return true;
-            return readFromResponse(0, _rdata);
-        }
-    }
+    bool readFromResponses(ReadData& _rdata);
 
     bool readFromResponse(const size_t _idx, ReadData& _rdata);
 
-    void enqueue(ReadData& _rdata)
+    bool enqueue(ReadData& _rdata)
     {
         _rdata.pnext_ = pback_;
         _rdata.pprev_ = nullptr;
         if (pback_ == nullptr) {
             pback_ = pfront_ = &_rdata;
+            return true;
         } else {
             pback_->pprev_ = &_rdata;
             pback_         = &_rdata;
+            return false;
         }
     }
 
@@ -423,7 +423,7 @@ public:
         EntryPointerT& _rentry_ptr,
         char*          _pbuf,
         uint64_t _offset, unsigned long _length, unsigned long& _rbytes_transfered);
-    void asyncFetch(EntryPointerT& _rentry_ptr);
+    void tryFetch(EntryPointerT& _rentry_ptr);
 
 private:
     void getAuthToken(const frame::mprpc::RecipientId& _recipient_id, string& _rtoken, const string* const _ptoken = nullptr);
@@ -716,6 +716,11 @@ bool Engine::Implementation::entry(const fs::path& _path, EntryPointerT& _rentry
     } else {
         solid_check(_rentry_ptr->type_ > EntryTypeE::Unknown);
 
+        if (_rentry_ptr->type_ == EntryTypeE::File) {
+            //TODO: move creation to FileCache
+            _rentry_ptr->data_var_ = make_unique<FileData>(storage_id, remote_path);
+        }
+
         //success
         return true;
     }
@@ -798,15 +803,28 @@ bool Engine::Implementation::list(
     return false;
 }
 
+bool FileData::readFromResponses(ReadData& _rdata)
+{
+    if (fetch_stubs_[0].offset_ < fetch_stubs_[1].offset_) {
+        if (readFromResponse(0, _rdata))
+            return true;
+        return readFromResponse(1, _rdata);
+    } else {
+        if (readFromResponse(1, _rdata))
+            return true;
+        return readFromResponse(0, _rdata);
+    }
+}
+
 bool FileData::readFromResponse(const size_t _idx, ReadData& _rdata)
 {
-    RequestStub& rrs = request_stubs_[_idx];
-    if (rrs.status_ != RequestStub::FetchedE) {
+    FetchStub& rfs = fetch_stubs_[_idx];
+    if (rfs.status_ != FetchStub::FetchedE) {
         return false;
     }
 
-    if (rrs.offset_ >= _rdata.offset_ && _rdata.offset_ < (rrs.offset_ + rrs.size_)) {
-        uint64_t tocopy = (rrs.offset_ + rrs.size_) - _rdata.offset_;
+    if (rfs.offset_ >= _rdata.offset_ && _rdata.offset_ < (rfs.offset_ + rfs.size_)) {
+        uint64_t tocopy = (rfs.offset_ + rfs.size_) - _rdata.offset_;
         if (tocopy > _rdata.size_) {
             tocopy = _rdata.size_;
         }
@@ -842,11 +860,13 @@ bool Engine::Implementation::read(
         return true;
     }
 
-    rfile_data.enqueue(read_data);
-
-    asyncFetch(_rentry_ptr);
+    if (rfile_data.enqueue(read_data)) {
+        //the queue was empty
+        tryFetch(_rentry_ptr);
+    }
 
     _rentry_ptr->conditionVariable().wait(lock, [&rfile_data]() { return rfile_data.status_ != FileData::PendingE; });
+
     if (rfile_data.status_ == FileData::ErrorE) {
         return false;
     }
@@ -854,41 +874,73 @@ bool Engine::Implementation::read(
     return true;
 }
 
-void Engine::Implementation::asyncFetch(EntryPointerT& _rentry_ptr)
+void Engine::Implementation::tryFetch(EntryPointerT& _rentry_ptr)
 {
     FileData& rfile_data = *get<FileDataPointerT>(_rentry_ptr->data_var_);
+    ReadData& rread_data = *rfile_data.pfront_;
+    size_t    fs0_idx    = 0;
 
-    size_t available_stubs = 0;
+    {
+        auto& rfs0 = rfile_data.fetch_stubs_[0];
+        auto& rfs1 = rfile_data.fetch_stubs_[1];
 
-    if (!rfile_data.request_stubs_[0].isPending()) {
-        ++available_stubs;
-    }
-    if (!rfile_data.request_stubs_[1].isPending()) {
-        ++available_stubs;
-    }
-    if (available_stubs == 0) {
-        return;
-	}
-
-    uint64_t next_offset = 0;
-    size_t   max_size    = 0;
-
-    if (auto pcrt_data = rfile_data.pfront_) {
-        do {
-            const uint64_t nxt_off = pcrt_data->offset_ + pcrt_data->size_;
-            if (nxt_off > next_offset) {
-                next_offset = nxt_off;
+        //check if any pending fetch will handle our data
+        if (rfs0.status_ == FetchStub::PendingE) {
+            if (
+                rfs0.offset_ <= rread_data.offset_ && rread_data.offset_ < (rfs0.offset_ + rfs0.size_)) {
+                return;
             }
-            if (max_size > pcrt_data->size_) {
-                max_size = pcrt_data->size_;
+            fs0_idx = solid::InvalidIndex();
+        }
+
+        if (rfs1.status_ == FetchStub::PendingE) {
+            if (
+                rfs1.offset_ <= rread_data.offset_ && rread_data.offset_ < (rfs1.offset_ + rfs1.size_)) {
+                return;
             }
+        } else if (fs0_idx != solid::InvalidIndex()) {
+            //if both fetch stubs are available, chose the one with smaller offset
+            if (rfs1.offset_ < rfile_data.fetch_stubs_[fs0_idx].offset_) {
+                fs0_idx = 1;
+            }
+        } else {
+            fs0_idx = 1;
+        }
+    }
 
+    if (fs0_idx != solid::InvalidIndex()) {
+        auto& rfs = rfile_data.fetch_stubs_[fs0_idx];
 
+        rfs.status_ = FetchStub::PendingE;
+        rfs.offset_ = rread_data.offset_;
+        rfs.size_   = config_.max_stream_size_;
 
-            pcrt_data = pcrt_data->pprev_;
-        } while (pcrt_data != nullptr && available_stubs != 0);
+        auto lambda = [entry_ptr = _rentry_ptr, this, fs0_idx](
+                          frame::mprpc::ConnectionContext&            _rctx,
+                          std::shared_ptr<front::FetchStoreRequest>&  _rsent_msg_ptr,
+                          std::shared_ptr<front::FetchStoreResponse>& _rrecv_msg_ptr,
+                          ErrorConditionT const&                      _rerror) mutable {
+            
+			//TODO:..	
+			auto&             m = entry_ptr->mutex();
+            lock_guard<mutex> lock{m};
+
+        };
+
+        if (!rfile_data.req_ptr_) {
+            rfile_data.req_ptr_ = make_shared<FetchStoreRequest>();
+		}
+        
+        rfile_data.req_ptr_->path_ = rfile_data.remote_path_;
+        rfile_data.req_ptr_->storage_id_ = rfile_data.storage_id_;
+
+        front_rpc_service_.sendRequest(config_.front_endpoint_.c_str(), rfile_data.req_ptr_, lambda);
     }
 }
+
+
+
+//-----------------------------------------------------------------------------
 
 void Engine::Implementation::getAuthToken(const frame::mprpc::RecipientId& _recipient_id, string& _rtoken, const string* const _ptoken)
 {
