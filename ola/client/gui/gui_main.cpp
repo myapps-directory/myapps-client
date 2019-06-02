@@ -346,8 +346,8 @@ void local_configure_service(const Parameters& _params, frame::mprpc::ServiceT& 
         auto connection_stop_lambda = [](frame::mprpc::ConnectionContext& _ctx) {
             QApplication::quit();
         };
-        
-        cfg.connection_stop_fnc         = std::move(connection_stop_lambda);
+
+        cfg.connection_stop_fnc = std::move(connection_stop_lambda);
     }
 
     _rsvc.start(std::move(cfg));
