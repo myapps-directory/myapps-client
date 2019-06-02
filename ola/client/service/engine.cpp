@@ -93,11 +93,12 @@ struct ReadData {
     uint64_t  offset_;
     size_t    size_;
     ReadData* pnext_ = nullptr;
+    ReadData* pprev_ = nullptr;
 
     ReadData(
-        char*  _pbuffer,
-		uint64_t _offset,
-        size_t _size)
+        char*    _pbuffer,
+        uint64_t _offset,
+        size_t   _size)
         : pbuffer_(_pbuffer)
         , offset_(_offset)
         , size_(_size)
@@ -105,14 +106,27 @@ struct ReadData {
     }
 };
 
+struct RequestStub {
+    enum StatusE {
+        NotUsedE,
+        PendingE,
+        FetchedE,
+    };
+
+    uint64_t offset_ = 0;
+    size_t   size_   = 0;
+    StatusE  status_ = NotUsedE;
+};
+
 struct FileData {
-	enum StatusE {
-		PendingE,
-		ErrorE,
-	};
-    ReadData* pfront_ = nullptr;
-    ReadData* pback_  = nullptr;
-    StatusE   status_ = PendingE;
+    enum StatusE {
+        PendingE,
+        ErrorE,
+    };
+    ReadData*   pfront_ = nullptr;
+    ReadData*   pback_  = nullptr;
+    StatusE     status_ = PendingE;
+    RequestStub request_stubs_[2];
 
     bool readFromCache(ReadData& _rdata)
     {
@@ -121,16 +135,42 @@ struct FileData {
 
     bool readFromResponses(ReadData& _rdata)
     {
-        return false;
+        if (request_stubs_[0].offset_ < request_stubs_[1].offset_) {
+            if (readFromResponse(0, _rdata))
+                return true;
+            return readFromResponse(1, _rdata);
+        } else {
+            if (readFromResponse(1, _rdata))
+                return true;
+            return readFromResponse(0, _rdata);
+        }
     }
+
+    bool readFromResponse(const size_t _idx, ReadData& _rdata);
 
     void enqueue(ReadData& _rdata)
     {
         _rdata.pnext_ = pback_;
+        _rdata.pprev_ = nullptr;
         if (pback_ == nullptr) {
             pback_ = pfront_ = &_rdata;
         } else {
-            pback_ = &_rdata;
+            pback_->pprev_ = &_rdata;
+            pback_         = &_rdata;
+        }
+    }
+
+    void erase(ReadData& _rdata)
+    {
+        if (_rdata.pprev_ != nullptr) {
+            _rdata.pprev_->pnext_ = _rdata.pnext_;
+        } else {
+            pfront_ = _rdata.pnext_;
+        }
+        if (_rdata.pnext_ != nullptr) {
+            _rdata.pnext_->pprev_ = _rdata.pprev_;
+        } else {
+            pback_ = _rdata.pprev_;
         }
     }
 };
@@ -758,6 +798,29 @@ bool Engine::Implementation::list(
     return false;
 }
 
+bool FileData::readFromResponse(const size_t _idx, ReadData& _rdata)
+{
+    RequestStub& rrs = request_stubs_[_idx];
+    if (rrs.status_ != RequestStub::FetchedE) {
+        return false;
+    }
+
+    if (rrs.offset_ >= _rdata.offset_ && _rdata.offset_ < (rrs.offset_ + rrs.size_)) {
+        uint64_t tocopy = (rrs.offset_ + rrs.size_) - _rdata.offset_;
+        if (tocopy > _rdata.size_) {
+            tocopy = _rdata.size_;
+        }
+
+        //TODO: do the copy with tocopy size
+
+        _rdata.pbuffer_ += tocopy;
+        _rdata.size_ -= tocopy;
+        _rdata.bytes_transfered_ += tocopy;
+        return _rdata.size_ == 0;
+    }
+    return false;
+}
+
 bool Engine::Implementation::read(
     EntryPointerT& _rentry_ptr,
     char*          _pbuf,
@@ -784,14 +847,47 @@ bool Engine::Implementation::read(
     asyncFetch(_rentry_ptr);
 
     _rentry_ptr->conditionVariable().wait(lock, [&rfile_data]() { return rfile_data.status_ != FileData::PendingE; });
-    if (rfile_data.status_ == FileData::ErrorE)
+    if (rfile_data.status_ == FileData::ErrorE) {
         return false;
+    }
     _rbytes_transfered = read_data.bytes_transfered_;
     return true;
 }
 
-void Engine::Implementation::asyncFetch(EntryPointerT& _rentry_ptr) {
+void Engine::Implementation::asyncFetch(EntryPointerT& _rentry_ptr)
+{
+    FileData& rfile_data = *get<FileDataPointerT>(_rentry_ptr->data_var_);
 
+    size_t available_stubs = 0;
+
+    if (!rfile_data.request_stubs_[0].isPending()) {
+        ++available_stubs;
+    }
+    if (!rfile_data.request_stubs_[1].isPending()) {
+        ++available_stubs;
+    }
+    if (available_stubs == 0) {
+        return;
+	}
+
+    uint64_t next_offset = 0;
+    size_t   max_size    = 0;
+
+    if (auto pcrt_data = rfile_data.pfront_) {
+        do {
+            const uint64_t nxt_off = pcrt_data->offset_ + pcrt_data->size_;
+            if (nxt_off > next_offset) {
+                next_offset = nxt_off;
+            }
+            if (max_size > pcrt_data->size_) {
+                max_size = pcrt_data->size_;
+            }
+
+
+
+            pcrt_data = pcrt_data->pprev_;
+        } while (pcrt_data != nullptr && available_stubs != 0);
+    }
 }
 
 void Engine::Implementation::getAuthToken(const frame::mprpc::RecipientId& _recipient_id, string& _rtoken, const string* const _ptoken)
