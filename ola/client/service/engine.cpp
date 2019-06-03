@@ -94,6 +94,7 @@ struct ReadData {
     size_t    size_;
     ReadData* pnext_ = nullptr;
     ReadData* pprev_ = nullptr;
+    bool      done_  = false;
 
     ReadData(
         char*    _pbuffer,
@@ -111,11 +112,14 @@ struct FetchStub {
         NotUsedE,
         PendingE,
         FetchedE,
+        WaitE,
     };
 
-    uint64_t offset_ = 0;
-    size_t   size_   = 0;
-    StatusE  status_ = NotUsedE;
+    uint64_t                              offset_ = 0;
+    size_t                                size_   = 0;
+    StatusE                               status_ = NotUsedE;
+    shared_ptr<FetchStoreRequest>         request_ptr_;
+    shared_ptr<front::FetchStoreResponse> response_ptr_;
 };
 
 struct FileData {
@@ -129,7 +133,8 @@ struct FileData {
     FetchStub fetch_stubs_[2];
     string    storage_id_;
     string    remote_path_;
-    shared_ptr<FetchStoreRequest> req_ptr_;
+    uint64_t  prefetch_offset_;
+    size_t    contiguous_read_count_;
 
     FileData(const string& _storage_id, const string& _remote_path)
         : storage_id_(_storage_id)
@@ -142,7 +147,7 @@ struct FileData {
         return false;
     }
 
-    bool readFromResponses(ReadData& _rdata);
+    bool readFromResponses(ReadData& _rdata, bool _is_front);
 
     bool readFromResponse(const size_t _idx, ReadData& _rdata);
 
@@ -173,6 +178,12 @@ struct FileData {
             pback_ = _rdata.pprev_;
         }
     }
+    size_t findAvailableFetchIndex() const;
+    size_t isReadHandledByPendingFetch(const ReadData& _rread_data) const;
+    bool   readFromResponse(const size_t _idx, ReadData& _rdata, bool _is_front);
+    void   updateContiguousRead(uint64_t _offset, uint64_t _size);
+
+    void writeToCache(const uint64_t _offset, istream& _ris);
 };
 
 struct ApplicationData : DirectoryData {
@@ -415,6 +426,8 @@ public:
 
     bool entry(const fs::path& _path, EntryPointerT& _rentry_ptr, unique_lock<mutex>& _rlock);
 
+    void asyncFetch(EntryPointerT& _rentry_ptr, const size_t _fetch_index, const uint64_t _offset, uint64_t _size);
+
     bool list(
         EntryPointerT& _rentry_ptr,
         void*&         _rpctx,
@@ -423,7 +436,8 @@ public:
         EntryPointerT& _rentry_ptr,
         char*          _pbuf,
         uint64_t _offset, unsigned long _length, unsigned long& _rbytes_transfered);
-    void tryFetch(EntryPointerT& _rentry_ptr);
+    void tryFetch(EntryPointerT& _rentry_ptr, ReadData& _rread_data);
+    void tryPreFetch(EntryPointerT& _rentry_ptr);
 
 private:
     void getAuthToken(const frame::mprpc::RecipientId& _recipient_id, string& _rtoken, const string* const _ptoken = nullptr);
@@ -446,7 +460,8 @@ private:
     void storeAuthData(const string& _user, const string& _token);
 
     void insertApplicationEntry(std::shared_ptr<front::FetchBuildConfigurationResponse>& _rrecv_msg_ptr);
-    void Implementation::insertMountEntry(EntryPointerT& _rparent_ptr, const fs::path& _local, const string& _remote);
+    void insertMountEntry(EntryPointerT& _rparent_ptr, const fs::path& _local, const string& _remote);
+    bool canPreFetch(const EntryPointerT& _rentry_ptr) const;
 
     void remoteFetchApplication(
         std::shared_ptr<front::ListAppsResponse>&               _apps_response,
@@ -803,16 +818,16 @@ bool Engine::Implementation::list(
     return false;
 }
 
-bool FileData::readFromResponses(ReadData& _rdata)
+bool FileData::readFromResponses(ReadData& _rdata, const bool _is_front)
 {
     if (fetch_stubs_[0].offset_ < fetch_stubs_[1].offset_) {
-        if (readFromResponse(0, _rdata))
+        if (readFromResponse(0, _rdata, _is_front))
             return true;
-        return readFromResponse(1, _rdata);
+        return readFromResponse(1, _rdata, _is_front);
     } else {
-        if (readFromResponse(1, _rdata))
+        if (readFromResponse(1, _rdata, _is_front))
             return true;
-        return readFromResponse(0, _rdata);
+        return readFromResponse(0, _rdata, _is_front);
     }
 }
 
@@ -855,17 +870,18 @@ bool Engine::Implementation::read(
         return true;
     }
 
-    if (rfile_data.readFromResponses(read_data)) {
+    if (rfile_data.readFromResponses(read_data, false)) {
         _rbytes_transfered = read_data.bytes_transfered_;
         return true;
     }
 
     if (rfile_data.enqueue(read_data)) {
         //the queue was empty
-        tryFetch(_rentry_ptr);
+        tryFetch(_rentry_ptr, read_data);
+        tryPreFetch(_rentry_ptr);
     }
 
-    _rentry_ptr->conditionVariable().wait(lock, [&rfile_data]() { return rfile_data.status_ != FileData::PendingE; });
+    _rentry_ptr->conditionVariable().wait(lock, [&read_data]() { return read_data.done_; });
 
     if (rfile_data.status_ == FileData::ErrorE) {
         return false;
@@ -874,71 +890,197 @@ bool Engine::Implementation::read(
     return true;
 }
 
-void Engine::Implementation::tryFetch(EntryPointerT& _rentry_ptr)
+size_t FileData::isReadHandledByPendingFetch(const ReadData& _rread_data) const
 {
-    FileData& rfile_data = *get<FileDataPointerT>(_rentry_ptr->data_var_);
-    ReadData& rread_data = *rfile_data.pfront_;
-    size_t    fs0_idx    = 0;
+    size_t fetch_index = InvalidIndex();
 
     {
-        auto& rfs0 = rfile_data.fetch_stubs_[0];
-        auto& rfs1 = rfile_data.fetch_stubs_[1];
-
-        //check if any pending fetch will handle our data
-        if (rfs0.status_ == FetchStub::PendingE) {
+        auto& rfetch_stub = fetch_stubs_[0];
+        if (rfetch_stub.status_ == FetchStub::PendingE) {
             if (
-                rfs0.offset_ <= rread_data.offset_ && rread_data.offset_ < (rfs0.offset_ + rfs0.size_)) {
-                return;
+                rfetch_stub.offset_ <= _rread_data.offset_ && _rread_data.offset_ < (rfetch_stub.offset_ + rfetch_stub.size_)) {
+                return 0;
             }
-            fs0_idx = solid::InvalidIndex();
         }
-
-        if (rfs1.status_ == FetchStub::PendingE) {
+    }
+    {
+        auto& rfetch_stub = fetch_stubs_[1];
+        if (rfetch_stub.status_ == FetchStub::PendingE) {
             if (
-                rfs1.offset_ <= rread_data.offset_ && rread_data.offset_ < (rfs1.offset_ + rfs1.size_)) {
-                return;
+                rfetch_stub.offset_ <= _rread_data.offset_ && _rread_data.offset_ < (rfetch_stub.offset_ + rfetch_stub.size_)) {
+                return 1;
             }
-        } else if (fs0_idx != solid::InvalidIndex()) {
-            //if both fetch stubs are available, chose the one with smaller offset
-            if (rfs1.offset_ < rfile_data.fetch_stubs_[fs0_idx].offset_) {
-                fs0_idx = 1;
-            }
-        } else {
-            fs0_idx = 1;
         }
     }
 
-    if (fs0_idx != solid::InvalidIndex()) {
-        auto& rfs = rfile_data.fetch_stubs_[fs0_idx];
+    return InvalidIndex();
+}
 
-        rfs.status_ = FetchStub::PendingE;
-        rfs.offset_ = rread_data.offset_;
-        rfs.size_   = config_.max_stream_size_;
+size_t FileData::findAvailableFetchIndex() const
+{
+    auto& rfetch_stub0 = fetch_stubs_[0];
+    auto& rfetch_stub1 = fetch_stubs_[1];
 
-        auto lambda = [entry_ptr = _rentry_ptr, this, fs0_idx](
-                          frame::mprpc::ConnectionContext&            _rctx,
-                          std::shared_ptr<front::FetchStoreRequest>&  _rsent_msg_ptr,
-                          std::shared_ptr<front::FetchStoreResponse>& _rrecv_msg_ptr,
-                          ErrorConditionT const&                      _rerror) mutable {
-            
-			//TODO:..	
-			auto&             m = entry_ptr->mutex();
-            lock_guard<mutex> lock{m};
+    if (rfetch_stub0.status_ == FetchStub::NotUsedE)
+        return 0;
+    if (rfetch_stub1.status_ == FetchStub::NotUsedE)
+        return 1;
 
-        };
+    if (rfetch_stub0.status_ == FetchStub::FetchedE)
+        return 0;
+    if (rfetch_stub1.status_ == FetchStub::FetchedE)
+        return 1;
+    return InvalidIndex();
+}
 
-        if (!rfile_data.req_ptr_) {
-            rfile_data.req_ptr_ = make_shared<FetchStoreRequest>();
-		}
-        
-        rfile_data.req_ptr_->path_ = rfile_data.remote_path_;
-        rfile_data.req_ptr_->storage_id_ = rfile_data.storage_id_;
+void Engine::Implementation::tryFetch(EntryPointerT& _rentry_ptr, ReadData& _rread_data)
+{
+    FileData& rfile_data = *get<FileDataPointerT>(_rentry_ptr->data_var_);
 
-        front_rpc_service_.sendRequest(config_.front_endpoint_.c_str(), rfile_data.req_ptr_, lambda);
+    if (auto fetch_index = rfile_data.isReadHandledByPendingFetch(_rread_data) != InvalidIndex()) {
+        //check if we can use the secondary buffer to speed-up fetching
+        auto&  rfs         = rfile_data.fetch_stubs_[fetch_index];
+        auto   next_offset = rfs.offset_ + rfs.size_;
+        size_t second_fetch_index;
+        if (next_offset < _rentry_ptr->size_ && (second_fetch_index = rfile_data.findAvailableFetchIndex()) != InvalidIndex()) {
+            asyncFetch(_rentry_ptr, second_fetch_index, next_offset, 0 /*_rread_data.size_*/);
+        }
+        return;
+    }
+
+    if (auto fetch_index = rfile_data.findAvailableFetchIndex() != InvalidIndex()) {
+        asyncFetch(_rentry_ptr, fetch_index, _rread_data.offset_, 0 /*size*/);
+
+        auto&  rfetch_stub = rfile_data.fetch_stubs_[fetch_index];
+        auto   next_offset = rfetch_stub.offset_ + rfetch_stub.size_;
+        size_t second_fetch_index;
+        if (next_offset < _rentry_ptr->size_ && (second_fetch_index = rfile_data.findAvailableFetchIndex()) != InvalidIndex()) {
+            asyncFetch(_rentry_ptr, second_fetch_index, next_offset, 0);
+        }
     }
 }
 
+void copy_stream(ReadData& _rread_data, const uint64_t _offset, istream& _ris)
+{
+    solid_check(_offset >= _rread_data.offset_);
+    _ris.seekg(_offset - _rread_data.offset_);
+    _ris.read(_rread_data.pbuffer_, _rread_data.size_);
+    uint64_t sz = _ris.gcount();
+    _rread_data.pbuffer_ += sz;
+    _rread_data.bytes_transfered_ += sz;
+    _rread_data.size_ -= sz;
+}
 
+void FileData::writeToCache(const uint64_t _offset, istream& _ris)
+{
+}
+
+bool FileData::readFromResponse(const size_t _idx, ReadData& _rdata, bool _is_front)
+{
+    FetchStub& rfetch_stub = fetch_stubs_[_idx];
+    if (rfetch_stub.status_ != FetchStub::FetchedE && rfetch_stub.status_ != FetchStub::WaitE) {
+        return false;
+    }
+    if (rfetch_stub.offset_ >= _rdata.offset_ && _rdata.offset_ < (rfetch_stub.offset_ + rfetch_stub.size_)) {
+        uint64_t tocopy = (rfetch_stub.offset_ + rfetch_stub.size_) - _rdata.offset_;
+        if (tocopy > _rdata.size_) {
+            tocopy = _rdata.size_;
+        }
+
+        copy_stream(_rdata, rfetch_stub.offset_, rfetch_stub.response_ptr_->ioss_);
+
+        if (_is_front && rfetch_stub.status_ == FetchStub::WaitE) {
+            rfetch_stub.status_ == FetchStub::FetchedE;
+        }
+        return _rdata.size_ == 0;
+    }
+    return false;
+}
+
+void FileData::updateContiguousRead(uint64_t _offset, uint64_t _size)
+{
+    if (_offset == prefetch_offset_) {
+        ++contiguous_read_count_;
+    } else {
+        contiguous_read_count_ = 0;
+    }
+    prefetch_offset_ = _offset + _size;
+}
+
+bool Engine::Implementation::canPreFetch(const EntryPointerT& _rentry_ptr) const
+{
+    const FileData& rfile_data = *get<FileDataPointerT>(_rentry_ptr->data_var_);
+    return (rfile_data.contiguous_read_count_ >= config_.min_contiguous_read_count_) && rfile_data.prefetch_offset_ < _rentry_ptr->size_;
+}
+
+void Engine::Implementation::tryPreFetch(EntryPointerT& _rentry_ptr)
+{
+    FileData& rfile_data = *get<FileDataPointerT>(_rentry_ptr->data_var_);
+    size_t    fetch_index;
+    if (canPreFetch(_rentry_ptr) && (fetch_index = rfile_data.findAvailableFetchIndex()) != InvalidIndex()) {
+        asyncFetch(_rentry_ptr, fetch_index, rfile_data.prefetch_offset_, 0);
+    }
+}
+
+void Engine::Implementation::asyncFetch(EntryPointerT& _rentry_ptr, const size_t _fetch_index, const uint64_t _offset, uint64_t _size)
+{
+    FileData& rfile_data  = *get<FileDataPointerT>(_rentry_ptr->data_var_);
+    auto&     rfetch_stub = rfile_data.fetch_stubs_[_fetch_index];
+
+    rfetch_stub.status_ = FetchStub::PendingE;
+    rfetch_stub.offset_ = _offset;
+    rfetch_stub.size_   = config_.max_stream_size_;
+
+    auto lambda = [entry_ptr = _rentry_ptr, this, _fetch_index](
+                      frame::mprpc::ConnectionContext&            _rctx,
+                      std::shared_ptr<front::FetchStoreRequest>&  _rsent_msg_ptr,
+                      std::shared_ptr<front::FetchStoreResponse>& _rrecv_msg_ptr,
+                      ErrorConditionT const&                      _rerror) mutable {
+        auto&             m = entry_ptr->mutex();
+        lock_guard<mutex> lock{m};
+        FileData&         rfile_data  = *get<FileDataPointerT>(entry_ptr->data_var_);
+        auto&             rfetch_stub = rfile_data.fetch_stubs_[_fetch_index];
+
+        rfetch_stub.status_ = FetchStub::FetchedE;
+        rfetch_stub.response_ptr_ = std::move(_rrecv_msg_ptr);
+
+        rfile_data.writeToCache(_rsent_msg_ptr->offset_, _rrecv_msg_ptr->ioss_);
+
+        size_t fetched_size = _rrecv_msg_ptr->size_ >= 0 ? _rrecv_msg_ptr->size_ : -_rrecv_msg_ptr->size_;
+
+        for (auto* prd = rfile_data.pfront_; prd != nullptr; prd = prd->pprev_) {
+            if (prd->offset_ >= rfetch_stub.offset_ && prd->offset_ < (rfetch_stub.offset_ + fetched_size)) {
+                copy_stream(*prd, rfetch_stub.offset_, _rrecv_msg_ptr->ioss_);
+            } else if (prd == rfile_data.pfront_ && prd->offset_ >= rfetch_stub.offset_ && rfetch_stub.offset_ < (prd->offset_ + prd->size_)) {
+                //TODO: maybe more checks are needed
+                rfetch_stub.status_ = FetchStub::WaitE;
+            }
+
+            rfile_data.readFromResponses(*prd, prd == rfile_data.pfront_);
+
+            if (prd->size_ == 0) {
+                rfile_data.erase(*prd);
+                prd->done_ = true;
+                entry_ptr->conditionVariable().notify_all();
+            }
+        }
+
+        for (auto* prd = rfile_data.pfront_; prd != nullptr; prd = prd->pprev_) {
+            tryFetch(entry_ptr, *prd);
+        }
+        tryPreFetch(entry_ptr);
+    };
+
+    if (!rfetch_stub.request_ptr_) {
+        rfetch_stub.request_ptr_ = make_shared<FetchStoreRequest>();
+    }
+    rfetch_stub.request_ptr_->path_       = rfile_data.remote_path_;
+    rfetch_stub.request_ptr_->storage_id_ = rfile_data.storage_id_;
+    rfetch_stub.request_ptr_->offset_     = rfetch_stub.offset_;
+    rfetch_stub.request_ptr_->size_       = rfetch_stub.size_;
+
+    front_rpc_service_.sendRequest(config_.front_endpoint_.c_str(), rfetch_stub.request_ptr_, lambda);
+}
 
 //-----------------------------------------------------------------------------
 
