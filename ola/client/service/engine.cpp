@@ -149,8 +149,6 @@ struct FileData {
 
     bool readFromResponses(ReadData& _rdata, bool _is_front);
 
-    bool readFromResponse(const size_t _idx, ReadData& _rdata);
-
     bool enqueue(ReadData& _rdata)
     {
         _rdata.pnext_ = pback_;
@@ -636,7 +634,9 @@ Descriptor* Engine::open(const fs::path& _path)
     unique_lock<mutex> lock{rmutex};
 
     if (pimpl_->entry(_path, entry_ptr, lock)) {
-        return new Descriptor(std::move(entry_ptr));
+        auto pdesc = new Descriptor(std::move(entry_ptr));
+        solid_log(logger, Verbose, _path.generic_path() << " -> " << pdesc);
+        return pdesc;
     }
     return nullptr;
 }
@@ -647,6 +647,10 @@ void Engine::cleanup(Descriptor* _pdesc)
 
 void Engine::close(Descriptor* _pdesc)
 {
+    if (_pdesc->entry_ptr_->type_ == EntryTypeE::File) {
+        //_pdesc->entry_ptr_->data_var_ = UniqueIdT(); //TODO store propper UniqueId
+    }
+
     delete _pdesc;
 }
 
@@ -726,6 +730,7 @@ bool Engine::Implementation::entry(const fs::path& _path, EntryPointerT& _rentry
         if (_rentry_ptr->type_ == EntryTypeE::Unknown) {
             eraseEntryFromParent(std::move(_rentry_ptr), std::move(_rlock));
         }
+        solid_log(logger, Verbose, "Fail open: " << _path.generic_path());
 
         return false;
     } else {
@@ -733,8 +738,12 @@ bool Engine::Implementation::entry(const fs::path& _path, EntryPointerT& _rentry
 
         if (_rentry_ptr->type_ == EntryTypeE::File) {
             //TODO: move creation to FileCache
-            _rentry_ptr->data_var_ = make_unique<FileData>(storage_id, remote_path);
+            if (holds_alternative<UniqueIdT>(_rentry_ptr->data_var_)) {
+                _rentry_ptr->data_var_ = make_unique<FileData>(storage_id, remote_path);
+            }
         }
+
+        solid_log(logger, Verbose, "Open " << _rentry_ptr.get() << " " << _path.generic_path() << " type: " << static_cast<uint16_t>(_rentry_ptr->type_) << " remote: " << remote_path);
 
         //success
         return true;
@@ -766,8 +775,9 @@ bool Engine::Implementation::list(
     void*&         _rpctx,
     std::wstring& _rname, NodeTypeE& _rnode_type, uint64_t& _rsize)
 {
-    using ContextT       = pair<int, EntryMapT::const_iterator>;
-    auto&              m = _rentry_ptr->mutex();
+    using ContextT = pair<int, EntryMapT::const_iterator>;
+
+    auto&              m{_rentry_ptr->mutex()};
     unique_lock<mutex> lock(m);
     ContextT*          pctx = nullptr;
     DirectoryData*     pdd  = _rentry_ptr->directoryData();
@@ -831,47 +841,40 @@ bool FileData::readFromResponses(ReadData& _rdata, const bool _is_front)
     }
 }
 
-bool FileData::readFromResponse(const size_t _idx, ReadData& _rdata)
-{
-    FetchStub& rfs = fetch_stubs_[_idx];
-    if (rfs.status_ != FetchStub::FetchedE) {
-        return false;
-    }
-
-    if (rfs.offset_ >= _rdata.offset_ && _rdata.offset_ < (rfs.offset_ + rfs.size_)) {
-        uint64_t tocopy = (rfs.offset_ + rfs.size_) - _rdata.offset_;
-        if (tocopy > _rdata.size_) {
-            tocopy = _rdata.size_;
-        }
-
-        //TODO: do the copy with tocopy size
-
-        _rdata.pbuffer_ += tocopy;
-        _rdata.size_ -= tocopy;
-        _rdata.bytes_transfered_ += tocopy;
-        return _rdata.size_ == 0;
-    }
-    return false;
-}
-
 bool Engine::Implementation::read(
     EntryPointerT& _rentry_ptr,
     char*          _pbuf,
     uint64_t _offset, unsigned long _length, unsigned long& _rbytes_transfered)
 {
+    solid_log(logger, Verbose, _rentry_ptr.get() << " " << _offset << " " << _length);
+
     auto&              m = _rentry_ptr->mutex();
     unique_lock<mutex> lock(m);
+
+    if (_offset >= _rentry_ptr->size_) {
+        _rbytes_transfered = 0;
+        return true;
+    }
+
+    {
+        size_t remaining_len = _rentry_ptr->size_ - _offset;
+        if (_length > remaining_len) {
+            _length = remaining_len;
+        }
+    }
 
     FileData& rfile_data = *get<FileDataPointerT>(_rentry_ptr->data_var_);
     ReadData  read_data{_pbuf, _offset, _length};
 
     if (rfile_data.readFromCache(read_data)) {
         _rbytes_transfered = read_data.bytes_transfered_;
+        solid_log(logger, Verbose, _rentry_ptr.get() << " read from cache " << _rbytes_transfered);
         return true;
     }
 
     if (rfile_data.readFromResponses(read_data, false)) {
         _rbytes_transfered = read_data.bytes_transfered_;
+        solid_log(logger, Verbose, _rentry_ptr.get() << " read from responses " << _rbytes_transfered);
         return true;
     }
 
@@ -880,13 +883,15 @@ bool Engine::Implementation::read(
         tryFetch(_rentry_ptr, read_data);
         tryPreFetch(_rentry_ptr);
     }
-
+    solid_log(logger, Verbose, _rentry_ptr.get() << " wait");
     _rentry_ptr->conditionVariable().wait(lock, [&read_data]() { return read_data.done_; });
 
     if (rfile_data.status_ == FileData::ErrorE) {
+        solid_log(logger, Verbose, _rentry_ptr.get() << " error reading");
         return false;
     }
     _rbytes_transfered = read_data.bytes_transfered_;
+    solid_log(logger, Verbose, _rentry_ptr.get() << " read done " << _rbytes_transfered);
     return true;
 }
 
@@ -937,18 +942,21 @@ void Engine::Implementation::tryFetch(EntryPointerT& _rentry_ptr, ReadData& _rre
 {
     FileData& rfile_data = *get<FileDataPointerT>(_rentry_ptr->data_var_);
 
-    if (auto fetch_index = rfile_data.isReadHandledByPendingFetch(_rread_data) != InvalidIndex()) {
+    if (auto fetch_index = rfile_data.isReadHandledByPendingFetch(_rread_data); fetch_index != InvalidIndex()) {
+        solid_log(logger, Verbose, _rentry_ptr.get() << " read handled by pending " << fetch_index);
         //check if we can use the secondary buffer to speed-up fetching
         auto&  rfs         = rfile_data.fetch_stubs_[fetch_index];
         auto   next_offset = rfs.offset_ + rfs.size_;
         size_t second_fetch_index;
         if (next_offset < _rentry_ptr->size_ && (second_fetch_index = rfile_data.findAvailableFetchIndex()) != InvalidIndex()) {
+            solid_log(logger, Verbose, _rentry_ptr.get() << " prefetch " << second_fetch_index << " " << next_offset);
             asyncFetch(_rentry_ptr, second_fetch_index, next_offset, 0 /*_rread_data.size_*/);
         }
         return;
     }
 
-    if (auto fetch_index = rfile_data.findAvailableFetchIndex() != InvalidIndex()) {
+    if (auto fetch_index = rfile_data.findAvailableFetchIndex(); fetch_index != InvalidIndex()) {
+        solid_log(logger, Verbose, _rentry_ptr.get() << " read " << fetch_index << " " << _rread_data.offset_);
         asyncFetch(_rentry_ptr, fetch_index, _rread_data.offset_, 0 /*size*/);
 
         auto&  rfetch_stub = rfile_data.fetch_stubs_[fetch_index];
@@ -962,13 +970,16 @@ void Engine::Implementation::tryFetch(EntryPointerT& _rentry_ptr, ReadData& _rre
 
 void copy_stream(ReadData& _rread_data, const uint64_t _offset, istream& _ris)
 {
-    solid_check(_offset >= _rread_data.offset_);
-    _ris.seekg(_offset - _rread_data.offset_);
+    solid_check(_offset <= _rread_data.offset_);
+    _ris.seekg(_rread_data.offset_ - _offset);
     _ris.read(_rread_data.pbuffer_, _rread_data.size_);
     uint64_t sz = _ris.gcount();
+    _rread_data.offset_ += sz;
     _rread_data.pbuffer_ += sz;
     _rread_data.bytes_transfered_ += sz;
     _rread_data.size_ -= sz;
+
+    solid_log(logger, Verbose, "" << _rread_data.offset_ << " " << _rread_data.size_);
 }
 
 void FileData::writeToCache(const uint64_t _offset, istream& _ris)
@@ -977,11 +988,12 @@ void FileData::writeToCache(const uint64_t _offset, istream& _ris)
 
 bool FileData::readFromResponse(const size_t _idx, ReadData& _rdata, bool _is_front)
 {
+
     FetchStub& rfetch_stub = fetch_stubs_[_idx];
     if (rfetch_stub.status_ != FetchStub::FetchedE && rfetch_stub.status_ != FetchStub::WaitE) {
         return false;
     }
-    if (rfetch_stub.offset_ >= _rdata.offset_ && _rdata.offset_ < (rfetch_stub.offset_ + rfetch_stub.size_)) {
+    if (rfetch_stub.offset_ <= _rdata.offset_ && _rdata.offset_ < (rfetch_stub.offset_ + rfetch_stub.size_)) {
         uint64_t tocopy = (rfetch_stub.offset_ + rfetch_stub.size_) - _rdata.offset_;
         if (tocopy > _rdata.size_) {
             tocopy = _rdata.size_;
@@ -1017,13 +1029,15 @@ void Engine::Implementation::tryPreFetch(EntryPointerT& _rentry_ptr)
 {
     FileData& rfile_data = *get<FileDataPointerT>(_rentry_ptr->data_var_);
     size_t    fetch_index;
-    if (canPreFetch(_rentry_ptr) && (fetch_index = rfile_data.findAvailableFetchIndex()) != InvalidIndex()) {
+    if (canPreFetch(_rentry_ptr) && ((fetch_index = rfile_data.findAvailableFetchIndex()) != InvalidIndex())) {
+        solid_log(logger, Verbose, _rentry_ptr.get() << " " << fetch_index << " " << rfile_data.prefetch_offset_);
         asyncFetch(_rentry_ptr, fetch_index, rfile_data.prefetch_offset_, 0);
     }
 }
 
 void Engine::Implementation::asyncFetch(EntryPointerT& _rentry_ptr, const size_t _fetch_index, const uint64_t _offset, uint64_t _size)
 {
+    solid_log(logger, Verbose, _rentry_ptr.get() << " " << _fetch_index << " " << _offset << " " << _size);
     FileData& rfile_data  = *get<FileDataPointerT>(_rentry_ptr->data_var_);
     auto&     rfetch_stub = rfile_data.fetch_stubs_[_fetch_index];
 
@@ -1036,32 +1050,42 @@ void Engine::Implementation::asyncFetch(EntryPointerT& _rentry_ptr, const size_t
                       std::shared_ptr<front::FetchStoreRequest>&  _rsent_msg_ptr,
                       std::shared_ptr<front::FetchStoreResponse>& _rrecv_msg_ptr,
                       ErrorConditionT const&                      _rerror) mutable {
+
+		solid_check(_rrecv_msg_ptr, _rerror.message());
+        solid_log(logger, Verbose, "recv data: " << _rsent_msg_ptr->offset_ << " " << _rrecv_msg_ptr->size_);
         auto&             m = entry_ptr->mutex();
         lock_guard<mutex> lock{m};
-        FileData&         rfile_data  = *get<FileDataPointerT>(entry_ptr->data_var_);
+        FileDataPointerT* pfd         = get_if<FileDataPointerT>(&entry_ptr->data_var_);
+        if (pfd == nullptr) {
+            return;
+        }
+        FileData&         rfile_data  = *(*pfd);
         auto&             rfetch_stub = rfile_data.fetch_stubs_[_fetch_index];
 
-        rfetch_stub.status_ = FetchStub::FetchedE;
+        rfetch_stub.status_       = FetchStub::FetchedE;
         rfetch_stub.response_ptr_ = std::move(_rrecv_msg_ptr);
 
-        rfile_data.writeToCache(_rsent_msg_ptr->offset_, _rrecv_msg_ptr->ioss_);
+        rfile_data.writeToCache(_rsent_msg_ptr->offset_, rfetch_stub.response_ptr_->ioss_);
 
-        size_t fetched_size = _rrecv_msg_ptr->size_ >= 0 ? _rrecv_msg_ptr->size_ : -_rrecv_msg_ptr->size_;
+        size_t fetched_size = rfetch_stub.response_ptr_->size_ >= 0 ? rfetch_stub.response_ptr_->size_ : -rfetch_stub.response_ptr_->size_;
 
-        for (auto* prd = rfile_data.pfront_; prd != nullptr; prd = prd->pprev_) {
+        for (auto* prd = rfile_data.pfront_; prd != nullptr;) {
             if (prd->offset_ >= rfetch_stub.offset_ && prd->offset_ < (rfetch_stub.offset_ + fetched_size)) {
-                copy_stream(*prd, rfetch_stub.offset_, _rrecv_msg_ptr->ioss_);
+                copy_stream(*prd, rfetch_stub.offset_, rfetch_stub.response_ptr_->ioss_);
             } else if (prd == rfile_data.pfront_ && prd->offset_ >= rfetch_stub.offset_ && rfetch_stub.offset_ < (prd->offset_ + prd->size_)) {
                 //TODO: maybe more checks are needed
                 rfetch_stub.status_ = FetchStub::WaitE;
             }
 
-            rfile_data.readFromResponses(*prd, prd == rfile_data.pfront_);
-
             if (prd->size_ == 0) {
-                rfile_data.erase(*prd);
-                prd->done_ = true;
+                auto tmp = prd;
+                prd      = prd->pprev_;
+                rfile_data.erase(*tmp);
+                tmp->done_ = true;
                 entry_ptr->conditionVariable().notify_all();
+            } else {
+                rfile_data.readFromResponses(*prd, prd == rfile_data.pfront_);
+                prd = prd->pprev_;
             }
         }
 
