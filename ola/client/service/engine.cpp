@@ -252,7 +252,7 @@ struct Entry {
     EntryPointerT find(const string& _path) const
     {
         EntryPointerT entry_ptr;
-        if (auto pd = directoryData()) {
+        if (auto pd = directoryData(); pd != nullptr) {
             entry_ptr = pd->find(_path);
         }
         return entry_ptr;
@@ -260,7 +260,9 @@ struct Entry {
 
     void erase(const EntryPointerT& _rentry_ptr)
     {
-        data_var_ = UniqueIdT{};
+        if (auto pd = directoryData(); pd != nullptr) {
+            pd->erase(_rentry_ptr);
+        }
     }
 
     std::mutex& mutex() const
@@ -301,9 +303,9 @@ struct Entry {
 
     bool empty() const
     {
-        if (auto pd = std::get_if<UniqueIdT>(&data_var_)) {
+        if (auto pd = std::get_if<UniqueIdT>(&data_var_); pd != nullptr) {
             return true;
-        } else if (auto pd = std::get_if<DirectoryDataPointerT>(&data_var_)) {
+        } else if (auto pd = std::get_if<DirectoryDataPointerT>(&data_var_); pd != nullptr) {
             return (*pd)->empty();
         }
         return false;
@@ -541,7 +543,11 @@ void Engine::start(const Configuration& _rcfg)
             auto connection_start_lambda = [this](frame::mprpc::ConnectionContext& _ctx) {
                 pimpl_->onFrontConnectionStart(_ctx);
             };
+            auto connection_stop_lambda = [this](frame::mprpc::ConnectionContext& _ctx) {
+                solid_log(logger, Verbose, "Connection stopping");
+            };
             cfg.client.connection_start_fnc = std::move(connection_start_lambda);
+            cfg.connection_stop_fnc         = std::move(connection_stop_lambda);
         }
 
         if (_rcfg.secure_) {
@@ -841,6 +847,17 @@ bool FileData::readFromResponses(ReadData& _rdata, const bool _is_front)
     }
 }
 
+void check_file(char* _pbuf, uint64_t _offset, unsigned long _length)
+{
+    static ifstream ifs("C:\\Users\\vipal\\tmp\\bubbles_client\\bubbles_client.exe", ios::binary);
+    solid_assert(ifs);
+    char buf[1024 * 256];
+
+    ifs.seekg(_offset);
+    ifs.read(buf, _length);
+    solid_assert(memcmp(_pbuf, buf, _length) == 0);
+}
+
 bool Engine::Implementation::read(
     EntryPointerT& _rentry_ptr,
     char*          _pbuf,
@@ -890,6 +907,10 @@ bool Engine::Implementation::read(
         solid_log(logger, Verbose, _rentry_ptr.get() << " error reading");
         return false;
     }
+    if (_rentry_ptr->size_ == 3013632) {
+        check_file(_pbuf, _offset, read_data.bytes_transfered_);
+    }
+
     _rbytes_transfered = read_data.bytes_transfered_;
     solid_log(logger, Verbose, _rentry_ptr.get() << " read done " << _rbytes_transfered);
     return true;
@@ -942,44 +963,46 @@ void Engine::Implementation::tryFetch(EntryPointerT& _rentry_ptr, ReadData& _rre
 {
     FileData& rfile_data = *get<FileDataPointerT>(_rentry_ptr->data_var_);
 
-    if (auto fetch_index = rfile_data.isReadHandledByPendingFetch(_rread_data); fetch_index != InvalidIndex()) {
+    //try to avoid double prefetching
+    if (auto fetch_index = rfile_data.isReadHandledByPendingFetch(_rread_data); fetch_index != InvalidIndex() && rfile_data.fetch_stubs_[fetch_index].size_ != 0) {
         solid_log(logger, Verbose, _rentry_ptr.get() << " read handled by pending " << fetch_index);
         //check if we can use the secondary buffer to speed-up fetching
         auto&  rfs         = rfile_data.fetch_stubs_[fetch_index];
         auto   next_offset = rfs.offset_ + rfs.size_;
         size_t second_fetch_index;
-        if (next_offset < _rentry_ptr->size_ && (second_fetch_index = rfile_data.findAvailableFetchIndex()) != InvalidIndex()) {
+        if (canPreFetch(_rentry_ptr) && next_offset < _rentry_ptr->size_ && (second_fetch_index = rfile_data.findAvailableFetchIndex()) != InvalidIndex()) {
             solid_log(logger, Verbose, _rentry_ptr.get() << " prefetch " << second_fetch_index << " " << next_offset);
-            asyncFetch(_rentry_ptr, second_fetch_index, next_offset, 0 /*_rread_data.size_*/);
+            asyncFetch(_rentry_ptr, second_fetch_index, next_offset, config_.max_stream_size_ /*_rread_data.size_*/);
         }
         return;
     }
 
     if (auto fetch_index = rfile_data.findAvailableFetchIndex(); fetch_index != InvalidIndex()) {
         solid_log(logger, Verbose, _rentry_ptr.get() << " read " << fetch_index << " " << _rread_data.offset_);
-        asyncFetch(_rentry_ptr, fetch_index, _rread_data.offset_, 0 /*size*/);
+        asyncFetch(_rentry_ptr, fetch_index, _rread_data.offset_, canPreFetch(_rentry_ptr) ? config_.max_stream_size_ : _rread_data.size_);
 
         auto&  rfetch_stub = rfile_data.fetch_stubs_[fetch_index];
         auto   next_offset = rfetch_stub.offset_ + rfetch_stub.size_;
         size_t second_fetch_index;
-        if (next_offset < _rentry_ptr->size_ && (second_fetch_index = rfile_data.findAvailableFetchIndex()) != InvalidIndex()) {
-            asyncFetch(_rentry_ptr, second_fetch_index, next_offset, 0);
+
+        if (canPreFetch(_rentry_ptr) && next_offset < _rentry_ptr->size_ && (second_fetch_index = rfile_data.findAvailableFetchIndex()) != InvalidIndex()) {
+            asyncFetch(_rentry_ptr, second_fetch_index, next_offset, config_.max_stream_size_);
         }
     }
 }
 
-void copy_stream(ReadData& _rread_data, const uint64_t _offset, istream& _ris)
+void copy_stream(ReadData& _rread_data, const uint64_t _offset, istream& _ris, uint64_t _size)
 {
     solid_check(_offset <= _rread_data.offset_);
     _ris.seekg(_rread_data.offset_ - _offset);
-    _ris.read(_rread_data.pbuffer_, _rread_data.size_);
+    _ris.read(_rread_data.pbuffer_, _size);
     uint64_t sz = _ris.gcount();
     _rread_data.offset_ += sz;
     _rread_data.pbuffer_ += sz;
     _rread_data.bytes_transfered_ += sz;
     _rread_data.size_ -= sz;
 
-    solid_log(logger, Verbose, "" << _rread_data.offset_ << " " << _rread_data.size_);
+    solid_log(logger, Verbose, "" << _rread_data.offset_ << " " << _rread_data.size_ << " size = " << _size << " sz = " << sz);
 }
 
 void FileData::writeToCache(const uint64_t _offset, istream& _ris)
@@ -988,18 +1011,19 @@ void FileData::writeToCache(const uint64_t _offset, istream& _ris)
 
 bool FileData::readFromResponse(const size_t _idx, ReadData& _rdata, bool _is_front)
 {
-
+    return false;
     FetchStub& rfetch_stub = fetch_stubs_[_idx];
     if (rfetch_stub.status_ != FetchStub::FetchedE && rfetch_stub.status_ != FetchStub::WaitE) {
         return false;
     }
+
     if (rfetch_stub.offset_ <= _rdata.offset_ && _rdata.offset_ < (rfetch_stub.offset_ + rfetch_stub.size_)) {
         uint64_t tocopy = (rfetch_stub.offset_ + rfetch_stub.size_) - _rdata.offset_;
         if (tocopy > _rdata.size_) {
             tocopy = _rdata.size_;
         }
 
-        copy_stream(_rdata, rfetch_stub.offset_, rfetch_stub.response_ptr_->ioss_);
+        copy_stream(_rdata, rfetch_stub.offset_, rfetch_stub.response_ptr_->ioss_, tocopy);
 
         if (_is_front && rfetch_stub.status_ == FetchStub::WaitE) {
             rfetch_stub.status_ == FetchStub::FetchedE;
@@ -1043,35 +1067,39 @@ void Engine::Implementation::asyncFetch(EntryPointerT& _rentry_ptr, const size_t
 
     rfetch_stub.status_ = FetchStub::PendingE;
     rfetch_stub.offset_ = _offset;
-    rfetch_stub.size_   = config_.max_stream_size_;
+    rfetch_stub.size_   = _size;
 
     auto lambda = [entry_ptr = _rentry_ptr, this, _fetch_index](
                       frame::mprpc::ConnectionContext&            _rctx,
                       std::shared_ptr<front::FetchStoreRequest>&  _rsent_msg_ptr,
                       std::shared_ptr<front::FetchStoreResponse>& _rrecv_msg_ptr,
                       ErrorConditionT const&                      _rerror) mutable {
-
-		solid_check(_rrecv_msg_ptr, _rerror.message());
+        solid_check(_rrecv_msg_ptr, _rerror.message());
         solid_log(logger, Verbose, "recv data: " << _rsent_msg_ptr->offset_ << " " << _rrecv_msg_ptr->size_);
         auto&             m = entry_ptr->mutex();
         lock_guard<mutex> lock{m};
-        FileDataPointerT* pfd         = get_if<FileDataPointerT>(&entry_ptr->data_var_);
+        FileDataPointerT* pfd = get_if<FileDataPointerT>(&entry_ptr->data_var_);
         if (pfd == nullptr) {
             return;
         }
-        FileData&         rfile_data  = *(*pfd);
-        auto&             rfetch_stub = rfile_data.fetch_stubs_[_fetch_index];
+        FileData& rfile_data  = *(*pfd);
+        auto&     rfetch_stub = rfile_data.fetch_stubs_[_fetch_index];
 
         rfetch_stub.status_       = FetchStub::FetchedE;
         rfetch_stub.response_ptr_ = std::move(_rrecv_msg_ptr);
 
         rfile_data.writeToCache(_rsent_msg_ptr->offset_, rfetch_stub.response_ptr_->ioss_);
 
-        size_t fetched_size = rfetch_stub.response_ptr_->size_ >= 0 ? rfetch_stub.response_ptr_->size_ : -rfetch_stub.response_ptr_->size_;
+        rfetch_stub.size_ = rfetch_stub.response_ptr_->size_ >= 0 ? rfetch_stub.response_ptr_->size_ : -rfetch_stub.response_ptr_->size_;
 
         for (auto* prd = rfile_data.pfront_; prd != nullptr;) {
-            if (prd->offset_ >= rfetch_stub.offset_ && prd->offset_ < (rfetch_stub.offset_ + fetched_size)) {
-                copy_stream(*prd, rfetch_stub.offset_, rfetch_stub.response_ptr_->ioss_);
+            if (prd->offset_ >= rfetch_stub.offset_ && prd->offset_ < (rfetch_stub.offset_ + rfetch_stub.size_)) {
+                uint64_t tocopy = (rfetch_stub.offset_ + rfetch_stub.size_) - prd->offset_;
+                if (tocopy > prd->size_) {
+                    tocopy = prd->size_;
+                }
+
+                copy_stream(*prd, rfetch_stub.offset_, rfetch_stub.response_ptr_->ioss_, tocopy);
             } else if (prd == rfile_data.pfront_ && prd->offset_ >= rfetch_stub.offset_ && rfetch_stub.offset_ < (prd->offset_ + prd->size_)) {
                 //TODO: maybe more checks are needed
                 rfetch_stub.status_ = FetchStub::WaitE;
@@ -1475,10 +1503,12 @@ void Engine::Implementation::eraseEntryFromParent(EntryPointerT&& _uentry_ptr, u
 
     if (parent_ptr) {
         unique_lock<mutex> lock{parent_ptr->mutex()};
-        parent_ptr->erase(entry_ptr);
+        if (parent_ptr->status_ != EntryStatusE::Fetched) {
+            parent_ptr->erase(entry_ptr);
 
-        if (parent_ptr->isErasable()) {
-            eraseEntryFromParent(std::move(parent_ptr), std::move(lock));
+			if (parent_ptr->isErasable()) {
+                eraseEntryFromParent(std::move(parent_ptr), std::move(lock));
+            }
         }
     }
 }
