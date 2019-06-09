@@ -20,6 +20,10 @@
 #include "ola/common/ola_front_protocol.hpp"
 
 #include "boost/filesystem.hpp"
+#include <boost/algorithm/string/predicate.hpp>
+#include <boost/functional/hash.hpp>
+
+
 #include <condition_variable>
 #include <fstream>
 #include <mutex>
@@ -53,6 +57,7 @@ enum struct EntryStatusE : uint8_t {
     Fetched
 };
 
+/*
 struct Hash {
     size_t operator()(const std::reference_wrapper<const string>& _rrw) const
     {
@@ -65,6 +70,29 @@ struct Equal {
     bool operator()(const std::reference_wrapper<const string>& _rrw1, const std::reference_wrapper<const string>& _rrw2) const
     {
         return _rrw1.get() == _rrw2.get();
+    }
+};
+*/
+
+struct Equal {
+    bool operator()(const std::reference_wrapper<const string>& _rrw1, const std::reference_wrapper<const string>& _rrw2) const
+    {
+        return boost::algorithm::iequals(_rrw1.get(), _rrw2.get(), std::locale());
+    }
+};
+
+struct Hash {
+    std::size_t operator()(const std::reference_wrapper<const string>& _rrw) const
+    {
+        std::size_t seed = 0;
+        std::locale locale;
+
+        for (std::string::const_iterator it = _rrw.get().begin();
+             it != _rrw.get().end(); ++it) {
+            boost::hash_combine(seed, std::toupper(*it, locale));
+        }
+
+        return seed;
     }
 };
 
@@ -627,8 +655,10 @@ bool Engine::info(const fs::path& _path, NodeTypeE& _rnode_type, uint64_t& _rsiz
 
     if (pimpl_->entry(_path, entry_ptr, lock)) {
         entry_ptr->info(_rnode_type, _rsize);
+        solid_log(logger, Verbose, "INFO: " << _path.generic_path() << " " << static_cast<int>(_rnode_type) << " " << _rsize);
         return true;
     }
+    solid_log(logger, Verbose, "INFO: FAIL " << _path.generic_path());
     return false;
 }
 
@@ -641,7 +671,7 @@ Descriptor* Engine::open(const fs::path& _path)
 
     if (pimpl_->entry(_path, entry_ptr, lock)) {
         auto pdesc = new Descriptor(std::move(entry_ptr));
-        solid_log(logger, Verbose, _path.generic_path() << " -> " << pdesc);
+        solid_log(logger, Verbose, "OPEN: " << _path.generic_path() << " -> " << pdesc << " entry: " << pdesc->entry_ptr_.get());
         return pdesc;
     }
     return nullptr;
@@ -656,7 +686,7 @@ void Engine::close(Descriptor* _pdesc)
     if (_pdesc->entry_ptr_->type_ == EntryTypeE::File) {
         //_pdesc->entry_ptr_->data_var_ = UniqueIdT(); //TODO store propper UniqueId
     }
-
+    solid_log(logger, Verbose, "CLOSE: " << _pdesc << " entry: " << _pdesc->entry_ptr_.get());
     delete _pdesc;
 }
 
@@ -695,7 +725,7 @@ bool Engine::Implementation::entry(const fs::path& _path, EntryPointerT& _rentry
                 remote_path += _rentry_ptr->remote_;
             } else {
                 remote_path += '/';
-                remote_path += s;
+                remote_path += _rentry_ptr->name_;
             }
         }
     }
@@ -849,7 +879,7 @@ bool FileData::readFromResponses(ReadData& _rdata, const bool _is_front)
 
 void check_file(char* _pbuf, uint64_t _offset, unsigned long _length)
 {
-    static ifstream ifs("C:\\Users\\vipal\\tmp\\bubbles_client\\bubbles_client.exe", ios::binary);
+    static ifstream ifs("C:\\Users\\vipal\\work\\bubbles_release\\bubbles_client.exe", ios::binary);
     solid_assert(ifs);
     char buf[1024 * 256];
 
@@ -863,13 +893,13 @@ bool Engine::Implementation::read(
     char*          _pbuf,
     uint64_t _offset, unsigned long _length, unsigned long& _rbytes_transfered)
 {
-    solid_log(logger, Verbose, _rentry_ptr.get() << " " << _offset << " " << _length);
 
     auto&              m = _rentry_ptr->mutex();
     unique_lock<mutex> lock(m);
 
     if (_offset >= _rentry_ptr->size_) {
         _rbytes_transfered = 0;
+        solid_log(logger, Verbose, "READ: " << _rentry_ptr.get() << " zero");
         return true;
     }
 
@@ -885,13 +915,13 @@ bool Engine::Implementation::read(
 
     if (rfile_data.readFromCache(read_data)) {
         _rbytes_transfered = read_data.bytes_transfered_;
-        solid_log(logger, Verbose, _rentry_ptr.get() << " read from cache " << _rbytes_transfered);
+        solid_log(logger, Verbose, "READ: " << _rentry_ptr.get() << " read from cache " << _rbytes_transfered);
         return true;
     }
 
     if (rfile_data.readFromResponses(read_data, false)) {
         _rbytes_transfered = read_data.bytes_transfered_;
-        solid_log(logger, Verbose, _rentry_ptr.get() << " read from responses " << _rbytes_transfered);
+        solid_log(logger, Verbose, "READ: " << _rentry_ptr.get() << " read from responses " << _rbytes_transfered);
         return true;
     }
 
@@ -904,15 +934,12 @@ bool Engine::Implementation::read(
     _rentry_ptr->conditionVariable().wait(lock, [&read_data]() { return read_data.done_; });
 
     if (rfile_data.status_ == FileData::ErrorE) {
-        solid_log(logger, Verbose, _rentry_ptr.get() << " error reading");
+        solid_log(logger, Verbose, "READ: " << _rentry_ptr.get() << " error reading");
         return false;
-    }
-    if (_rentry_ptr->size_ == 3013632) {
-        check_file(_pbuf, _offset, read_data.bytes_transfered_);
     }
 
     _rbytes_transfered = read_data.bytes_transfered_;
-    solid_log(logger, Verbose, _rentry_ptr.get() << " read done " << _rbytes_transfered);
+    solid_log(logger, Verbose, "READ: " << _rentry_ptr.get() << " " << _offset << " " << _length << " " << _rbytes_transfered);
     return true;
 }
 
@@ -1001,8 +1028,6 @@ void copy_stream(ReadData& _rread_data, const uint64_t _offset, istream& _ris, u
     _rread_data.pbuffer_ += sz;
     _rread_data.bytes_transfered_ += sz;
     _rread_data.size_ -= sz;
-
-    solid_log(logger, Verbose, "" << _rread_data.offset_ << " " << _rread_data.size_ << " size = " << _size << " sz = " << sz);
 }
 
 void FileData::writeToCache(const uint64_t _offset, istream& _ris)
@@ -1011,7 +1036,6 @@ void FileData::writeToCache(const uint64_t _offset, istream& _ris)
 
 bool FileData::readFromResponse(const size_t _idx, ReadData& _rdata, bool _is_front)
 {
-    return false;
     FetchStub& rfetch_stub = fetch_stubs_[_idx];
     if (rfetch_stub.status_ != FetchStub::FetchedE && rfetch_stub.status_ != FetchStub::WaitE) {
         return false;
@@ -1026,7 +1050,7 @@ bool FileData::readFromResponse(const size_t _idx, ReadData& _rdata, bool _is_fr
         copy_stream(_rdata, rfetch_stub.offset_, rfetch_stub.response_ptr_->ioss_, tocopy);
 
         if (_is_front && rfetch_stub.status_ == FetchStub::WaitE) {
-            rfetch_stub.status_ == FetchStub::FetchedE;
+            rfetch_stub.status_ = FetchStub::FetchedE;
         }
         return _rdata.size_ == 0;
     }

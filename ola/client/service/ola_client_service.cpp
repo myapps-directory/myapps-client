@@ -54,7 +54,7 @@ struct Parameters {
     wstring        debug_log_file_;
     uint32_t       debug_flags_;
     wstring        mount_point_;
-    vector<string> debug_modules_ = {"ola::.*:VIEW"};
+    vector<string> debug_modules_ = {"ola::.*:EW"};
     string         debug_addr_;
     string         debug_port_;
     bool           debug_console_;
@@ -84,7 +84,6 @@ private:
 
     NTSTATUS InitSecurityDescriptor();
 
-    static NTSTATUS GetFileInfoInternal(HANDLE Handle, FileInfo* FileInfo);
     NTSTATUS        Init(PVOID Host) override;
     NTSTATUS        GetVolumeInfo(
                VolumeInfo* VolumeInfo) override;
@@ -592,16 +591,6 @@ wstring a2w(const string &_a) {
 }
 
 void FileSystemService::onGuiStart(int _port){
-#if 0
-	DWORD dwSessionId = GetSessionIdOfUser(NULL, NULL); 
-    if (dwSessionId == 0xFFFFFFFF) 
-    { 
-        // Log the error and exit. 
-        WriteErrorLogEntry(L"GetSessionIdOfUser", GetLastError()); 
-        return; 
-    }
-	RevertToSelf();
-#endif
 	wostringstream oss;
 	oss<<L"ola_client_gui.exe --front "<<a2w(params_.front_endpoint_)<<L" --local "<<_port;
     DWORD dwExitCode;
@@ -668,23 +657,6 @@ uint32_t node_type_to_attributes(ola::client::service::NodeTypeE _node_type){
 	return attr;
 }
 
-#if 0
-struct Descriptor
-{
-	using EntryIdT = ola::client::service::EntryIdT;
-
-    PVOID  DirBuffer = nullptr;
-	EntryIdT	entry_id_;
-
-	~Descriptor(){
-		FileSystem::DeleteDirectoryBuffer(&DirBuffer);
-	}
-
-	void clear(){
-		entry_id_.clear();
-	}
-};
-#endif
 //-----------------------------------------------------------------------------
 
 FileSystem::FileSystem(ola::client::service::Engine &_rengine) :  rengine_(_rengine)
@@ -825,7 +797,7 @@ NTSTATUS FileSystem::Open(
     if(*PFileDesc != nullptr){
         return GetFileInfo(*PFileNode, *PFileDesc, &OpenFileInfo->FileInfo);
     }else{
-        return STATUS_OBJECT_NAME_INVALID;
+        return NtStatusFromWin32(ERROR_FILE_NOT_FOUND);
     }
 }
 
@@ -1029,25 +1001,6 @@ NTSTATUS FileSystem::ReadDirectoryEntry(
 	uint32_t  attributes = FILE_ATTRIBUTE_READONLY | FILE_ATTRIBUTE_NOT_CONTENT_INDEXED;
 	NodeTypeE	node_type;
 
-#if 0
-    PVOID &rvctx = *pContext;
-	size_t &rctx = reinterpret_cast<size_t&>(rvctx);
-	if(rctx == 0){
-		//.
-		name = L".";
-		attributes |= FILE_ATTRIBUTE_DIRECTORY;
-		++rctx;
-	}else if(rctx == 1){
-		name = L"..";
-		attributes |= FILE_ATTRIBUTE_DIRECTORY;
-		++rctx;
-	}else if(engine().node(pFileNode, pFileDesc, pContext, name, size, entry_type)){
-		attributes |= entry_type_to_attributes(entry_type);
-	}else{
-		return STATUS_NO_MORE_FILES;
-	}
-#endif
-
     if(engine().list(static_cast<service::Descriptor*>(pFileDesc), *pContext, name, node_type, size)){
 		attributes |= node_type_to_attributes(node_type);
 	}else{
@@ -1075,74 +1028,4 @@ NTSTATUS FileSystem::ReadDirectoryEntry(
 //-----------------------------------------------------------------------------
 
 //-----------------------------------------------------------------------------
-
-#if 0
-NTSTATUS FileSystem::ReadDirectoryEntry(
-    PVOID FileNode,
-    PVOID FileDesc0,
-    PWSTR Pattern,
-    PWSTR Marker,
-    PVOID *PContext,
-    DirInfo *DirInfo)
-{
-    FileDesc *pFileDesc = (FileDesc *)FileDesc0;
-    HANDLE Handle = pFileDesc->Handle;
-    WCHAR FullPath[FULLPATH_SIZE];
-    ULONG Length, PatternLength;
-    HANDLE FindHandle;
-    WIN32_FIND_DATAW FindData;
-
-    if (0 == *PContext)
-    {
-        if (0 == Pattern)
-            Pattern = L"*";
-        PatternLength = (ULONG)wcslen(Pattern);
-
-        Length = GetFinalPathNameByHandleW(Handle, FullPath, FULLPATH_SIZE - 1, 0);
-        if (0 == Length)
-            return NtStatusFromWin32(GetLastError());
-        if (Length + 1 + PatternLength >= FULLPATH_SIZE)
-            return STATUS_OBJECT_NAME_INVALID;
-
-        if (L'\\' != FullPath[Length - 1])
-            FullPath[Length++] = L'\\';
-        memcpy(FullPath + Length, Pattern, PatternLength * sizeof(WCHAR));
-        FullPath[Length + PatternLength] = L'\0';
-
-        FindHandle = FindFirstFileW(FullPath, &FindData);
-        if (INVALID_HANDLE_VALUE == FindHandle)
-            return STATUS_NO_MORE_FILES;
-
-        *PContext = FindHandle;
-    }
-    else
-    {
-        FindHandle = *PContext;
-        if (!FindNextFileW(FindHandle, &FindData))
-        {
-            FindClose(FindHandle);
-            return STATUS_NO_MORE_FILES;
-        }
-    }
-
-    memset(DirInfo, 0, sizeof *DirInfo);
-    Length = (ULONG)wcslen(FindData.cFileName);
-    DirInfo->Size = (UINT16)(FIELD_OFFSET(FileSystem::DirInfo, FileNameBuf) + Length * sizeof(WCHAR));
-    DirInfo->FileInfo.FileAttributes = FindData.dwFileAttributes;
-    DirInfo->FileInfo.ReparseTag = 0;
-    DirInfo->FileInfo.FileSize =
-        ((UINT64)FindData.nFileSizeHigh << 32) | (UINT64)FindData.nFileSizeLow;
-    DirInfo->FileInfo.AllocationSize = (DirInfo->FileInfo.FileSize + ALLOCATION_UNIT - 1)
-        / ALLOCATION_UNIT * ALLOCATION_UNIT;
-    DirInfo->FileInfo.CreationTime = ((PLARGE_INTEGER)&FindData.ftCreationTime)->QuadPart;
-    DirInfo->FileInfo.LastAccessTime = ((PLARGE_INTEGER)&FindData.ftLastAccessTime)->QuadPart;
-    DirInfo->FileInfo.LastWriteTime = ((PLARGE_INTEGER)&FindData.ftLastWriteTime)->QuadPart;
-    DirInfo->FileInfo.ChangeTime = DirInfo->FileInfo.LastWriteTime;
-    DirInfo->FileInfo.IndexNumber = 0;
-    DirInfo->FileInfo.HardLinks = 0;
-    memcpy(DirInfo->FileNameBuf, FindData.cFileName, Length * sizeof(WCHAR));
-
-    return STATUS_SUCCESS;
-}
-#endif
 }//namespace
