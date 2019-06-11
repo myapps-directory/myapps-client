@@ -18,11 +18,11 @@
 #include "ola/client/utility/locale.hpp"
 
 #include "ola/common/ola_front_protocol.hpp"
+#include "shortcut_creator.hpp"
 
 #include "boost/filesystem.hpp"
 #include <boost/algorithm/string/predicate.hpp>
 #include <boost/functional/hash.hpp>
-
 
 #include <condition_variable>
 #include <fstream>
@@ -407,6 +407,7 @@ struct Engine::Implementation {
     CVDequeT                  cv_dq_;
     string                    os_id_;
     string                    language_id_;
+    ShortcutCreator           shortcut_creator_;
 
 public:
     Implementation(
@@ -416,6 +417,7 @@ public:
         , resolver_{workpool_}
         , front_rpc_service_{manager_}
         , gui_rpc_service_{manager_}
+        , shortcut_creator_{config_.temp_folder_}
     {
     }
 
@@ -1438,6 +1440,19 @@ void Engine::Implementation::insertApplicationEntry(std::shared_ptr<front::Fetch
         entry_ptr->status_ = EntryStatusE::FetchRequired;
     }
 
+    if (!_rrecv_msg_ptr->build_configuration_.shortcut_vec_.empty()) {
+        for (const auto& sh : _rrecv_msg_ptr->build_configuration_.shortcut_vec_) {
+            shortcut_creator_.create(
+				sh.name_,
+                _rrecv_msg_ptr->build_configuration_.directory_+ '\\' + sh.command_,
+                "",
+				sh.run_folder_,
+				sh.icon_,
+                ""
+			);
+		}
+    }
+
     solid_log(logger, Info, entry_ptr->name_);
 
     auto&             rm = root_entry_ptr_->mutex();
@@ -1530,7 +1545,7 @@ void Engine::Implementation::eraseEntryFromParent(EntryPointerT&& _uentry_ptr, u
         if (parent_ptr->status_ != EntryStatusE::Fetched) {
             parent_ptr->erase(entry_ptr);
 
-			if (parent_ptr->isErasable()) {
+            if (parent_ptr->isErasable()) {
                 eraseEntryFromParent(std::move(parent_ptr), std::move(lock));
             }
         }

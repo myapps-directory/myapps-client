@@ -2,7 +2,10 @@ message("FUSE_INCLUDE_DIRECTORY = ${FUSE_INCLUDE_DIRECTORY}")
 
 if(WIN32)
     include_directories("${FUSE_INCLUDE_DIRECTORY}")
-    add_executable(ola_client_service WIN32 ola_client_service.cpp engine.hpp engine.cpp filecache.hpp filecache.cpp)
+    add_executable(ola_client_service WIN32
+        ola_client_service.cpp engine.hpp engine.cpp file_cache.hpp file_cache.cpp
+        shortcut_creator.hpp shortcut_creator.cpp
+    )
 
     if(CMAKE_SIZEOF_VOID_P EQUAL 8)
         target_link_options(ola_client_service PRIVATE /DELAYLOAD:winfsp-x64.dll)
