@@ -573,10 +573,11 @@ ostream& operator<<(ostream &_ros, const utility::Build::Configuration &c){
     _ros<<endl;
     _ros<<"Shortcuts: {\n";
     for(const auto &s: c.shortcut_vec_){
-        _ros<<"Name:   "<<s.name_<<endl;
-        _ros<<"Command:"<<s.command_<<endl;
-        _ros<<"Run Fld:"<<s.run_folder_<<endl;
-        _ros<<"Icon:   "<<s.icon_<<endl;
+        _ros<<"Name:      "<<s.name_<<endl;
+        _ros<<"Command:   "<<s.command_<<endl;
+        _ros<<"Arguments: "<<s.arguments_<<endl;
+        _ros<<"Run Fld:   "<<s.run_folder_<<endl;
+        _ros<<"Icon:      "<<s.icon_<<endl;
         _ros<<endl;
     }
     _ros<<"}\n";
@@ -1017,15 +1018,15 @@ void handle_generate_app(istream& _ris, Engine &_reng){
     cfg.dictionary_dq_ = {
         {"", "en-US"},
         {"NAME", "bubbles"},
-        {"DESC", "bubbles description"},
+        {"DESCRIPTION", "bubbles description"},
         {"", "ro-RO"},
         {"NAME", "bule"},
-        {"DESC", "descriere bule"},
+        {"DESCRIPTION", "descriere bule"},
     };
     
     cfg.property_vec_ = {
         {"name", "${NAME}"},
-        {"desc", "${DESC}"}
+        {"description", "${DESCRIPTION}"}
     };
     store_app_config(cfg, path(config_path));
     {
@@ -1049,15 +1050,15 @@ void handle_generate_buid(istream& _ris, Engine &_reng){
     cfg.dictionary_dq_ = {
         {"", "en-US"},
         {"NAME", "Bubbles"},
-        {"DESC", "Bubbles description"},
+        {"DESCRIPTION", "Bubbles description"},
         {"", "ro-RO"},
         {"NAME", "Bule"},
-        {"DESC", "Descriere Bule"},
+        {"DESCRIPTION", "Descriere Bule"},
     };
     
     cfg.property_vec_ = {
         {"name", "${NAME}"},
-        {"desc", "${DESC}"}
+        {"description", "${DESCRIPTION}"}
     };
     
     cfg.configuration_vec_ = ola::utility::Build::ConfigurationVectorT{
@@ -1078,7 +1079,7 @@ void handle_generate_buid(istream& _ris, Engine &_reng){
                 },
                 {
                     {"name", "${NAME}"},
-                    {"desc", "${DESC}"}
+                    {"description", "${DESCRIPTION}"}
                 }//properties
             },
             {
@@ -1097,7 +1098,7 @@ void handle_generate_buid(istream& _ris, Engine &_reng){
                 },
                 {
                     {"name", "${NAME}"},
-                    {"desc", "${DESC}"}
+                    {"description", "${DESCRIPTION}"}
                 }//properties
             }
         }
@@ -1598,6 +1599,7 @@ bool load_build_config(ola::utility::Build &_rcfg, const string &_path){
                     
                     it->lookupValue("name", s.name_);
                     it->lookupValue("command", s.command_);
+                    it->lookupValue("arguments", s.arguments_);
                     it->lookupValue("run_folder", s.run_folder_);
                     it->lookupValue("icon", s.icon_);
                     
@@ -1691,6 +1693,7 @@ bool store_build_config(const ola::utility::Build &_rcfg, const string &_path){
                 Setting &g  = shortcut_list.add(Setting::TypeGroup);
                 g.add("name", Setting::TypeString) = v.name_;
                 g.add("command", Setting::TypeString) = v.command_;
+                g.add("arguments", Setting::TypeString) = v.arguments_;
                 g.add("icon", Setting::TypeString) = v.icon_;
                 g.add("run_folder", Setting::TypeString) = v.run_folder_;
             }
