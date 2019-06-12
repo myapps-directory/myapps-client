@@ -54,7 +54,7 @@ struct Parameters {
     wstring        debug_log_file_;
     uint32_t       debug_flags_;
     wstring        mount_point_;
-    vector<string> debug_modules_ = {"ola::.*:EW"};
+    vector<string> debug_modules_ = {"ola::.*:VIEW"};
     string         debug_addr_;
     string         debug_port_;
     bool           debug_console_;
@@ -279,6 +279,19 @@ string envLogPathPrefix()
     string r = v;
     r += "\\OLA\\client";
     return r;
+}
+
+string envTempPrefix()
+{
+    const char* v = getenv("TEMP");
+    if (v == nullptr) {
+        v = getenv("TMP");
+        if (v == nullptr) {
+            v = "c:";
+        }
+    }
+
+    return v;
 }
 
 // -- FileSystemService -------------------------------------------------------
@@ -558,6 +571,7 @@ NTSTATUS FileSystemService::OnStart(ULONG argc, PWSTR *argv)
     cfg.compress_ = params_.compress_;
     cfg.front_endpoint_ = params_.front_endpoint_;
 	cfg.path_prefix_ = envConfigPathPrefix();
+	cfg.temp_folder_ = envTempPrefix();
 	cfg.gui_fail_fnc_ = [this](){
 		onGuiFail();
 	};

@@ -215,13 +215,18 @@ struct FileData {
 struct ApplicationData : DirectoryData {
 };
 
+struct ShortcutData {
+    stringstream ioss_;
+};
+
 using DirectoryDataPointerT   = std::unique_ptr<DirectoryData>;
 using FileDataPointerT        = std::unique_ptr<FileData>;
 using ApplicationDataPointerT = std::unique_ptr<ApplicationData>;
+using ShortcutDataPointerT    = std::unique_ptr<ShortcutData>;
 using UniqueIdT               = solid::frame::UniqueId;
 using EntryDataVariantT       = std::variant<
     UniqueIdT,
-    DirectoryDataPointerT, ApplicationDataPointerT, FileDataPointerT>; //the order should be consistent with EntryTypeE
+    DirectoryDataPointerT, ApplicationDataPointerT, FileDataPointerT, ShortcutDataPointerT>; //the order should be consistent with EntryTypeE
 
 struct Entry {
     std::mutex&              rmutex_;
@@ -492,6 +497,17 @@ private:
     void insertApplicationEntry(std::shared_ptr<front::FetchBuildConfigurationResponse>& _rrecv_msg_ptr);
     void insertMountEntry(EntryPointerT& _rparent_ptr, const fs::path& _local, const string& _remote);
     bool canPreFetch(const EntryPointerT& _rentry_ptr) const;
+
+	bool readFromFile(
+        EntryPointerT&      _rentry_ptr,
+        unique_lock<mutex>& _rlock,
+        char*               _pbuf,
+        uint64_t _offset, unsigned long _length, unsigned long& _rbytes_transfered);
+
+	bool readFromShortcut(
+        EntryPointerT&      _rentry_ptr,
+        char*               _pbuf,
+        uint64_t _offset, unsigned long _length, unsigned long& _rbytes_transfered);
 
     void remoteFetchApplication(
         std::shared_ptr<front::ListAppsResponse>&               _apps_response,
@@ -912,6 +928,22 @@ bool Engine::Implementation::read(
         }
     }
 
+    switch (_rentry_ptr->type_) {
+    case EntryTypeE::File:
+        return readFromFile(_rentry_ptr, lock, _pbuf, _offset, _length, _rbytes_transfered);
+    case EntryTypeE::Shortcut:
+        return readFromShortcut(_rentry_ptr, _pbuf, _offset, _length, _rbytes_transfered);
+    default:
+        solid_throw("Try read from unknown entry type");
+    }
+}
+
+bool Engine::Implementation::readFromFile(
+    EntryPointerT& _rentry_ptr,
+    unique_lock<mutex> &_rlock,
+    char*          _pbuf,
+    uint64_t _offset, unsigned long _length, unsigned long& _rbytes_transfered)
+{
     FileData& rfile_data = *get<FileDataPointerT>(_rentry_ptr->data_var_);
     ReadData  read_data{_pbuf, _offset, _length};
 
@@ -933,7 +965,7 @@ bool Engine::Implementation::read(
         tryPreFetch(_rentry_ptr);
     }
     solid_log(logger, Verbose, _rentry_ptr.get() << " wait");
-    _rentry_ptr->conditionVariable().wait(lock, [&read_data]() { return read_data.done_; });
+    _rentry_ptr->conditionVariable().wait(_rlock, [&read_data]() { return read_data.done_; });
 
     if (rfile_data.status_ == FileData::ErrorE) {
         solid_log(logger, Verbose, "READ: " << _rentry_ptr.get() << " error reading");
@@ -942,6 +974,19 @@ bool Engine::Implementation::read(
 
     _rbytes_transfered = read_data.bytes_transfered_;
     solid_log(logger, Verbose, "READ: " << _rentry_ptr.get() << " " << _offset << " " << _length << " " << _rbytes_transfered);
+    return true;
+}
+
+bool Engine::Implementation::readFromShortcut(
+    EntryPointerT& _rentry_ptr,
+    char*          _pbuf,
+    uint64_t _offset, unsigned long _length, unsigned long& _rbytes_transfered)
+{
+    ShortcutData& rshortcut_data = *get<ShortcutDataPointerT>(_rentry_ptr->data_var_);
+
+    rshortcut_data.ioss_.seekg(_offset);
+    rshortcut_data.ioss_.read(_pbuf, _length);
+    _rbytes_transfered = rshortcut_data.ioss_.gcount();
     return true;
 }
 
@@ -1378,6 +1423,7 @@ void Engine::Implementation::onFrontListAppsResponse(
     //TODO:
     req_ptr->lang_  = "US_en";
     req_ptr->os_id_ = "Windows10x86_64";
+    req_ptr->property_vec_.emplace_back("description");
 
     remoteFetchApplication(_rrecv_msg_ptr, req_ptr, 0);
 }
@@ -1417,6 +1463,19 @@ void Engine::Implementation::insertMountEntry(EntryPointerT& _rparent_ptr, const
     entry_ptr->status_ = EntryStatusE::FetchRequired;
 }
 
+string to_system_path(const string& _path)
+{
+    string to;
+    to.reserve(_path.size());
+    for (char c : _path) {
+        if (c == '/') {
+            c = '\\';
+        }
+        to += c;
+    }
+    return to;
+}
+
 void Engine::Implementation::insertApplicationEntry(std::shared_ptr<front::FetchBuildConfigurationResponse>& _rrecv_msg_ptr)
 {
     auto entry_ptr = createEntry(
@@ -1440,22 +1499,31 @@ void Engine::Implementation::insertApplicationEntry(std::shared_ptr<front::Fetch
         entry_ptr->status_ = EntryStatusE::FetchRequired;
     }
 
+	auto& rm = root_entry_ptr_->mutex();
+
     if (!_rrecv_msg_ptr->build_configuration_.shortcut_vec_.empty()) {
         for (const auto& sh : _rrecv_msg_ptr->build_configuration_.shortcut_vec_) {
-            shortcut_creator_.create(
-				sh.name_,
-                _rrecv_msg_ptr->build_configuration_.directory_+ '\\' + sh.command_,
-                "",
-				sh.run_folder_,
-				sh.icon_,
-                ""
-			);
-		}
+            auto skt_entry_ptr = createEntry(
+                root_entry_ptr_, sh.name_ + ".lnk",
+                EntryTypeE::Shortcut);
+
+            skt_entry_ptr->status_   = EntryStatusE::Fetched;
+            skt_entry_ptr->data_var_ = make_unique<ShortcutData>();
+
+            skt_entry_ptr->size_ = shortcut_creator_.create(
+                get<ShortcutDataPointerT>(skt_entry_ptr->data_var_)->ioss_,
+                to_system_path("c:/ola/" + entry_ptr->name_ + '/' + sh.command_),
+                sh.arguments_,
+                to_system_path("c:/ola/" + entry_ptr->name_ + '/' + sh.run_folder_),
+                to_system_path("c:/ola/" + entry_ptr->name_ + '/' + sh.icon_),
+                _rrecv_msg_ptr->build_configuration_.property_vec_.front().second);
+
+            get<DirectoryDataPointerT>(root_entry_ptr_->data_var_)->insertEntry(std::move(skt_entry_ptr));
+        }
     }
 
     solid_log(logger, Info, entry_ptr->name_);
 
-    auto&             rm = root_entry_ptr_->mutex();
     lock_guard<mutex> lock{rm};
     //TODO: also create coresponding shortcuts
 

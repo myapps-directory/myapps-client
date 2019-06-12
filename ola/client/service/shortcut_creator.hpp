@@ -3,6 +3,7 @@
 #include <solid/system/pimpl.hpp>
 #include <solid/system/error.hpp>
 #include <string>
+#include <ostream>
 
 namespace ola {
 namespace client {
@@ -13,8 +14,8 @@ public:
     ShortcutCreator(const std::string &_temp_folder);
     ~ShortcutCreator();
 
-    std::string create(
-		const std::string &_name,
+    size_t create(
+        std::ostream& _ros,
 		const std::string &_command,
         const std::string& _arguments,
 		const std::string &_run_folder,

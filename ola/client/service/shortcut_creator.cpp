@@ -46,8 +46,8 @@ ShortcutCreator::~ShortcutCreator()
 {
 }
 
-string ShortcutCreator::create(
-    const std::string& _name,
+size_t ShortcutCreator::create(
+    std::ostream&      _ros,
     const std::string& _command,
     const std::string& _arguments,
     const std::string& _run_folder,
@@ -70,6 +70,7 @@ string ShortcutCreator::create(
         psl->SetArguments(_arguments.c_str());
         psl->SetDescription(_description.c_str());
         psl->SetWorkingDirectory(_run_folder.c_str());
+        psl->SetIconLocation(_icon.c_str(), 0);
 
         // Query IShellLink for the IPersistFile interface, used for saving the
         // shortcut in persistent storage.
@@ -90,17 +91,23 @@ string ShortcutCreator::create(
     CoUninitialize();
 
 	string lnk;
+    size_t read_count = 0;
 
 	if (SUCCEEDED(hres)) {
-        ifstream ifs{path, ios::binary};
-        ifs.seekg(0, std::ios_base::end);
-        std::streamoff sz = ifs.tellg();
-        ifs.seekg(0);
-
-        lnk.resize(sz);
-        ifs.read(&lnk[0], sz); 
+        ifstream         ifs{path, ios::binary};
+        constexpr size_t buffer_capacity = 4096;
+        char             buffer[buffer_capacity];
+        if (ifs) {
+            while (ifs.read(buffer, buffer_capacity)) {
+                read_count += buffer_capacity;
+                _ros.write(buffer, buffer_capacity);
+            }
+            size_t cnt = ifs.gcount(); 
+            _ros.write(buffer, cnt);
+            read_count += cnt;
+        }
     }
-    return lnk;
+    return read_count;
 }
 
 } //namespace service
