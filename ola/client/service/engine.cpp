@@ -1399,7 +1399,11 @@ void Engine::Implementation::remoteFetchApplication(
                       std::shared_ptr<front::FetchBuildConfigurationResponse>& _rrecv_msg_ptr,
                       ErrorConditionT const&                                   _rerror) mutable {
         if (_rrecv_msg_ptr) {
-            insertApplicationEntry(_rrecv_msg_ptr);
+
+			this->workpool_.push([this, recv_msg_ptr = std::move(_rrecv_msg_ptr)]() mutable {
+                insertApplicationEntry(recv_msg_ptr);
+			});
+
             ++_app_index;
             if (_app_index < apps_response->app_id_vec_.size()) {
                 remoteFetchApplication(apps_response, _rsent_msg_ptr, _app_index);
@@ -1499,7 +1503,17 @@ void Engine::Implementation::insertApplicationEntry(std::shared_ptr<front::Fetch
         entry_ptr->status_ = EntryStatusE::FetchRequired;
     }
 
+	solid_log(logger, Info, entry_ptr->name_);
+
 	auto& rm = root_entry_ptr_->mutex();
+    {
+        lock_guard<mutex> lock{rm};
+        //TODO: also create coresponding shortcuts
+
+        get<DirectoryDataPointerT>(root_entry_ptr_->data_var_)->insertEntry(std::move(entry_ptr));
+    }
+	
+	const auto& app_folder_name = _rrecv_msg_ptr->build_configuration_.directory_;
 
     if (!_rrecv_msg_ptr->build_configuration_.shortcut_vec_.empty()) {
         for (const auto& sh : _rrecv_msg_ptr->build_configuration_.shortcut_vec_) {
@@ -1512,22 +1526,16 @@ void Engine::Implementation::insertApplicationEntry(std::shared_ptr<front::Fetch
 
             skt_entry_ptr->size_ = shortcut_creator_.create(
                 get<ShortcutDataPointerT>(skt_entry_ptr->data_var_)->ioss_,
-                to_system_path("c:/ola/" + entry_ptr->name_ + '/' + sh.command_),
+                to_system_path(config_.mount_prefix_ + '/' + app_folder_name + '/' + sh.command_),
                 sh.arguments_,
-                to_system_path("c:/ola/" + entry_ptr->name_ + '/' + sh.run_folder_),
-                to_system_path("c:/ola/" + entry_ptr->name_ + '/' + sh.icon_),
+                to_system_path(config_.mount_prefix_ + '/' + app_folder_name + '/' + sh.run_folder_),
+                to_system_path(config_.mount_prefix_ + '/' + app_folder_name + '/' + sh.icon_),
                 _rrecv_msg_ptr->build_configuration_.property_vec_.front().second);
 
+            lock_guard<mutex> lock{rm};
             get<DirectoryDataPointerT>(root_entry_ptr_->data_var_)->insertEntry(std::move(skt_entry_ptr));
         }
     }
-
-    solid_log(logger, Info, entry_ptr->name_);
-
-    lock_guard<mutex> lock{rm};
-    //TODO: also create coresponding shortcuts
-
-    get<DirectoryDataPointerT>(root_entry_ptr_->data_var_)->insertEntry(std::move(entry_ptr));
 }
 
 EntryPointerT Engine::Implementation::createEntry(EntryPointerT& _rparent_ptr, const string& _name, const EntryTypeE _type, const uint64_t _size)

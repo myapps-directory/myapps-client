@@ -571,6 +571,7 @@ NTSTATUS FileSystemService::OnStart(ULONG argc, PWSTR *argv)
     cfg.compress_ = params_.compress_;
     cfg.front_endpoint_ = params_.front_endpoint_;
 	cfg.path_prefix_ = envConfigPathPrefix();
+	cfg.mount_prefix_ = utility::narrow(params_.mount_point_);
 	cfg.temp_folder_ = envTempPrefix();
 	cfg.gui_fail_fnc_ = [this](){
 		onGuiFail();
