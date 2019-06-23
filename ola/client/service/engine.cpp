@@ -19,8 +19,9 @@
 
 #include "ola/common/ola_front_protocol.hpp"
 #include "shortcut_creator.hpp"
+#include "file_cache.hpp"
 
-#include "boost/filesystem.hpp"
+#include <boost/filesystem.hpp>
 #include <boost/algorithm/string/predicate.hpp>
 #include <boost/functional/hash.hpp>
 
@@ -150,7 +151,7 @@ struct FetchStub {
     shared_ptr<front::FetchStoreResponse> response_ptr_;
 };
 
-struct FileData {
+struct FileData : file_cache::FileData {
     enum StatusE {
         PendingE,
         ErrorE,
@@ -172,7 +173,7 @@ struct FileData {
 
     bool readFromCache(ReadData& _rdata)
     {
-        return false;
+        return file_cache::FileData::readFromCache(_rdata.pbuffer_, _rdata.offset_, _rdata.size_, _rdata.bytes_transfered_);
     }
 
     bool readFromResponses(ReadData& _rdata, bool _is_front);
@@ -208,8 +209,6 @@ struct FileData {
     size_t isReadHandledByPendingFetch(const ReadData& _rread_data) const;
     bool   readFromResponse(const size_t _idx, ReadData& _rdata, bool _is_front);
     void   updateContiguousRead(uint64_t _offset, uint64_t _size);
-
-    void writeToCache(const uint64_t _offset, istream& _ris);
 };
 
 struct ApplicationData : DirectoryData {
@@ -413,6 +412,7 @@ struct Engine::Implementation {
     string                    os_id_;
     string                    language_id_;
     ShortcutCreator           shortcut_creator_;
+    file_cache::Engine        file_cache_engine_;
 
 public:
     Implementation(
@@ -473,6 +473,13 @@ public:
         uint64_t _offset, unsigned long _length, unsigned long& _rbytes_transfered);
     void tryFetch(EntryPointerT& _rentry_ptr, ReadData& _rread_data);
     void tryPreFetch(EntryPointerT& _rentry_ptr);
+
+	fs::path cachePath() const
+    {
+        fs::path p = config_.path_prefix_;
+        p /= "cache";
+        return p;
+    }
 
 private:
     void getAuthToken(const frame::mprpc::RecipientId& _recipient_id, string& _rtoken, const string* const _ptoken = nullptr);
@@ -570,6 +577,8 @@ void Engine::start(const Configuration& _rcfg)
 {
     solid_log(logger, Verbose, "");
     pimpl_ = make_unique<Implementation>(_rcfg);
+
+	fs::create_directories(pimpl_->cachePath());
 
     pimpl_->scheduler_.start(1);
 
@@ -702,7 +711,11 @@ void Engine::cleanup(Descriptor* _pdesc)
 void Engine::close(Descriptor* _pdesc)
 {
     if (_pdesc->entry_ptr_->type_ == EntryTypeE::File) {
-        //_pdesc->entry_ptr_->data_var_ = UniqueIdT(); //TODO store propper UniqueId
+        mutex&             rmutex = _pdesc->entry_ptr_->mutex();
+        unique_lock<mutex> lock{rmutex};
+        if (_pdesc->entry_ptr_.use_count() == 2) {
+            _pdesc->entry_ptr_->data_var_ = pimpl_->file_cache_engine_.release(get<FileDataPointerT>(_pdesc->entry_ptr_->data_var_));
+        }
     }
     solid_log(logger, Verbose, "CLOSE: " << _pdesc << " entry: " << _pdesc->entry_ptr_.get());
     delete _pdesc;
@@ -791,9 +804,9 @@ bool Engine::Implementation::entry(const fs::path& _path, EntryPointerT& _rentry
         solid_check(_rentry_ptr->type_ > EntryTypeE::Unknown);
 
         if (_rentry_ptr->type_ == EntryTypeE::File) {
-            //TODO: move creation to FileCache
             if (holds_alternative<UniqueIdT>(_rentry_ptr->data_var_)) {
-                _rentry_ptr->data_var_ = make_unique<FileData>(storage_id, remote_path);
+                //_rentry_ptr->data_var_ = make_unique<FileData>(storage_id, remote_path);
+                _rentry_ptr->data_var_ = file_cache_engine_.create<FileData>(get<UniqueIdT>(_rentry_ptr->data_var_), _rentry_ptr->size_, storage_id, remote_path);
             }
         }
 
@@ -1075,10 +1088,6 @@ void copy_stream(ReadData& _rread_data, const uint64_t _offset, istream& _ris, u
     _rread_data.pbuffer_ += sz;
     _rread_data.bytes_transfered_ += sz;
     _rread_data.size_ -= sz;
-}
-
-void FileData::writeToCache(const uint64_t _offset, istream& _ris)
-{
 }
 
 bool FileData::readFromResponse(const size_t _idx, ReadData& _rdata, bool _is_front)

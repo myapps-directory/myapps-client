@@ -1,5 +1,7 @@
 message("FUSE_INCLUDE_DIRECTORY = ${FUSE_INCLUDE_DIRECTORY}")
 
+add_subdirectory(test)
+
 if(WIN32)
     include_directories("${FUSE_INCLUDE_DIRECTORY}")
     add_executable(ola_client_service WIN32
