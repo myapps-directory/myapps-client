@@ -4,6 +4,7 @@
 #include <fstream>
 #include <vector>
 #include <memory>
+#include <string>
 
 namespace ola {
 namespace client {
@@ -11,6 +12,9 @@ namespace service {
 namespace file_cache {
 
 namespace fs = boost::filesystem;
+
+std::string namefy(const std::string& _path);
+std::string denamefy(const std::string& _path);
 
 class File {
     struct Header {
@@ -25,10 +29,17 @@ class File {
             , size_(_size)
         {
         }
+
+		template <class Archive>
+        void serialize(Archive& _a)
+        {
+            _a(offset_, size_);
+        }
     };
     using RangeVectorT = std::vector<Range>;
     RangeVectorT range_vec_;
     std::fstream stream_;
+    uint64_t     size_;
 
 public:
     static uint64_t check(const fs::path& _path);
@@ -37,12 +48,15 @@ public:
 
 	void close();
 
-	void write(const uint64_t _offset, const uint64_t _size, std::istream& _ris);
+	void write(const uint64_t _offset, std::istream& _ris);
     bool read(char* _pbuf, uint64_t _offset, size_t _length, size_t& _rbytes_transfered);
 
 private:
 	void addRange(const uint64_t _offset, const uint64_t _size);
     bool findRange(const uint64_t _offset, size_t& _rsize) const;
+
+	bool loadRanges();
+    void storeRanges();
 };
 
 struct FileData {

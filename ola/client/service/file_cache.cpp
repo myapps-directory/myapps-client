@@ -1,5 +1,11 @@
 #include "file_cache.hpp"
+#include "solid/system/cassert.hpp"
 #include <algorithm>
+
+#include <cereal/archives/binary.hpp>
+#include <cereal/types/memory.hpp>
+#include <cereal/types/string.hpp>
+#include <cereal/types/vector.hpp>
 
 using namespace std;
 
@@ -15,12 +21,94 @@ namespace file_cache {
     return 0;
 }
 
+template <class T>
+struct BufferWrapper {
+    static constexpr size_t size = sizeof(T);
+
+    union {
+        T    t_;
+        char b_[size];
+    } u_;
+
+    char* buffer()
+    {
+        return u_.b_;
+    }
+
+    T& data()
+    {
+        return u_.t_;
+    }
+};
+
 bool File::open(const fs::path& _path, const uint64_t _size)
 {
-    return false;
+    size_ = _size;
+
+    stream_.open(_path.generic_string(), ios::in | ios::out | ios::binary);
+    if (!stream_.is_open()) {
+        stream_.open(_path.generic_string(), ios::in | ios::out | ios::binary | ios::trunc);
+    }
+    if (stream_.is_open()) {
+        BufferWrapper<Header> h;
+        stream_.read(h.buffer(), h.size);
+
+        if (!stream_.eof()) {
+            if (h.data().size_ != _size) {
+                stream_.close();
+                fs::remove(_path);
+                return false;
+            }
+
+            if (!loadRanges()) {
+                stream_.close();
+                fs::remove(_path);
+                return false;
+            }
+        } else {
+            stream_.clear();
+            BufferWrapper<Header> h;
+            h.data().size_ = _size;
+            stream_.seekp(0);
+            stream_.write(h.buffer(), h.size);
+        }
+        return true;
+    } else {
+        return false;
+    }
 }
 
-void File::close() {
+bool File::loadRanges()
+{
+    stream_.seekg(sizeof(Header) + size_);
+    cereal::BinaryInputArchive a(stream_);
+
+    size_t s = -1; //dummy value
+
+    a(range_vec_, s);
+
+    if (range_vec_.size() != s) {
+        range_vec_.clear();
+        return false;
+    }
+    return true;
+}
+void File::storeRanges()
+{
+    stream_.seekp(sizeof(Header) + size_);
+    cereal::BinaryOutputArchive a(stream_);
+
+    size_t s = range_vec_.size();
+    a(range_vec_, s);
+}
+
+void File::close()
+{
+    if (stream_.is_open()) {
+        storeRanges();
+        stream_.flush();
+        stream_.close();
+    }
 }
 
 bool File::read(char* _pbuf, uint64_t _offset, size_t _length, size_t& _rbytes_transfered)
@@ -42,6 +130,8 @@ void File::write(const uint64_t _offset, std::istream& _ris)
         char     buffer[buffer_capacity];
         uint64_t read_count = 0;
 
+        stream_.seekp(sizeof(Header) + _offset);
+
         while (_ris.read(buffer, buffer_capacity)) {
             read_count += buffer_capacity;
             stream_.write(buffer, buffer_capacity);
@@ -57,39 +147,76 @@ void File::write(const uint64_t _offset, std::istream& _ris)
 bool File::findRange(const uint64_t _offset, size_t& _rsize) const
 {
     const auto less_cmp = [](const Range& _rr, const uint64_t _o) -> bool {
-        return (_rr.offset_ + _rr.size_) <= _o;
+        return _rr.offset_ < _o;
     };
-    auto it = lower_bound(range_vec_.begin(), range_vec_.end(), _offset, less_cmp);
-    if (it != range_vec_.end() && _offset >= it->offset_ && _offset < (it->offset_ + it->size_)) {
-        auto remsize = (it->offset_ + it->size_) - _offset;
-        if (remsize < _rsize) {
-            _rsize = remsize;
-		}
-        return true;
-    }
 
+    auto it = lower_bound(range_vec_.begin(), range_vec_.end(), _offset, less_cmp);
+
+    if (it != range_vec_.begin()) {
+        auto prev_it = it - 1;
+        solid_assert(_offset > prev_it->offset_);
+        if (_offset < (prev_it->offset_ + prev_it->size_)) {
+            auto remsize = (prev_it->offset_ + prev_it->size_) - _offset;
+            if (remsize < _rsize) {
+                _rsize = remsize;
+            }
+            return true;
+        }
+    }
+    if (it != range_vec_.end()) {
+        solid_assert(_offset <= it->offset_);
+        if (_offset == it->offset_) {
+            if (it->size_ < _rsize) {
+                _rsize = it->size_;
+            }
+            return true;
+        }
+    }
     return false;
 }
 
 void File::addRange(const uint64_t _offset, const uint64_t _size)
 {
     const auto less_cmp = [](const Range& _rr, const uint64_t _o) -> bool {
-        return (_rr.offset_ + _rr.size_) <= _o;
+        return _rr.offset_ < _o;
     };
 
     auto it = lower_bound(range_vec_.begin(), range_vec_.end(), _offset, less_cmp);
-    if (it != range_vec_.end() && _offset >= it->offset_ && _offset < (it->offset_ + it->size_)) {
-        //overlapping ranges
-        if ((it->offset_ + it->size_) < (_offset + _size)) {
-            it->size_ = (_offset + _size) - it->offset_;
+
+    if (it != range_vec_.begin()) {
+        auto prev_it = it - 1;
+        solid_assert(_offset > prev_it->offset_);
+        if (_offset <= (prev_it->offset_ + prev_it->size_)) {
+            if ((_offset + _size) > (prev_it->offset_ + prev_it->size_)) {
+                prev_it->size_ = (_offset + _size) - prev_it->offset_;
+                it             = prev_it;
+                goto Optimize;
+            } else {
+                //range already contained
+                return;
+            }
         }
-    } else {
-        it = range_vec_.insert(it, Range(_offset, _size));
     }
 
+    if (it != range_vec_.end()) {
+        if (it->offset_ == _offset) {
+            if ((_offset + _size) > (it->offset_ + it->size_)) {
+                it->size_ = (_offset + _size) - it->offset_;
+                goto Optimize;
+            } else {
+                return;
+            }
+        }
+        it = range_vec_.insert(it, Range(_offset, _size));
+    } else {
+        range_vec_.insert(it, Range(_offset, _size));
+        return;
+    }
+
+Optimize:
     auto nextit = it + 1;
     while (nextit != range_vec_.end()) {
-        if (nextit->offset_ < (it->offset_ + it->size_)) {
+        if (nextit->offset_ <= (it->offset_ + it->size_)) {
             //overlapping
             if ((it->offset_ + it->size_) < (nextit->offset_ + nextit->size_)) {
                 it->size_ = (nextit->offset_ + nextit->size_) - it->offset_;
@@ -99,6 +226,55 @@ void File::addRange(const uint64_t _offset, const uint64_t _size)
             break;
         }
     }
+}
+
+string namefy(const std::string& _path)
+{
+    string r{};
+    r.reserve(_path.size());
+    for (char c : _path) {
+        if (c == '\\') {
+            r += '&';
+            r += '_';
+        } else if (c == '&') {
+            r += '&';
+            r += '&';
+        } else {
+            r += c;
+        }
+    }
+    return string{std::move(r)};
+}
+
+string denamefy(const std::string& _path)
+{
+    string r;
+    r.reserve(_path.size());
+    bool has_escape = false;
+    for (char c : _path) {
+        assert(c != '\\');
+        if (c == '&') {
+            if (has_escape) {
+                r += '&';
+                has_escape = false;
+            } else {
+                has_escape = true;
+            }
+        } else if (c == '_') {
+            if (has_escape) {
+                r += '\\';
+                has_escape = false;
+            } else {
+                r += '_';
+            }
+        } else {
+            if (has_escape) {
+                r += '&';
+            }
+            r += c;
+        }
+    }
+	return string{std::move(r)};
 }
 
 //-----------------------------------------------------------------------------

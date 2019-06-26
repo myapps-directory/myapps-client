@@ -16,8 +16,8 @@ void copy(ostream& _ros, istream& _ris, uint64_t _size)
         uint64_t toread = _size;
         if (toread > buffer_capacity) {
             toread = buffer_capacity;
-		}
-        while (_ris.read(buffer, toread)) {
+        }
+        while (toread != 0 && _ris.read(buffer, toread)) {
             read_count += toread;
             _ros.write(buffer, toread);
             _size -= toread;
@@ -26,10 +26,6 @@ void copy(ostream& _ros, istream& _ris, uint64_t _size)
                 toread = buffer_capacity;
             }
         }
-        size_t cnt = _ris.gcount();
-        _ros.write(buffer, cnt);
-        read_count += cnt;
-        _size -= cnt;
         solid_check(_size == 0);
     }
 }
@@ -45,12 +41,25 @@ void write(File& _rf, uint64_t _offset, uint64_t _size, istream& _ris)
     stringstream ioss;
     _ris.seekg(_offset);
     copy(ioss, _ris, _size);
-    _rf.write(_offset, _size, ioss);
+    _rf.write(_offset, ioss);
 }
 
 bool check(const char* _pbuf, uint64_t _offset, uint64_t _size, istream& _ris)
 {
+    constexpr size_t buf_cap = 1024 * 32;
+    char             buf[buf_cap];
 
+    _ris.seekg(_offset);
+    while (_size != 0) {
+        size_t toread = buf_cap;
+        if (toread > _size) {
+            toread = _size;
+		}
+        _ris.read(buf, toread);
+        solid_check(memcmp(_pbuf, buf, toread) == 0);
+        _size -= toread;
+        _pbuf += toread;
+    }
 }
 
 } //namespace
@@ -64,6 +73,8 @@ int test_file_cache_file(int argc, char* argv[])
 
     ioss.seekg(0, ios::end);
     const uint64_t data_size = ioss.tellg();
+
+	fs::remove("test.data");
 
     {
         constexpr size_t buf_cap = 1024 * 100;
@@ -122,7 +133,7 @@ int test_file_cache_file(int argc, char* argv[])
 
         //1000-4500
         bytes_transfered = 0;
-        solid_check(!f.read(buf, 1000, 3500, bytes_transfered) && bytes_transfered == 3500 && check(buf, 1000, 3500, ioss));
+        solid_check(f.read(buf, 1000, 3500, bytes_transfered) && bytes_transfered == 3500 && check(buf, 1000, 3500, ioss));
     }
 
     fs::remove("test.data");
@@ -135,6 +146,7 @@ int test_file_cache_file(int argc, char* argv[])
         write(f, 1000, 500, ioss);
         write(f, 2000, 500, ioss);
         write(f, 3000, 500, ioss);
+        f.close();
     }
 
     {
@@ -146,13 +158,13 @@ int test_file_cache_file(int argc, char* argv[])
         solid_check(f.open("test.data", data_size));
 
         bytes_transfered = 0;
-        solid_check(!f.read(buf, 1000, 500, bytes_transfered) && bytes_transfered == 500 && check(buf, 1000, 500, ioss));
+        solid_check(f.read(buf, 1000, 500, bytes_transfered) && bytes_transfered == 500 && check(buf, 1000, 500, ioss));
 
         bytes_transfered = 0;
-        solid_check(!f.read(buf, 2000, 500, bytes_transfered) && bytes_transfered == 500 && check(buf, 2000, 500, ioss));
+        solid_check(f.read(buf, 2000, 500, bytes_transfered) && bytes_transfered == 500 && check(buf, 2000, 500, ioss));
 
         bytes_transfered = 0;
-        solid_check(!f.read(buf, 3000, 500, bytes_transfered) && bytes_transfered == 500 && check(buf, 3000, 500, ioss));
+        solid_check(f.read(buf, 3000, 500, bytes_transfered) && bytes_transfered == 500 && check(buf, 3000, 500, ioss));
     }
 
     return 0;
