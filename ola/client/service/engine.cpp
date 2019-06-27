@@ -173,7 +173,13 @@ struct FileData : file_cache::FileData {
 
     bool readFromCache(ReadData& _rdata)
     {
-        return file_cache::FileData::readFromCache(_rdata.pbuffer_, _rdata.offset_, _rdata.size_, _rdata.bytes_transfered_);
+        size_t bytes_transfered = 0;
+        bool   b                = file_cache::FileData::readFromCache(_rdata.pbuffer_, _rdata.offset_, _rdata.size_, bytes_transfered);
+        _rdata.bytes_transfered_ += bytes_transfered;
+        _rdata.pbuffer_ += bytes_transfered;
+        _rdata.offset_ += bytes_transfered;
+        _rdata.size_ -= bytes_transfered;
+        return b;
     }
 
     bool readFromResponses(ReadData& _rdata, bool _is_front);
@@ -578,7 +584,14 @@ void Engine::start(const Configuration& _rcfg)
     solid_log(logger, Verbose, "");
     pimpl_ = make_unique<Implementation>(_rcfg);
 
-	fs::create_directories(pimpl_->cachePath());
+	{
+        pimpl_->mutex_dq_.resize(pimpl_->config_.mutex_count_);
+        pimpl_->cv_dq_.resize(pimpl_->config_.cv_count_);
+    }
+
+	pimpl_->createRootEntry();
+
+	pimpl_->file_cache_engine_.start(pimpl_->cachePath());
 
     pimpl_->scheduler_.start(1);
 
@@ -634,13 +647,6 @@ void Engine::start(const Configuration& _rcfg)
 
         pimpl_->gui_rpc_service_.start(std::move(cfg));
     }
-
-    {
-        pimpl_->mutex_dq_.resize(pimpl_->config_.mutex_count_);
-        pimpl_->cv_dq_.resize(pimpl_->config_.cv_count_);
-    }
-
-    pimpl_->createRootEntry();
 
     auto err = pimpl_->front_rpc_service_.createConnectionPool(_rcfg.front_endpoint_.c_str(), 1);
     solid_check(!err, "creating connection pool: " << err.message());
@@ -1081,6 +1087,7 @@ void Engine::Implementation::tryFetch(EntryPointerT& _rentry_ptr, ReadData& _rre
 void copy_stream(ReadData& _rread_data, const uint64_t _offset, istream& _ris, uint64_t _size)
 {
     solid_check(_offset <= _rread_data.offset_);
+    _ris.clear();
     _ris.seekg(_rread_data.offset_ - _offset);
     _ris.read(_rread_data.pbuffer_, _size);
     uint64_t sz = _ris.gcount();
@@ -1443,6 +1450,8 @@ void Engine::Implementation::onFrontListAppsResponse(
 
 void Engine::Implementation::createRootEntry()
 {
+    lock_guard<mutex> lock{root_mutex_};
+
     root_entry_ptr_            = make_shared<Entry>(EntryTypeE::Directory, root_mutex_, cv_dq_[0], "");
     root_entry_ptr_->data_var_ = make_unique<DirectoryData>();
     root_entry_ptr_->status_   = EntryStatusE::Fetched;

@@ -16,6 +16,8 @@ namespace fs = boost::filesystem;
 std::string namefy(const std::string& _path);
 std::string denamefy(const std::string& _path);
 
+std::string namefy_b64(const std::string& _path);
+
 class File {
     struct Header {
         uint64_t size_;
@@ -72,7 +74,7 @@ using UniqueIdT = solid::frame::UniqueId;
 
 class Engine {
 public:
-    void start();
+    void start(const fs::path &_path);
 
     template <class T>
     std::unique_ptr<T> create(const UniqueIdT& _uid, const uint64_t _size, const std::string& _storage_id, const std::string& _remote_path)
@@ -83,7 +85,7 @@ public:
             return ptr;
         }
 		ptr = std::make_unique<T>(_storage_id, _remote_path);
-		tryOpen(*ptr);
+        tryOpen(*ptr, _size, _storage_id, _remote_path);
 		return ptr;
 	}	
 
@@ -96,10 +98,13 @@ public:
 
 private:
     void open(FileData& _rfd);
-    void tryOpen(FileData& _rfd);
+    void tryOpen(FileData& _rfd, const uint64_t _size, const std::string& _storage_id, const std::string& _remote_path);
     void close(FileData& _rfd);
     UniqueIdT cache(FileData* _pfd);
 	std::unique_ptr<FileData> uncache(const UniqueIdT& _uid);
+
+private:
+    fs::path path_;
 };
 
 

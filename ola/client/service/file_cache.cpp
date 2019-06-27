@@ -1,4 +1,5 @@
 #include "file_cache.hpp"
+#include "ola/common/utility/encode.hpp"
 #include "solid/system/cassert.hpp"
 #include <algorithm>
 
@@ -117,6 +118,7 @@ bool File::read(char* _pbuf, uint64_t _offset, size_t _length, size_t& _rbytes_t
     if (findRange(_offset, len)) {
         stream_.seekg(sizeof(Header) + _offset);
         stream_.read(_pbuf, len);
+        solid_assert(len == stream_.gcount());
         _rbytes_transfered += len;
         return len == _length;
     }
@@ -274,7 +276,18 @@ string denamefy(const std::string& _path)
             r += c;
         }
     }
-	return string{std::move(r)};
+    return string{std::move(r)};
+}
+
+std::string namefy_b64(const std::string& _txt)
+{
+    string s = utility::base64_encode(utility::sha256(_txt));
+    for (auto& c : s) {
+        if (c == '/') {
+            c = '_';
+        }
+    }
+    return s;
 }
 
 //-----------------------------------------------------------------------------
@@ -290,18 +303,36 @@ bool FileData::readFromCache(char* _pbuf, uint64_t _offset, size_t _length, size
 }
 
 //-----------------------------------------------------------------------------
-
+void Engine::start(const fs::path& _path)
+{
+    path_ = _path;
+    fs::create_directories(path_);
+}
 void Engine::open(FileData& _rfd)
 {
 }
-void Engine::tryOpen(FileData& _rfd)
+void Engine::tryOpen(FileData& _rfd, const uint64_t _size, const std::string& _storage_id, const std::string& _remote_path)
 {
+    string d = namefy_b64(_storage_id);
+    string f = namefy_b64(_remote_path);
+
+    fs::path p = path_;
+
+	p /= d;
+
+	fs::create_directories(p);
+
+	p /= f;
+
+	_rfd.file_.open(p, _size);
 }
 void Engine::close(FileData& _rfd)
 {
+    _rfd.file_.close();
 }
 UniqueIdT Engine::cache(FileData* _pfd)
 {
+    delete _pfd;
     return UniqueIdT();
 }
 
