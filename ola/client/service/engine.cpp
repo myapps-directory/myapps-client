@@ -12,7 +12,7 @@
 #include "solid/frame/mprpc/mprpcservice.hpp"
 #include "solid/frame/mprpc/mprpcsocketstub_openssl.hpp"
 
-#include "ola/common/utility/crypto.hpp"
+#include "ola/common/utility/encode.hpp"
 
 #include "ola/client/gui/gui_protocol.hpp"
 #include "ola/client/utility/locale.hpp"

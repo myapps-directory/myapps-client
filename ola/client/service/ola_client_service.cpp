@@ -10,7 +10,7 @@
 
 #include "solid/system/log.hpp"
 
-#include "ola/common/utility/crypto.hpp"
+#include "ola/common/utility/encode.hpp"
 
 #include "ola/common/ola_front_protocol.hpp"
 
