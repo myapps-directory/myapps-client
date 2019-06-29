@@ -42,6 +42,7 @@ class File {
     RangeVectorT range_vec_;
     std::fstream stream_;
     uint64_t     size_;
+    bool         modified_ = false;
 
 public:
     static uint64_t check(const fs::path& _path);
@@ -52,6 +53,8 @@ public:
 
 	void write(const uint64_t _offset, std::istream& _ris);
     bool read(char* _pbuf, uint64_t _offset, size_t _length, size_t& _rbytes_transfered);
+
+	void flush();
 
 private:
 	void addRange(const uint64_t _offset, const uint64_t _size);
@@ -100,12 +103,20 @@ public:
 		return cache(_data_ptr.release());
 	}
 
+
+	template<class T>
+    void flush(std::unique_ptr<T>& _data_ptr)
+    {
+        doFlush(*_data_ptr);
+    }
+
 private:
     void open(FileData& _rfd);
     void tryOpen(FileData& _rfd, const uint64_t _size, const std::string& _app_id, const std::string &_build_unique, const std::string& _remote_path);
     void close(FileData& _rfd);
     UniqueIdT cache(FileData* _pfd);
 	std::unique_ptr<FileData> uncache(const UniqueIdT& _uid);
+    void                      doFlush(FileData& _rfd);
 
 private:
     fs::path path_;

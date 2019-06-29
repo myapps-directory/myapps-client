@@ -3,6 +3,7 @@
 #include "solid/system/cassert.hpp"
 #include <algorithm>
 
+#include "solid/system/log.hpp"
 #include <cereal/archives/binary.hpp>
 #include <cereal/types/memory.hpp>
 #include <cereal/types/string.hpp>
@@ -14,6 +15,8 @@ namespace ola {
 namespace client {
 namespace service {
 namespace file_cache {
+
+const solid::LoggerT logger("ola::client::file_cache");
 
 //-----------------------------------------------------------------------------
 
@@ -44,8 +47,9 @@ struct BufferWrapper {
 
 bool File::open(const fs::path& _path, const uint64_t _size)
 {
-    size_ = _size;
-
+    solid_log(logger, Info, this << " path = " << _path.generic_string() << " " << _size);
+    size_     = _size;
+    modified_ = false;
     stream_.open(_path.generic_string(), ios::in | ios::out | ios::binary);
     if (!stream_.is_open()) {
         stream_.open(_path.generic_string(), ios::in | ios::out | ios::binary | ios::trunc);
@@ -72,6 +76,7 @@ bool File::open(const fs::path& _path, const uint64_t _size)
             h.data().size_ = _size;
             stream_.seekp(0);
             stream_.write(h.buffer(), h.size);
+            modified_ = true;
         }
         return true;
     } else {
@@ -82,11 +87,17 @@ bool File::open(const fs::path& _path, const uint64_t _size)
 bool File::loadRanges()
 {
     stream_.seekg(sizeof(Header) + size_);
-    cereal::BinaryInputArchive a(stream_);
-
     size_t s = -1; //dummy value
 
-    a(range_vec_, s);
+    try {
+        cereal::BinaryInputArchive a(stream_);
+
+        a(range_vec_, s);
+    } catch (...) {
+        solid_assert(false);
+        return false;
+    }
+    solid_log(logger, Info, this << " " << range_vec_.size() << " " << s);
 
     if (range_vec_.size() != s) {
         range_vec_.clear();
@@ -96,19 +107,40 @@ bool File::loadRanges()
 }
 void File::storeRanges()
 {
-    stream_.seekp(sizeof(Header) + size_);
-    cereal::BinaryOutputArchive a(stream_);
+    if (modified_) {
 
-    size_t s = range_vec_.size();
-    a(range_vec_, s);
+        stream_.clear();
+        stream_.seekp(sizeof(Header) + size_);
+
+        try {
+            cereal::BinaryOutputArchive a(stream_);
+
+            size_t s = range_vec_.size();
+            a(range_vec_, s);
+
+            solid_log(logger, Info, this << " " << range_vec_.size() << " " << s);
+        } catch (...) {
+            solid_assert(false);
+        }
+        modified_ = false;
+    }
 }
 
 void File::close()
 {
+    solid_log(logger, Info, this << " ");
     if (stream_.is_open()) {
         storeRanges();
         stream_.flush();
         stream_.close();
+    }
+}
+
+void File::flush()
+{
+    if (stream_.is_open()) {
+        storeRanges();
+        stream_.flush();
     }
 }
 
@@ -143,11 +175,9 @@ void File::write(const uint64_t _offset, std::istream& _ris)
         read_count += cnt;
 
         addRange(_offset, read_count);
-        if (range_vec_.size() == 1 && range_vec_.front().size_ == size_) {
-        
-			storeRanges();
-            stream_.flush();
-		}
+        modified_ = true;
+        flush();
+		solid_log(logger, Info, this << " " << range_vec_.size());
     }
 }
 
@@ -229,6 +259,7 @@ Optimize:
                 it->size_ = (nextit->offset_ + nextit->size_) - it->offset_;
             }
             nextit = range_vec_.erase(nextit);
+            solid_assert(!range_vec_.empty());
         } else {
             break;
         }
@@ -354,6 +385,11 @@ UniqueIdT Engine::cache(FileData* _pfd)
 std::unique_ptr<FileData> Engine::uncache(const UniqueIdT& _uid)
 {
     return std::unique_ptr<FileData>();
+}
+
+void Engine::doFlush(FileData& _rfd)
+{
+    _rfd.file_.flush();
 }
 
 } //namespace file_cache

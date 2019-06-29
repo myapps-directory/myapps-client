@@ -713,7 +713,7 @@ Descriptor* Engine::open(const fs::path& _path)
     if (pimpl_->entry(_path, entry_ptr, lock)) {
         auto pdesc = new Descriptor(std::move(entry_ptr));
         solid_log(logger, Verbose, "OPEN: " << _path.generic_path() << " -> " << pdesc << " entry: " << pdesc->entry_ptr_.get());
-        return pdesc;
+		return pdesc;
     }
     return nullptr;
 }
@@ -727,11 +727,17 @@ void Engine::close(Descriptor* _pdesc)
     if (_pdesc->entry_ptr_->type_ == EntryTypeE::File) {
         mutex&             rmutex = _pdesc->entry_ptr_->mutex();
         unique_lock<mutex> lock{rmutex};
-        if (_pdesc->entry_ptr_.use_count() == 2) {
+        size_t             use_cnt = _pdesc->entry_ptr_.use_count();
+
+		solid_log(logger, Verbose, "CLOSE: " << _pdesc << " entry: " << _pdesc->entry_ptr_.get()<<" use count = "<<use_cnt);
+        if (use_cnt == 2) {
             _pdesc->entry_ptr_->data_var_ = pimpl_->file_cache_engine_.release(get<FileDataPointerT>(_pdesc->entry_ptr_->data_var_));
-        }
+        } else {
+            pimpl_->file_cache_engine_.flush(get<FileDataPointerT>(_pdesc->entry_ptr_->data_var_));
+		}
+    } else {
+        solid_log(logger, Verbose, "CLOSE: " << _pdesc << " entry: " << _pdesc->entry_ptr_.get());
     }
-    solid_log(logger, Verbose, "CLOSE: " << _pdesc << " entry: " << _pdesc->entry_ptr_.get());
     delete _pdesc;
 }
 
