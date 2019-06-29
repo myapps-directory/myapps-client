@@ -17,12 +17,12 @@
 #include "ola/client/gui/gui_protocol.hpp"
 #include "ola/client/utility/locale.hpp"
 
+#include "file_cache.hpp"
 #include "ola/common/ola_front_protocol.hpp"
 #include "shortcut_creator.hpp"
-#include "file_cache.hpp"
 
-#include <boost/filesystem.hpp>
 #include <boost/algorithm/string/predicate.hpp>
+#include <boost/filesystem.hpp>
 #include <boost/functional/hash.hpp>
 
 #include <condition_variable>
@@ -218,6 +218,14 @@ struct FileData : file_cache::FileData {
 };
 
 struct ApplicationData : DirectoryData {
+    std::string app_id_;
+    std::string build_name_;
+
+    ApplicationData(const std::string& _app_id, const std::string& _build_name)
+        : app_id_(_app_id)
+        , build_name_(_build_name)
+    {
+    }
 };
 
 struct ShortcutData {
@@ -480,7 +488,7 @@ public:
     void tryFetch(EntryPointerT& _rentry_ptr, ReadData& _rread_data);
     void tryPreFetch(EntryPointerT& _rentry_ptr);
 
-	fs::path cachePath() const
+    fs::path cachePath() const
     {
         fs::path p = config_.path_prefix_;
         p /= "cache";
@@ -507,19 +515,19 @@ private:
 
     void storeAuthData(const string& _user, const string& _token);
 
-    void insertApplicationEntry(std::shared_ptr<front::FetchBuildConfigurationResponse>& _rrecv_msg_ptr);
+    void insertApplicationEntry(const std::string& _app_id, std::shared_ptr<front::FetchBuildConfigurationResponse>& _rrecv_msg_ptr);
     void insertMountEntry(EntryPointerT& _rparent_ptr, const fs::path& _local, const string& _remote);
     bool canPreFetch(const EntryPointerT& _rentry_ptr) const;
 
-	bool readFromFile(
+    bool readFromFile(
         EntryPointerT&      _rentry_ptr,
         unique_lock<mutex>& _rlock,
         char*               _pbuf,
         uint64_t _offset, unsigned long _length, unsigned long& _rbytes_transfered);
 
-	bool readFromShortcut(
-        EntryPointerT&      _rentry_ptr,
-        char*               _pbuf,
+    bool readFromShortcut(
+        EntryPointerT& _rentry_ptr,
+        char*          _pbuf,
         uint64_t _offset, unsigned long _length, unsigned long& _rbytes_transfered);
 
     void remoteFetchApplication(
@@ -584,14 +592,14 @@ void Engine::start(const Configuration& _rcfg)
     solid_log(logger, Verbose, "");
     pimpl_ = make_unique<Implementation>(_rcfg);
 
-	{
+    {
         pimpl_->mutex_dq_.resize(pimpl_->config_.mutex_count_);
         pimpl_->cv_dq_.resize(pimpl_->config_.cv_count_);
     }
 
-	pimpl_->createRootEntry();
+    pimpl_->createRootEntry();
 
-	pimpl_->file_cache_engine_.start(pimpl_->cachePath());
+    pimpl_->file_cache_engine_.start(pimpl_->cachePath());
 
     pimpl_->scheduler_.start(1);
 
@@ -732,6 +740,8 @@ bool Engine::Implementation::entry(const fs::path& _path, EntryPointerT& _rentry
     auto   generic_path_str = _path.generic_string();
     string remote_path;
     string storage_id;
+    string app_id;
+    string build_name;
 
     for (const auto& e : _path) {
         string        s     = e.generic_string();
@@ -757,6 +767,9 @@ bool Engine::Implementation::entry(const fs::path& _path, EntryPointerT& _rentry
             if (_rentry_ptr->type_ == EntryTypeE::Application) {
                 remote_path.clear();
                 storage_id = _rentry_ptr->remote_;
+                ApplicationData& rapp_data = *get<ApplicationDataPointerT>(_rentry_ptr->data_var_);
+                app_id                    = rapp_data.app_id_;
+                build_name                = rapp_data.build_name_;
             } else if (!_rentry_ptr->remote_.empty()) {
                 remote_path += '/';
                 remote_path += _rentry_ptr->remote_;
@@ -812,7 +825,7 @@ bool Engine::Implementation::entry(const fs::path& _path, EntryPointerT& _rentry
         if (_rentry_ptr->type_ == EntryTypeE::File) {
             if (holds_alternative<UniqueIdT>(_rentry_ptr->data_var_)) {
                 //_rentry_ptr->data_var_ = make_unique<FileData>(storage_id, remote_path);
-                _rentry_ptr->data_var_ = file_cache_engine_.create<FileData>(get<UniqueIdT>(_rentry_ptr->data_var_), _rentry_ptr->size_, storage_id, remote_path);
+                _rentry_ptr->data_var_ = file_cache_engine_.create<FileData>(get<UniqueIdT>(_rentry_ptr->data_var_), _rentry_ptr->size_, storage_id, app_id, build_name, remote_path);
             }
         }
 
@@ -958,9 +971,9 @@ bool Engine::Implementation::read(
 }
 
 bool Engine::Implementation::readFromFile(
-    EntryPointerT& _rentry_ptr,
-    unique_lock<mutex> &_rlock,
-    char*          _pbuf,
+    EntryPointerT&      _rentry_ptr,
+    unique_lock<mutex>& _rlock,
+    char*               _pbuf,
     uint64_t _offset, unsigned long _length, unsigned long& _rbytes_transfered)
 {
     FileData& rfile_data = *get<FileDataPointerT>(_rentry_ptr->data_var_);
@@ -1416,9 +1429,9 @@ void Engine::Implementation::remoteFetchApplication(
                       ErrorConditionT const&                                   _rerror) mutable {
         if (_rrecv_msg_ptr) {
 
-			this->workpool_.push([this, recv_msg_ptr = std::move(_rrecv_msg_ptr)]() mutable {
-                insertApplicationEntry(recv_msg_ptr);
-			});
+            this->workpool_.push([this, recv_msg_ptr = std::move(_rrecv_msg_ptr), app_id = _rsent_msg_ptr->app_id_]() mutable {
+                insertApplicationEntry(app_id, recv_msg_ptr);
+            });
 
             ++_app_index;
             if (_app_index < apps_response->app_id_vec_.size()) {
@@ -1498,14 +1511,14 @@ string to_system_path(const string& _path)
     return to;
 }
 
-void Engine::Implementation::insertApplicationEntry(std::shared_ptr<front::FetchBuildConfigurationResponse>& _rrecv_msg_ptr)
+void Engine::Implementation::insertApplicationEntry(const string& _app_id, std::shared_ptr<front::FetchBuildConfigurationResponse>& _rrecv_msg_ptr)
 {
     auto entry_ptr = createEntry(
         root_entry_ptr_, _rrecv_msg_ptr->build_configuration_.directory_,
         EntryTypeE::Application);
 
     entry_ptr->remote_   = _rrecv_msg_ptr->storage_id_;
-    entry_ptr->data_var_ = make_unique<ApplicationData>();
+    entry_ptr->data_var_ = make_unique<ApplicationData>(_app_id, _rrecv_msg_ptr->build_configuration_.name_);
 
     if (!_rrecv_msg_ptr->build_configuration_.mount_vec_.empty()) {
 #if 0
@@ -1521,17 +1534,17 @@ void Engine::Implementation::insertApplicationEntry(std::shared_ptr<front::Fetch
         entry_ptr->status_ = EntryStatusE::FetchRequired;
     }
 
-	solid_log(logger, Info, entry_ptr->name_);
+    solid_log(logger, Info, entry_ptr->name_);
 
-	auto& rm = root_entry_ptr_->mutex();
+    auto& rm = root_entry_ptr_->mutex();
     {
         lock_guard<mutex> lock{rm};
         //TODO: also create coresponding shortcuts
 
         get<DirectoryDataPointerT>(root_entry_ptr_->data_var_)->insertEntry(std::move(entry_ptr));
     }
-	
-	const auto& app_folder_name = _rrecv_msg_ptr->build_configuration_.directory_;
+
+    const auto& app_folder_name = _rrecv_msg_ptr->build_configuration_.directory_;
 
     if (!_rrecv_msg_ptr->build_configuration_.shortcut_vec_.empty()) {
         for (const auto& sh : _rrecv_msg_ptr->build_configuration_.shortcut_vec_) {
