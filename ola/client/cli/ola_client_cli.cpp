@@ -668,6 +668,7 @@ void handle_fetch_config(istream& _ris, Engine &_reng){
         if(_rrecv_msg_ptr && _rrecv_msg_ptr->error_ == 0){
             cout<<"{\n";
             cout<<"Remote Root: "<<utility::base64_encode(_rrecv_msg_ptr->storage_id_)<<endl;
+            cout<<"Build unique: "<<_rrecv_msg_ptr->build_unique_<<endl;
             cout<<_rrecv_msg_ptr->build_configuration_;
             cout<<endl;
             cout<<"}"<<endl;
