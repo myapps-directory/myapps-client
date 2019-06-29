@@ -668,6 +668,7 @@ void handle_fetch_config(istream& _ris, Engine &_reng){
         if(_rrecv_msg_ptr && _rrecv_msg_ptr->error_ == 0){
             cout<<"{\n";
             cout<<"Remote Root: "<<utility::base64_encode(_rrecv_msg_ptr->storage_id_)<<endl;
+            cout<<"Build unique: "<<_rrecv_msg_ptr->build_unique_<<endl;
             cout<<_rrecv_msg_ptr->build_configuration_;
             cout<<endl;
             cout<<"}"<<endl;
@@ -921,7 +922,7 @@ void handle_create_build(istream& _ris, Engine &_reng){
     {
         ifstream ifs(zip_path, std::ifstream::binary);
         if(ifs){
-            req_ptr->sha_sum_ = ola::utility::sha256(ifs);
+            req_ptr->sha_sum_ = ola::utility::sha256hex(ifs);
             cout<<"sha_sum for "<<zip_path<<": "<<req_ptr->sha_sum_<<endl;
         }else{
             cout<<"could not open "<<zip_path<<" for reading"<<endl;
@@ -1183,7 +1184,7 @@ void Engine::authRun(){
             cout<<"User: "<<flush;cin>>req_ptr->auth_;
             cout<<"Pass: "<<flush;cin>>req_ptr->pass_;
         
-            req_ptr->pass_ = ola::utility::sha256(req_ptr->pass_);
+            req_ptr->pass_ = ola::utility::sha256hex(req_ptr->pass_);
         }
         
         promise<int> prom;
