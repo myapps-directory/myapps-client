@@ -63,7 +63,7 @@ private:
 
 struct FileData {
     std::string app_id_;
-    std::string build_name_;
+    std::string build_unique_;
     File file_;
 
     virtual ~FileData() = default;
@@ -79,7 +79,7 @@ public:
     void start(const fs::path &_path);
 
     template <class T>
-    std::unique_ptr<T> create(const UniqueIdT& _uid, const uint64_t _size, const std::string &_storage_id, const std::string& _app_id, const std::string &_build_name, const std::string& _remote_path)
+    std::unique_ptr<T> create(const UniqueIdT& _uid, const uint64_t _size, const std::string &_storage_id, const std::string& _app_id, const std::string &_build_unique, const std::string& _remote_path)
 	{
         std::unique_ptr<T> ptr = std::unique_ptr<T>(static_cast<T*>(uncache(_uid).release()));
         if (ptr) {
@@ -88,8 +88,8 @@ public:
         }
         ptr = std::make_unique<T>(_storage_id, _remote_path);
         ptr->app_id_ = _app_id;
-        ptr->build_name_ = _build_name;
-        tryOpen(*ptr, _size, _app_id, _build_name, _remote_path);
+        ptr->build_unique_ = _build_unique;
+        tryOpen(*ptr, _size, _app_id, _build_unique, _remote_path);
 		return ptr;
 	}	
 
@@ -102,7 +102,7 @@ public:
 
 private:
     void open(FileData& _rfd);
-    void tryOpen(FileData& _rfd, const uint64_t _size, const std::string& _app_id, const std::string &_build_name, const std::string& _remote_path);
+    void tryOpen(FileData& _rfd, const uint64_t _size, const std::string& _app_id, const std::string &_build_unique, const std::string& _remote_path);
     void close(FileData& _rfd);
     UniqueIdT cache(FileData* _pfd);
 	std::unique_ptr<FileData> uncache(const UniqueIdT& _uid);

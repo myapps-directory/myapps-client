@@ -219,11 +219,11 @@ struct FileData : file_cache::FileData {
 
 struct ApplicationData : DirectoryData {
     std::string app_id_;
-    std::string build_name_;
+    std::string build_unique_;
 
-    ApplicationData(const std::string& _app_id, const std::string& _build_name)
+    ApplicationData(const std::string& _app_id, const std::string& _build_unique)
         : app_id_(_app_id)
-        , build_name_(_build_name)
+        , build_unique_(_build_unique)
     {
     }
 };
@@ -466,10 +466,10 @@ public:
 
     void eraseEntryFromParent(EntryPointerT&& _uentry_ptr, unique_lock<mutex>&& _ulock);
 
-    void createEntryData(EntryPointerT& _rentry_ptr, const std::string& _path_str, ListNodeDequeT& _rnode_dq);
+    void createEntryData(unique_lock<mutex>& _lock, EntryPointerT& _rentry_ptr, const std::string& _path_str, ListNodeDequeT& _rnode_dq);
 
-    void insertDirectoryEntry(EntryPointerT& _rparent_ptr, const string& _name);
-    void insertFileEntry(EntryPointerT& _rparent_ptr, const string& _name, uint64_t _size);
+    void insertDirectoryEntry(unique_lock<mutex>& _lock, EntryPointerT& _rparent_ptr, const string& _name);
+    void insertFileEntry(unique_lock<mutex>& _lock, EntryPointerT& _rparent_ptr, const string& _name, uint64_t _size);
 
     void createRootEntry();
 
@@ -741,7 +741,7 @@ bool Engine::Implementation::entry(const fs::path& _path, EntryPointerT& _rentry
     string        remote_path;
     const string* pstorage_id = nullptr;
     const string* papp_id     = nullptr;
-    const string* pbuild_name = nullptr;
+    const string* pbuild_unique = nullptr;
 
     for (const auto& e : _path) {
         string        s     = e.generic_string();
@@ -771,7 +771,7 @@ bool Engine::Implementation::entry(const fs::path& _path, EntryPointerT& _rentry
                 auto pfd = get_if<ApplicationDataPointerT>(&_rentry_ptr->data_var_);
                 if (pfd && pfd->get()) {
                     papp_id     = &pfd->get()->app_id_;
-                    pbuild_name = &pfd->get()->build_name_;
+                    pbuild_unique = &pfd->get()->build_unique_;
                 } else {
                     solid_assert(false);
 				}
@@ -797,10 +797,10 @@ bool Engine::Implementation::entry(const fs::path& _path, EntryPointerT& _rentry
                           std::shared_ptr<front::ListStoreResponse>& _rrecv_msg_ptr,
                           ErrorConditionT const&                     _rerror) mutable {
             auto&             m = entry_ptr->mutex();
-            lock_guard<mutex> lock{m};
+            unique_lock<mutex> lock{m};
             if (_rrecv_msg_ptr && _rrecv_msg_ptr->error_ == 0) {
                 entry_ptr->status_ = EntryStatusE::Fetched;
-                createEntryData(entry_ptr, generic_path_str, _rrecv_msg_ptr->node_dq_);
+                createEntryData(lock, entry_ptr, generic_path_str, _rrecv_msg_ptr->node_dq_);
             } else {
                 entry_ptr->status_ = EntryStatusE::FetchError;
             }
@@ -831,7 +831,7 @@ bool Engine::Implementation::entry(const fs::path& _path, EntryPointerT& _rentry
         if (_rentry_ptr->type_ == EntryTypeE::File) {
             if (holds_alternative<UniqueIdT>(_rentry_ptr->data_var_)) {
                 //_rentry_ptr->data_var_ = make_unique<FileData>(storage_id, remote_path);
-                _rentry_ptr->data_var_ = file_cache_engine_.create<FileData>(get<UniqueIdT>(_rentry_ptr->data_var_), _rentry_ptr->size_, *pstorage_id, *papp_id, *pbuild_name, remote_path);
+                _rentry_ptr->data_var_ = file_cache_engine_.create<FileData>(get<UniqueIdT>(_rentry_ptr->data_var_), _rentry_ptr->size_, *pstorage_id, *papp_id, *pbuild_unique, remote_path);
             }
         }
 
@@ -1524,7 +1524,7 @@ void Engine::Implementation::insertApplicationEntry(const string& _app_id, std::
         EntryTypeE::Application);
 
     entry_ptr->remote_   = _rrecv_msg_ptr->storage_id_;
-    entry_ptr->data_var_ = make_unique<ApplicationData>(_app_id, _rrecv_msg_ptr->build_configuration_.name_);
+    entry_ptr->data_var_ = make_unique<ApplicationData>(_app_id, _rrecv_msg_ptr->build_unique_);
 
     if (!_rrecv_msg_ptr->build_configuration_.mount_vec_.empty()) {
 #if 0
@@ -1582,7 +1582,7 @@ EntryPointerT Engine::Implementation::createEntry(EntryPointerT& _rparent_ptr, c
     return make_shared<Entry>(_type, _rparent_ptr, mutex_dq_[index % mutex_dq_.size()], cv_dq_[index % cv_dq_.size()], _name, _size);
 }
 
-void Engine::Implementation::insertDirectoryEntry(EntryPointerT& _rparent_ptr, const string& _name)
+void Engine::Implementation::insertDirectoryEntry(unique_lock<mutex>& _lock, EntryPointerT& _rparent_ptr, const string& _name)
 {
     solid_log(logger, Info, _rparent_ptr->name_ << " " << _name);
 
@@ -1591,6 +1591,7 @@ void Engine::Implementation::insertDirectoryEntry(EntryPointerT& _rparent_ptr, c
     if (!entry_ptr) {
         _rparent_ptr->directoryData()->insertEntry(createEntry(_rparent_ptr, _name, EntryTypeE::Directory));
     } else {
+        _lock.unlock();
         //make sure the entry is directory
         auto&             rm = entry_ptr->mutex();
         lock_guard<mutex> lock{rm};
@@ -1602,7 +1603,7 @@ void Engine::Implementation::insertDirectoryEntry(EntryPointerT& _rparent_ptr, c
     }
 }
 
-void Engine::Implementation::insertFileEntry(EntryPointerT& _rparent_ptr, const string& _name, uint64_t _size)
+void Engine::Implementation::insertFileEntry(unique_lock<mutex>& _lock, EntryPointerT& _rparent_ptr, const string& _name, uint64_t _size)
 {
     solid_log(logger, Info, _rparent_ptr->name_ << " " << _name << " " << _size);
 
@@ -1611,6 +1612,7 @@ void Engine::Implementation::insertFileEntry(EntryPointerT& _rparent_ptr, const 
     if (!entry_ptr) {
         _rparent_ptr->directoryData()->insertEntry(createEntry(_rparent_ptr, _name, EntryTypeE::File));
     } else {
+        _lock.unlock();
         //make sure the entry is file
         auto&             rm = entry_ptr->mutex();
         lock_guard<mutex> lock{rm};
@@ -1665,7 +1667,7 @@ void Engine::Implementation::eraseEntryFromParent(EntryPointerT&& _uentry_ptr, u
     }
 }
 
-void Engine::Implementation::createEntryData(EntryPointerT& _rentry_ptr, const std::string& _path_str, ListNodeDequeT& _rnode_dq)
+void Engine::Implementation::createEntryData(unique_lock<mutex> &_lock, EntryPointerT& _rentry_ptr, const std::string& _path_str, ListNodeDequeT& _rnode_dq)
 {
     solid_log(logger, Info, _path_str);
     if (_rnode_dq.size() == 1 && _rnode_dq.front().name_.empty()) {
@@ -1686,9 +1688,9 @@ void Engine::Implementation::createEntryData(EntryPointerT& _rentry_ptr, const s
         if (n.name_.back() == '/') {
             string name = n.name_;
             name.pop_back();
-            insertDirectoryEntry(_rentry_ptr, name);
+            insertDirectoryEntry(_lock, _rentry_ptr, name);
         } else {
-            insertFileEntry(_rentry_ptr, n.name_, n.size_);
+            insertFileEntry(_lock, _rentry_ptr, n.name_, n.size_);
         }
     }
 }

@@ -143,6 +143,11 @@ void File::write(const uint64_t _offset, std::istream& _ris)
         read_count += cnt;
 
         addRange(_offset, read_count);
+        if (range_vec_.size() == 1 && range_vec_.front().size_ == size_) {
+        
+			storeRanges();
+            stream_.flush();
+		}
     }
 }
 
@@ -311,30 +316,30 @@ void Engine::start(const fs::path& _path)
 void Engine::open(FileData& _rfd)
 {
 }
-void Engine::tryOpen(FileData& _rfd, const uint64_t _size, const std::string& _app_id, const std::string& _build_name, const std::string& _remote_path)
+void Engine::tryOpen(FileData& _rfd, const uint64_t _size, const std::string& _app_id, const std::string& _build_unique, const std::string& _remote_path)
 {
     string d = utility::base64_encode(_app_id);
     string f = namefy_b64(_remote_path);
 
-	for (auto& c : d) {
+    for (auto& c : d) {
         if (c == '/') {
             c = '_';
         }
     }
 
     d += '\\';
-    d += _build_name;
+    d += _build_unique;
     d = namefy(d);
 
     fs::path p = path_;
 
-	p /= d;
+    p /= d;
 
-	fs::create_directories(p);
+    fs::create_directories(p);
 
-	p /= f;
+    p /= f;
 
-	_rfd.file_.open(p, _size);
+    _rfd.file_.open(p, _size);
 }
 void Engine::close(FileData& _rfd)
 {
