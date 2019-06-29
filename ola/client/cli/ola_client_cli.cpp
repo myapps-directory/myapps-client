@@ -921,7 +921,7 @@ void handle_create_build(istream& _ris, Engine &_reng){
     {
         ifstream ifs(zip_path, std::ifstream::binary);
         if(ifs){
-            req_ptr->sha_sum_ = ola::utility::sha256(ifs);
+            req_ptr->sha_sum_ = ola::utility::sha256hex(ifs);
             cout<<"sha_sum for "<<zip_path<<": "<<req_ptr->sha_sum_<<endl;
         }else{
             cout<<"could not open "<<zip_path<<" for reading"<<endl;
@@ -1183,7 +1183,7 @@ void Engine::authRun(){
             cout<<"User: "<<flush;cin>>req_ptr->auth_;
             cout<<"Pass: "<<flush;cin>>req_ptr->pass_;
         
-            req_ptr->pass_ = ola::utility::sha256(req_ptr->pass_);
+            req_ptr->pass_ = ola::utility::sha256hex(req_ptr->pass_);
         }
         
         promise<int> prom;
