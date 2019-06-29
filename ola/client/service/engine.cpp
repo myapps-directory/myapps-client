@@ -737,11 +737,11 @@ void Engine::close(Descriptor* _pdesc)
 
 bool Engine::Implementation::entry(const fs::path& _path, EntryPointerT& _rentry_ptr, unique_lock<mutex>& _rlock)
 {
-    auto   generic_path_str = _path.generic_string();
-    string remote_path;
-    string storage_id;
-    string app_id;
-    string build_name;
+    auto          generic_path_str = _path.generic_string();
+    string        remote_path;
+    const string* pstorage_id = nullptr;
+    const string* papp_id     = nullptr;
+    const string* pbuild_name = nullptr;
 
     for (const auto& e : _path) {
         string        s     = e.generic_string();
@@ -766,10 +766,16 @@ bool Engine::Implementation::entry(const fs::path& _path, EntryPointerT& _rentry
 
             if (_rentry_ptr->type_ == EntryTypeE::Application) {
                 remote_path.clear();
-                storage_id = _rentry_ptr->remote_;
-                ApplicationData& rapp_data = *get<ApplicationDataPointerT>(_rentry_ptr->data_var_);
-                app_id                    = rapp_data.app_id_;
-                build_name                = rapp_data.build_name_;
+                pstorage_id = &_rentry_ptr->remote_;
+
+                auto pfd = get_if<ApplicationDataPointerT>(&_rentry_ptr->data_var_);
+                if (pfd && pfd->get()) {
+                    papp_id     = &pfd->get()->app_id_;
+                    pbuild_name = &pfd->get()->build_name_;
+                } else {
+                    solid_assert(false);
+				}
+
             } else if (!_rentry_ptr->remote_.empty()) {
                 remote_path += '/';
                 remote_path += _rentry_ptr->remote_;
@@ -803,7 +809,7 @@ bool Engine::Implementation::entry(const fs::path& _path, EntryPointerT& _rentry
 
         auto req_ptr         = make_shared<ListStoreRequest>();
         req_ptr->path_       = remote_path;
-        req_ptr->storage_id_ = storage_id;
+        req_ptr->storage_id_ = *pstorage_id;
 
         front_rpc_service_.sendRequest(config_.front_endpoint_.c_str(), req_ptr, lambda);
     }
@@ -825,7 +831,7 @@ bool Engine::Implementation::entry(const fs::path& _path, EntryPointerT& _rentry
         if (_rentry_ptr->type_ == EntryTypeE::File) {
             if (holds_alternative<UniqueIdT>(_rentry_ptr->data_var_)) {
                 //_rentry_ptr->data_var_ = make_unique<FileData>(storage_id, remote_path);
-                _rentry_ptr->data_var_ = file_cache_engine_.create<FileData>(get<UniqueIdT>(_rentry_ptr->data_var_), _rentry_ptr->size_, storage_id, app_id, build_name, remote_path);
+                _rentry_ptr->data_var_ = file_cache_engine_.create<FileData>(get<UniqueIdT>(_rentry_ptr->data_var_), _rentry_ptr->size_, *pstorage_id, *papp_id, *pbuild_name, remote_path);
             }
         }
 
@@ -1670,7 +1676,9 @@ void Engine::Implementation::createEntryData(EntryPointerT& _rentry_ptr, const s
         return;
     }
 
-    _rentry_ptr->data_var_ = make_unique<DirectoryData>();
+	if (_rentry_ptr->directoryData() == nullptr) {
+        _rentry_ptr->data_var_ = make_unique<DirectoryData>();
+    }
 
     for (const auto& n : _rnode_dq) {
         //TODO: we do not create the EntryData here

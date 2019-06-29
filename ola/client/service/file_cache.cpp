@@ -281,7 +281,7 @@ string denamefy(const std::string& _path)
 
 std::string namefy_b64(const std::string& _txt)
 {
-    string s = utility::sha256(_txt);
+    string s = utility::base64_encode(utility::sha256(_txt));
     for (auto& c : s) {
         if (c == '/') {
             c = '_';
@@ -313,8 +313,14 @@ void Engine::open(FileData& _rfd)
 }
 void Engine::tryOpen(FileData& _rfd, const uint64_t _size, const std::string& _app_id, const std::string& _build_name, const std::string& _remote_path)
 {
-    string d = namefy_b64(_app_id);
+    string d = utility::base64_encode(_app_id);
     string f = namefy_b64(_remote_path);
+
+	for (auto& c : d) {
+        if (c == '/') {
+            c = '_';
+        }
+    }
 
     d += '\\';
     d += _build_name;
@@ -328,7 +334,7 @@ void Engine::tryOpen(FileData& _rfd, const uint64_t _size, const std::string& _a
 
 	p /= f;
 
-	//_rfd.file_.open(p, _size);
+	_rfd.file_.open(p, _size);
 }
 void Engine::close(FileData& _rfd)
 {
