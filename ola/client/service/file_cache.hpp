@@ -75,20 +75,26 @@ struct FileData {
     bool readFromCache(char* _pbuf, uint64_t _offset, size_t _length, size_t& _rbytes_transfered);
 };
 
+struct Configuration{
+    fs::path    base_path_;
+    uint64_t    max_size_ = 1024 * 1024 * 1024;
+    size_t      max_count_ = -1;
+};
+
 using UniqueIdT = solid::frame::UniqueId;
 
 class Engine {
+    struct Implementation;
+    std::unique_ptr<Implementation> pimpl_;
 public:
-    void start(const fs::path &_path);
+    Engine();
+    ~Engine();
+
+    void start(Configuration &&_config);
 
     template <class T>
-    std::unique_ptr<T> create(const UniqueIdT& _uid, const uint64_t _size, const std::string &_storage_id, const std::string& _app_id, const std::string &_build_unique, const std::string& _remote_path)
+    std::unique_ptr<T> create(const uint64_t _size, const std::string &_storage_id, const std::string& _app_id, const std::string &_build_unique, const std::string& _remote_path)
 	{
-        std::unique_ptr<T> ptr = std::unique_ptr<T>(static_cast<T*>(uncache(_uid).release()));
-        if (ptr) {
-            open(*ptr);
-            return ptr;
-        }
         ptr = std::make_unique<T>(_storage_id, _remote_path);
         ptr->app_id_ = _app_id;
         ptr->build_unique_ = _build_unique;
@@ -97,17 +103,15 @@ public:
 	}	
 
 	template <class T>
-    UniqueIdT release(std::unique_ptr<T>& _data_ptr)
+    void release(std::unique_ptr<T>& _data_ptr)
 	{
 		close(*_data_ptr);
-		return cache(_data_ptr.release());
 	}
 
 
-	template<class T>
-    void flush(std::unique_ptr<T>& _data_ptr)
+	void flush(FileData &_rfd)
     {
-        doFlush(*_data_ptr);
+        doFlush(_rfd);
     }
 
 private:
@@ -118,8 +122,6 @@ private:
 	std::unique_ptr<FileData> uncache(const UniqueIdT& _uid);
     void                      doFlush(FileData& _rfd);
 
-private:
-    fs::path path_;
 };
 
 

@@ -1,5 +1,6 @@
 #include "shortcut_creator.hpp"
 #include "solid/system/common.hpp"
+#include "boost/filesystem.hpp"
 #include <sstream>
 #include <fstream>
 #include <thread>
@@ -17,6 +18,7 @@
 
 using namespace solid;
 using namespace std;
+namespace fs = boost::filesystem;
 
 namespace ola {
 namespace client {
@@ -106,6 +108,8 @@ size_t ShortcutCreator::create(
             _ros.write(buffer, cnt);
             read_count += cnt;
         }
+        ifs.close();
+        fs::remove(path);
     }
     return read_count;
 }

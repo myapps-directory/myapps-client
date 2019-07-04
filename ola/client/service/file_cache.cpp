@@ -339,14 +339,30 @@ bool FileData::readFromCache(char* _pbuf, uint64_t _offset, size_t _length, size
 }
 
 //-----------------------------------------------------------------------------
-void Engine::start(const fs::path& _path)
+struct Engine::Implementation{
+    Configuration   config_;
+    uint64_t        current_size_ = 0;
+
+    const Configuration &configuration()const{
+        return config_;
+    }
+};
+//-----------------------------------------------------------------------------
+
+Engine::Engine():pimpl_(solid::make_pimpl<Implementation>()){}
+Engine::~Engine(){}
+
+void Engine::start(Configuration &&_config)
 {
-    path_ = _path;
-    fs::create_directories(path_);
+    config_ = std::move(_config);
+    fs::create_directories(pimpl_->configuration().base_path_);
 }
+
 void Engine::open(FileData& _rfd)
 {
 }
+
+
 void Engine::tryOpen(FileData& _rfd, const uint64_t _size, const std::string& _app_id, const std::string& _build_unique, const std::string& _remote_path)
 {
     string d = utility::base64_encode(_app_id);
