@@ -1,6 +1,7 @@
 set( ClientServiceTests
     test_file_cache_file.cpp
     test_file_namefy.cpp
+    test_file_cache.cpp
 )
 
 create_test_sourcelist(

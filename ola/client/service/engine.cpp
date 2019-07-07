@@ -295,6 +295,15 @@ struct Entry {
         return pdd;
     }
 
+    inline ApplicationData* applicationData() const
+    {
+        ApplicationData* pad = nullptr;
+        if (auto pa = std::get_if<ApplicationDataPointerT>(&data_var_)) {
+            pad = pa->get();
+        }
+        return pad;
+    }
+
     EntryPointerT find(const string& _path) const
     {
         EntryPointerT entry_ptr;
@@ -460,6 +469,8 @@ public:
         frame::mprpc::ConnectionContext&          _ctx,
         std::shared_ptr<front::ListAppsResponse>& _rrecv_msg_ptr);
 
+    void onAllApplicationsFetched();
+
     EntryPointerT createEntry(EntryPointerT& _rparent_ptr, const string& _name, const EntryTypeE _type = EntryTypeE::Unknown, const uint64_t _size = 0);
 
     EntryPointerT tryInsertUnknownEntry(EntryPointerT& _rparent_ptr, const string& _path);
@@ -599,7 +610,12 @@ void Engine::start(const Configuration& _rcfg)
 
     pimpl_->createRootEntry();
 
-    pimpl_->file_cache_engine_.start(pimpl_->cachePath());
+    {
+        file_cache::Configuration config;
+        config.base_path_ = pimpl_->cachePath();
+        //TODO: set other configuration fields
+        pimpl_->file_cache_engine_.start(std::move(config));
+    }
 
     pimpl_->scheduler_.start(1);
 
@@ -713,7 +729,7 @@ Descriptor* Engine::open(const fs::path& _path)
     if (pimpl_->entry(_path, entry_ptr, lock)) {
         auto pdesc = new Descriptor(std::move(entry_ptr));
         solid_log(logger, Verbose, "OPEN: " << _path.generic_path() << " -> " << pdesc << " entry: " << pdesc->entry_ptr_.get());
-		return pdesc;
+        return pdesc;
     }
     return nullptr;
 }
@@ -729,12 +745,14 @@ void Engine::close(Descriptor* _pdesc)
         unique_lock<mutex> lock{rmutex};
         size_t             use_cnt = _pdesc->entry_ptr_.use_count();
 
-		solid_log(logger, Verbose, "CLOSE: " << _pdesc << " entry: " << _pdesc->entry_ptr_.get()<<" use count = "<<use_cnt);
+        solid_log(logger, Verbose, "CLOSE: " << _pdesc << " entry: " << _pdesc->entry_ptr_.get() << " use count = " << use_cnt);
         if (use_cnt == 2) {
-            _pdesc->entry_ptr_->data_var_ = pimpl_->file_cache_engine_.release(get<FileDataPointerT>(_pdesc->entry_ptr_->data_var_));
+            pimpl_->file_cache_engine_.close(*get<FileDataPointerT>(_pdesc->entry_ptr_->data_var_));
+            _pdesc->entry_ptr_->data_var_ = UniqueIdT();
+
         } else {
-            pimpl_->file_cache_engine_.flush(get<FileDataPointerT>(_pdesc->entry_ptr_->data_var_));
-		}
+            pimpl_->file_cache_engine_.flush(*get<FileDataPointerT>(_pdesc->entry_ptr_->data_var_));
+        }
     } else {
         solid_log(logger, Verbose, "CLOSE: " << _pdesc << " entry: " << _pdesc->entry_ptr_.get());
     }
@@ -745,8 +763,8 @@ bool Engine::Implementation::entry(const fs::path& _path, EntryPointerT& _rentry
 {
     auto          generic_path_str = _path.generic_string();
     string        remote_path;
-    const string* pstorage_id = nullptr;
-    const string* papp_id     = nullptr;
+    const string* pstorage_id   = nullptr;
+    const string* papp_id       = nullptr;
     const string* pbuild_unique = nullptr;
 
     for (const auto& e : _path) {
@@ -776,11 +794,11 @@ bool Engine::Implementation::entry(const fs::path& _path, EntryPointerT& _rentry
 
                 auto pfd = get_if<ApplicationDataPointerT>(&_rentry_ptr->data_var_);
                 if (pfd && pfd->get()) {
-                    papp_id     = &pfd->get()->app_id_;
+                    papp_id       = &pfd->get()->app_id_;
                     pbuild_unique = &pfd->get()->build_unique_;
                 } else {
                     solid_assert(false);
-				}
+                }
 
             } else if (!_rentry_ptr->remote_.empty()) {
                 remote_path += '/';
@@ -802,7 +820,7 @@ bool Engine::Implementation::entry(const fs::path& _path, EntryPointerT& _rentry
                           std::shared_ptr<front::ListStoreRequest>&  _rsent_msg_ptr,
                           std::shared_ptr<front::ListStoreResponse>& _rrecv_msg_ptr,
                           ErrorConditionT const&                     _rerror) mutable {
-            auto&             m = entry_ptr->mutex();
+            auto&              m = entry_ptr->mutex();
             unique_lock<mutex> lock{m};
             if (_rrecv_msg_ptr && _rrecv_msg_ptr->error_ == 0) {
                 entry_ptr->status_ = EntryStatusE::Fetched;
@@ -836,8 +854,8 @@ bool Engine::Implementation::entry(const fs::path& _path, EntryPointerT& _rentry
 
         if (_rentry_ptr->type_ == EntryTypeE::File) {
             if (holds_alternative<UniqueIdT>(_rentry_ptr->data_var_)) {
-                //_rentry_ptr->data_var_ = make_unique<FileData>(storage_id, remote_path);
-                _rentry_ptr->data_var_ = file_cache_engine_.create<FileData>(get<UniqueIdT>(_rentry_ptr->data_var_), _rentry_ptr->size_, *pstorage_id, *papp_id, *pbuild_unique, remote_path);
+                _rentry_ptr->data_var_ = make_unique<FileData>(*pstorage_id, remote_path);
+                file_cache_engine_.open(*get<FileDataPointerT>(_rentry_ptr->data_var_), _rentry_ptr->size_, *papp_id, *pbuild_unique, remote_path);
             }
         }
 
@@ -1448,11 +1466,34 @@ void Engine::Implementation::remoteFetchApplication(
             ++_app_index;
             if (_app_index < apps_response->app_id_vec_.size()) {
                 remoteFetchApplication(apps_response, _rsent_msg_ptr, _app_index);
+            } else {
+                //done with all applications
+                onAllApplicationsFetched();
             }
         }
     };
 
     front_rpc_service_.sendRequest(config_.front_endpoint_.c_str(), _rsent_msg_ptr, lambda);
+}
+
+void Engine::Implementation::onAllApplicationsFetched()
+{
+    auto check_application_exist_lambda = [this](const std::string& _app_name, const std::string& _build_unique) {
+        unique_lock<mutex> lock{root_mutex_};
+        auto               entry_ptr = root_entry_ptr_->find(_app_name);
+        if (entry_ptr) {
+            mutex& rmutex = entry_ptr->mutex();
+            lock.unlock(); //no overlapping locks
+            unique_lock<mutex> tlock{rmutex};
+            lock.swap(tlock);
+            auto pad = entry_ptr->applicationData();
+            if (pad != nullptr) {
+                return pad->build_unique_ == _build_unique;
+			}
+        }
+        return false;
+    };
+    file_cache_engine_.removeOldApplications(check_application_exist_lambda);
 }
 
 void Engine::Implementation::onFrontListAppsResponse(
@@ -1673,7 +1714,7 @@ void Engine::Implementation::eraseEntryFromParent(EntryPointerT&& _uentry_ptr, u
     }
 }
 
-void Engine::Implementation::createEntryData(unique_lock<mutex> &_lock, EntryPointerT& _rentry_ptr, const std::string& _path_str, ListNodeDequeT& _rnode_dq)
+void Engine::Implementation::createEntryData(unique_lock<mutex>& _lock, EntryPointerT& _rentry_ptr, const std::string& _path_str, ListNodeDequeT& _rnode_dq)
 {
     solid_log(logger, Info, _path_str);
     if (_rnode_dq.size() == 1 && _rnode_dq.front().name_.empty()) {
@@ -1684,7 +1725,7 @@ void Engine::Implementation::createEntryData(unique_lock<mutex> &_lock, EntryPoi
         return;
     }
 
-	if (_rentry_ptr->directoryData() == nullptr) {
+    if (_rentry_ptr->directoryData() == nullptr) {
         _rentry_ptr->data_var_ = make_unique<DirectoryData>();
     }
 
