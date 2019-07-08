@@ -48,21 +48,28 @@ struct ApplicationStub {
     {
         file_map_.erase(_file_name);
     }
+
+    void clear()
+    {
+        name_.clear();
+        build_.clear();
+        file_map_.clear();
+    }
 };
 
 struct FileStub {
     string           name_;
-    ApplicationStub* papp_  = nullptr;
-    uint64_t         size_  = 0;
-    uint64_t         usage_ = -1;
+    ApplicationStub* papp_   = nullptr;
+    uint64_t         size_   = 0;
+    uint64_t         usage_  = -1;
     bool             in_use_ = false;
 
     void clear()
     {
         name_.clear();
-        papp_  = nullptr;
-        size_  = 0;
-        usage_ = -1;
+        papp_   = nullptr;
+        size_   = 0;
+        usage_  = -1;
         in_use_ = false;
     }
 };
@@ -123,11 +130,16 @@ struct Engine::Implementation {
         return p;
     }
 
-    bool exists(FileData& _rfd, const std::string& _app_id, const std::string& _build_unique, const std::string& _name) const;
-    bool ensureSpace(uint64_t _size);
-    void startUsingFile(FileData& _rfd, const std::string& _app_id, const std::string& _build_unique, const std::string& _name, const uint64_t _size);
-    void doneUsingFile(FileData& _rfd);
-    void eraseFile(const size_t _index);
+    bool             exists(FileData& _rfd, ApplicationStub*& _rpapp, const std::string& _app_id, const std::string& _build_unique, const std::string& _name) const;
+    ApplicationStub* application(const std::string& _app_id, const std::string& _build_unique) const;
+    bool             ensureSpace(uint64_t _size);
+    void             startUsingFile(FileData& _rfd, ApplicationStub& _rapp, const std::string& _name, const uint64_t _size);
+    void             doneUsingFile(FileData& _rfd);
+    void             eraseFile(const size_t _index);
+    void             removeApplication(ApplicationStub& _rapp);
+    bool             extractApplicationName(const string& _path, string& _rname, string& _rbuild);
+    void             addApplicationFiles(ApplicationStub& _rapp, const fs::path& _path, uint64_t& _rsize);
+    void             addApplicationFile(ApplicationStub& _rapp, const string& _name, uint64_t& _rsize);
 };
 //-----------------------------------------------------------------------------
 
@@ -141,6 +153,101 @@ void Engine::start(Configuration&& _config)
 {
     pimpl_->config_ = std::move(_config);
     fs::create_directories(configuration().base_path_);
+    solid_log(logger, Info, "Base path: " << configuration().base_path_);
+
+    fs::directory_iterator it, end;
+
+    try {
+        it = fs::directory_iterator(configuration().base_path_);
+    } catch (const std::exception&) {
+        it = end;
+    }
+
+    uint64_t size = 0;
+
+    while (it != end) {
+        if (is_directory(*it)) {
+            ApplicationStub* papp = nullptr;
+            if (pimpl_->app_free_stack_.empty()) {
+                pimpl_->app_dq_.emplace_back();
+                papp = &pimpl_->app_dq_.back();
+            } else {
+                papp = pimpl_->app_free_stack_.top();
+                pimpl_->app_free_stack_.pop();
+            }
+
+            if (pimpl_->extractApplicationName(it->path().leaf().generic_string(), papp->name_, papp->build_)) {
+                pimpl_->addApplicationFiles(*papp, it->path(), size);
+            } else {
+                papp->clear();
+                pimpl_->app_free_stack_.push(papp);
+            }
+        }
+        ++it;
+    }
+}
+
+bool Engine::Implementation::extractApplicationName(const string& _path, string& _rname, string& _rbuild)
+{
+    auto path = denamefy(_path);
+
+    auto off = path.rfind('\\');
+    if (off == string::npos) {
+        solid_log(logger, Info, _path<<": "<<path<<" invalid");
+        return false;
+	}
+
+	_rname = path.substr(0, off);
+    _rbuild = path.substr(off + 1);
+
+    solid_log(logger, Info, _path<<" -> "<<_rname<<' '<<_rbuild);
+    return true;
+}
+
+void Engine::Implementation::addApplicationFile(ApplicationStub& _rapp, const string& _name, uint64_t& _rsize)
+{
+    File f;
+    f.open(computeFilePath(_rapp.name_, _rapp.build_, _name));
+    _rsize += f.size();
+
+    size_t file_idx = -1;
+    if (file_free_index_stack_.size()) {
+        file_idx = file_free_index_stack_.top();
+        file_free_index_stack_.pop();
+    } else {
+        file_idx = file_dq_.size();
+        file_dq_.emplace_back();
+    }
+
+    FileStub& rfs = file_dq_[file_idx];
+    rfs.name_     = _name;
+    rfs.size_     = f.size();
+    rfs.usage_    = f.usage();
+    rfs.papp_     = &_rapp;
+
+    file_map_[&rfs] = file_idx;
+
+    _rapp.file_map_[rfs.name_] = file_idx;
+
+	solid_log(logger, Info, _rapp.name_ << ' ' << _rapp.build_ << ' ' << _name << ' ' << _rsize<<' '<<rfs.size_<<' '<<rfs.usage_<<' '<<file_idx);
+}
+
+void Engine::Implementation::addApplicationFiles(ApplicationStub& _rapp, const fs::path& _path, uint64_t& _rsize)
+{
+    solid_log(logger, Info, _rapp.name_ << ' ' << _rapp.name_ << ' ' << _path);
+    fs::directory_iterator it, end;
+
+    try {
+        it = fs::directory_iterator(_path);
+    } catch (const std::exception& ex) {
+        it = end;
+    }
+
+    while (it != end) {
+        if (!fs::is_directory(*it)) {
+            addApplicationFile(_rapp, it->path().filename().generic_string(), _rsize);
+        }
+    }
 }
 
 uint64_t Engine::usedSize() const
@@ -150,7 +257,7 @@ uint64_t Engine::usedSize() const
 
 size_t Engine::applicationCount() const
 {
-    return pimpl_->file_map_.size();
+    return pimpl_->file_dq_.size() - pimpl_->file_free_index_stack_.size();
 }
 
 const Configuration& Engine::configuration() const
@@ -160,6 +267,8 @@ const Configuration& Engine::configuration() const
 
 void Engine::open(FileData& _rfd, const uint64_t _size, const std::string& _app_id, const std::string& _build_unique, const std::string& _remote_path)
 {
+
+    solid_log(logger, Info, _size << ' ' << _app_id << ' ' << _build_unique << ' ' << _remote_path);
     string d = _app_id;
     string f = namefy_b64(_remote_path);
 
@@ -167,8 +276,9 @@ void Engine::open(FileData& _rfd, const uint64_t _size, const std::string& _app_
     d += _build_unique;
     d = namefy(d);
 
-    _rfd.cache_index_ = -1;
-    if (pimpl_->exists(_rfd, _app_id, _build_unique, f) || pimpl_->ensureSpace(_size)) {
+    _rfd.cache_index_     = -1;
+    ApplicationStub* papp = nullptr;
+    if (pimpl_->exists(_rfd, papp, _app_id, _build_unique, f) || ((papp = pimpl_->application(_app_id, _build_unique)) != nullptr && pimpl_->ensureSpace(_size))) {
 
         fs::path p = configuration().base_path_;
 
@@ -178,28 +288,44 @@ void Engine::open(FileData& _rfd, const uint64_t _size, const std::string& _app_
 
         p /= f;
 
-        pimpl_->startUsingFile(_rfd, _app_id, _build_unique, f, _size);
+        pimpl_->startUsingFile(_rfd, *papp, f, _size);
         _rfd.file_.open(p, _size);
     }
 }
 
-bool Engine::Implementation::exists(FileData& _rfd, const std::string& _app_id, const std::string& _build_unique, const std::string& _name) const
+ApplicationStub* Engine::Implementation::application(const std::string& _app_id, const std::string& _build_unique) const
+{
+    solid_log(logger, Info, _app_id << ' ' << _build_unique);
+    auto it = app_map_.find(_app_id);
+    if (it != app_map_.end()) {
+        if (it->second->build_ == _build_unique) {
+            return it->second;
+        }
+    }
+    return nullptr;
+}
+
+bool Engine::Implementation::exists(FileData& _rfd, ApplicationStub*& _rpapp, const std::string& _app_id, const std::string& _build_unique, const std::string& _name) const
 {
     auto it = app_map_.find(_app_id);
     if (it != app_map_.end()) {
         if (it->second->build_ == _build_unique) {
+            _rpapp   = it->second;
             auto fit = it->second->file_map_.find(_name);
             if (fit != it->second->file_map_.end()) {
                 _rfd.cache_index_ = fit->second;
+                solid_log(logger, Info, _app_id << ' ' << _build_unique << ' ' << _name << "-> true");
                 return true;
             }
         }
     }
+    solid_log(logger, Info, _app_id << ' ' << _build_unique << ' ' << _name << "-> false");
     return false;
 }
 
 bool Engine::Implementation::ensureSpace(uint64_t _size)
 {
+    solid_log(logger, Info, _size);
     if (current_size_ == solid::InvalidSize()) {
         return false;
     }
@@ -225,15 +351,15 @@ bool Engine::Implementation::ensureSpace(uint64_t _size)
                 break;
             }
         }
-		++it;
+        ++it;
     }
 
     if (freeing_size >= required_size) {
         freeing_size = 0;
 
-		it = file_map_.begin();
+        it = file_map_.begin();
 
-		while (it != file_map_.end()) {
+        while (it != file_map_.end()) {
             if (!it->first->in_use_) {
                 freeing_size += it->first->size_;
                 eraseFile(it->second);
@@ -252,6 +378,7 @@ bool Engine::Implementation::ensureSpace(uint64_t _size)
 
 void Engine::Implementation::eraseFile(const size_t _index)
 {
+    solid_log(logger, Info, _index);
     file_free_index_stack_.push(_index);
     FileStub& rfs = file_dq_[_index];
     rfs.papp_->erase(rfs.name_);
@@ -259,8 +386,9 @@ void Engine::Implementation::eraseFile(const size_t _index)
     rfs.clear();
 }
 
-void Engine::Implementation::startUsingFile(FileData& _rfd, const std::string& _app_id, const std::string& _build_unique, const std::string& _name, const uint64_t _size)
+void Engine::Implementation::startUsingFile(FileData& _rfd, ApplicationStub& _rapp, const std::string& _name, const uint64_t _size)
 {
+    solid_log(logger, Info, _name << ' ' << _size);
     if (_rfd.cache_index_ == solid::InvalidIndex()) {
         if (!file_free_index_stack_.empty()) {
             _rfd.cache_index_ = file_free_index_stack_.top();
@@ -273,7 +401,7 @@ void Engine::Implementation::startUsingFile(FileData& _rfd, const std::string& _
         FileStub& rfs = file_dq_[_rfd.cache_index_];
         rfs.size_     = _size;
         rfs.name_     = _name;
-        rfs.papp_     = application(_app_id, _build_name);
+        rfs.papp_     = &_rapp;
     } else {
         file_map_.erase(&file_dq_[_rfd.cache_index_]);
     }
@@ -282,41 +410,86 @@ void Engine::Implementation::startUsingFile(FileData& _rfd, const std::string& _
     rfs.in_use_   = true;
 
     solid_check(rfs.size_ == _size && rfs.name_ == _name);
-    
+
     file_map_[&rfs] = _rfd.cache_index_;
 }
 
 void Engine::Implementation::doneUsingFile(FileData& _rfd)
 {
+    solid_log(logger, Info, _rfd.cache_index_);
     solid_check(_rfd.cache_index_ != solid::InvalidIndex());
 
-	FileStub& rfs = file_dq_[_rfd.cache_index_];
+    FileStub& rfs = file_dq_[_rfd.cache_index_];
 
-	file_map_.erase(&rfs);
+    file_map_.erase(&rfs);
 
-	rfs.in_use_ = false;
+    rfs.in_use_ = false;
+    rfs.usage_  = computeUsage();
     _rfd.file_.usage(rfs.usage_);
 
-	_rfd.cache_index_ = solid::InvalidIndex();
+    _rfd.cache_index_ = solid::InvalidIndex();
 }
 
 void Engine::close(FileData& _rfd)
 {
+    solid_log(logger, Info, _rfd.cache_index_);
+    flush(_rfd);
     pimpl_->doneUsingFile(_rfd);
     _rfd.file_.close();
 }
 
 void Engine::flush(FileData& _rfd)
 {
+    solid_check(_rfd.cache_index_ != solid::InvalidIndex());
+
+    FileStub& rfs = pimpl_->file_dq_[_rfd.cache_index_];
+
+    rfs.usage_ = pimpl_->computeUsage();
+
+	solid_log(logger, Info, _rfd.cache_index_ << ' '<<rfs.usage_);
+
+    _rfd.file_.usage(rfs.usage_);
     _rfd.file_.flush();
+}
+
+void Engine::Implementation::removeApplication(ApplicationStub& _rapp)
+{
+    solid_log(logger, Info, _rapp.name_ << ' ' << _rapp.build_);
+    for (const auto& p : _rapp.file_map_) {
+        FileStub& rfs  = file_dq_[p.second];
+        auto      path = computeFilePath(_rapp.name_, _rapp.name_, rfs.name_);
+
+        fs::remove(path);
+        file_map_.erase(&rfs);
+        rfs.clear();
+        file_free_index_stack_.push(p.second);
+    }
+    _rapp.clear();
 }
 
 void Engine::removeApplication(const std::string& _app_id, const std::string& _build_unique)
 {
+    solid_log(logger, Info, _app_id << ' ' << _build_unique);
+    auto it = pimpl_->app_map_.find(_app_id);
+    if (it != pimpl_->app_map_.end()) {
+        if (it->second->build_ == _build_unique) {
+            pimpl_->removeApplication(*it->second);
+            pimpl_->app_map_.erase(it);
+            pimpl_->app_free_stack_.push(it->second);
+        }
+    }
 }
-
 void Engine::removeOldApplications(const CheckApplicationExistFunctionT& _app_check_fnc)
 {
+    auto it = pimpl_->app_map_.begin();
+    while (it != pimpl_->app_map_.end()) {
+        if (!_app_check_fnc(it->second->name_, it->second->build_)) {
+            pimpl_->removeApplication(*it->second);
+            it = pimpl_->app_map_.erase(it);
+        } else {
+            ++it;
+        }
+    }
 }
 
 //-----------------------------------------------------------------------------
@@ -362,12 +535,13 @@ bool File::open(const fs::path& _path, const uint64_t _size)
         stream_.read(h.buffer(), h.size);
 
         if (!stream_.eof()) {
-            if (h.data().size_ != _size) {
-                stream_.close();
-                fs::remove(_path);
-                return false;
+            if (_size != 0) {
+                if (h.data().size_ != _size) {
+                    stream_.close();
+                    fs::remove(_path);
+                    return false;
+                }
             }
-
             if (!loadRanges()) {
                 stream_.close();
                 fs::remove(_path);

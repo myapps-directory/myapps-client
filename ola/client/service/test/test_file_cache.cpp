@@ -1,7 +1,9 @@
 #include "../file_cache.hpp"
 #include "solid/system/common.hpp"
+#include "solid/system/log.hpp"
 #include <sstream>
 #include <vector>
+#include <iostream>
 
 using namespace std;
 using namespace ola::client::service::file_cache;
@@ -16,6 +18,9 @@ struct FileStub: FileData{
 
 int test_file_cache(int argc, char* argv[])
 {
+
+	solid::log_start(std::cout, {".*:VIEW"});
+
     fs::remove_all("./test");
 
     Engine engine;

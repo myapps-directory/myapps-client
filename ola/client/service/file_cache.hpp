@@ -51,7 +51,7 @@ class File {
 public:
     static uint64_t check(const fs::path& _path);
 
-    bool open(const fs::path& _path, const uint64_t _size);
+    bool open(const fs::path& _path, const uint64_t _size = 0);
 
     void close();
 
@@ -67,7 +67,7 @@ public:
         if (usage_ != _usage) {
             usage_         = _usage;
             modified_head_ = true;
-		}
+        }
     }
 
     uint64_t usage() const
@@ -75,8 +75,13 @@ public:
         return usage_;
     }
 
-    size_t rangeCount() const {
+    size_t rangeCount() const
+    {
         return range_vec_.size();
+    }
+
+    uint64_t size() const {
+        return size_;
 	}
 
 private:
@@ -109,9 +114,9 @@ struct FileData {
 struct Configuration {
     fs::path base_path_;
 
-    uint64_t max_size_  = 1024 * 1024 * 1024;
+    uint64_t max_size_      = 1024 * 1024 * 1024;
     uint64_t max_file_size_ = 100 * 1024 * 1024;
-    size_t   max_count_ = 10 * 1024;
+    size_t   max_count_     = 10 * 1024;
 };
 
 using UniqueIdT = solid::frame::UniqueId;
@@ -121,7 +126,7 @@ class Engine {
     solid::PimplT<Implementation> pimpl_;
 
 public:
-	using CheckApplicationExistFunctionT = std::function<bool(const std::string&, const std::string&)>;
+    using CheckApplicationExistFunctionT = std::function<bool(const std::string&, const std::string&)>;
 
     Engine();
     ~Engine();
@@ -140,8 +145,7 @@ public:
 
     const Configuration& configuration() const;
 
-	void removeOldApplications(const CheckApplicationExistFunctionT& _app_check_fnc);
-    
+    void removeOldApplications(const CheckApplicationExistFunctionT& _app_check_fnc);
 };
 
 } // namespace file_cache
