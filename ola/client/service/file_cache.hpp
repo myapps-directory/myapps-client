@@ -141,6 +141,7 @@ public:
 
     uint64_t usedSize() const;
     size_t   applicationCount() const;
+    size_t   fileCount() const;
     void     removeApplication(const std::string& _app_id, const std::string& _build_unique);
 
     const Configuration& configuration() const;
