@@ -794,7 +794,7 @@ bool Engine::Implementation::entry(const fs::path& _path, EntryPointerT& _rentry
 
                 auto pfd = get_if<ApplicationDataPointerT>(&_rentry_ptr->data_var_);
                 if (pfd && pfd->get()) {
-                    papp_id       = &pfd->get()->app_id_;
+                    papp_id       = &_rentry_ptr->name_; //&pfd->get()->app_id_;
                     pbuild_unique = &pfd->get()->build_unique_;
                 } else {
                     solid_assert(false);
@@ -1458,17 +1458,21 @@ void Engine::Implementation::remoteFetchApplication(
                       std::shared_ptr<front::FetchBuildConfigurationResponse>& _rrecv_msg_ptr,
                       ErrorConditionT const&                                   _rerror) mutable {
         if (_rrecv_msg_ptr) {
+			
+			++_app_index;
 
-            this->workpool_.push([this, recv_msg_ptr = std::move(_rrecv_msg_ptr), app_id = _rsent_msg_ptr->app_id_]() mutable {
-                insertApplicationEntry(app_id, recv_msg_ptr);
-            });
+            this->workpool_.push(
+                [this, recv_msg_ptr = std::move(_rrecv_msg_ptr), app_id = _rsent_msg_ptr->app_id_, is_last = _app_index >= apps_response->app_id_vec_.size()]() mutable {
+					insertApplicationEntry(app_id, recv_msg_ptr);
+                    if (is_last) {
+                        //done with all applications
+                        onAllApplicationsFetched();
+					}
+				}
+			);
 
-            ++_app_index;
             if (_app_index < apps_response->app_id_vec_.size()) {
                 remoteFetchApplication(apps_response, _rsent_msg_ptr, _app_index);
-            } else {
-                //done with all applications
-                onAllApplicationsFetched();
             }
         }
     };
@@ -1482,10 +1486,10 @@ void Engine::Implementation::onAllApplicationsFetched()
         unique_lock<mutex> lock{root_mutex_};
         auto               entry_ptr = root_entry_ptr_->find(_app_name);
         if (entry_ptr) {
-            mutex& rmutex = entry_ptr->mutex();
-            lock.unlock(); //no overlapping locks
-            unique_lock<mutex> tlock{rmutex};
-            lock.swap(tlock);
+            //mutex& rmutex = entry_ptr->mutex();
+            //lock.unlock(); //no overlapping locks
+            //unique_lock<mutex> tlock{rmutex};
+            //lock.swap(tlock);
             auto pad = entry_ptr->applicationData();
             if (pad != nullptr) {
                 return pad->build_unique_ == _build_unique;

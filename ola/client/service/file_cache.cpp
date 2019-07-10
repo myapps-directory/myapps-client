@@ -3,6 +3,7 @@
 #include "solid/system/cassert.hpp"
 #include <algorithm>
 #include <chrono>
+#include <mutex>
 #include <stack>
 
 #include "solid/system/log.hpp"
@@ -110,6 +111,7 @@ struct Engine::Implementation {
     FileDqT           file_dq_;
     IndexStackT       file_free_index_stack_;
     FileMapT          file_map_;
+    mutex             mutex_;
 
     uint64_t computeUsage() const
     {
@@ -140,6 +142,7 @@ struct Engine::Implementation {
     bool             extractApplicationName(const string& _path, string& _rname, string& _rbuild);
     void             addApplicationFiles(ApplicationStub& _rapp, const fs::path& _path, uint64_t& _rsize);
     void             addApplicationFile(ApplicationStub& _rapp, const string& _name, uint64_t& _rsize);
+    void             flush(FileData& _rfd);
 };
 //-----------------------------------------------------------------------------
 
@@ -152,7 +155,8 @@ Engine::~Engine() {}
 void Engine::start(Configuration&& _config)
 {
     pimpl_->config_ = std::move(_config);
-    fs::create_directories(configuration().base_path_);
+    boost::system::error_code err;
+    fs::create_directories(configuration().base_path_, err);
     solid_log(logger, Info, "Base path: " << configuration().base_path_);
 
     fs::directory_iterator it, end;
@@ -168,24 +172,30 @@ void Engine::start(Configuration&& _config)
     while (it != end) {
         if (is_directory(*it)) {
             ApplicationStub* papp = nullptr;
-            if (pimpl_->app_free_stack_.empty()) {
-                pimpl_->app_dq_.emplace_back();
-                papp = &pimpl_->app_dq_.back();
-            } else {
-                papp = pimpl_->app_free_stack_.top();
-                pimpl_->app_free_stack_.pop();
+            {
+                lock_guard<mutex> lock{pimpl_->mutex_};
+                if (pimpl_->app_free_stack_.empty()) {
+                    pimpl_->app_dq_.emplace_back();
+                    papp = &pimpl_->app_dq_.back();
+                } else {
+                    papp = pimpl_->app_free_stack_.top();
+                    pimpl_->app_free_stack_.pop();
+                }
             }
-
             if (pimpl_->extractApplicationName(it->path().leaf().generic_string(), papp->name_, papp->build_)) {
+                lock_guard<mutex> lock{pimpl_->mutex_};
                 pimpl_->app_map_[papp->name_] = papp;
                 pimpl_->addApplicationFiles(*papp, it->path(), size);
             } else {
                 papp->clear();
+                lock_guard<mutex> lock{pimpl_->mutex_};
                 pimpl_->app_free_stack_.push(papp);
             }
         }
         ++it;
     }
+
+    lock_guard<mutex> lock{pimpl_->mutex_};
     pimpl_->current_size_ = size;
 }
 
@@ -241,7 +251,7 @@ void Engine::Implementation::addApplicationFiles(ApplicationStub& _rapp, const f
 
     try {
         it = fs::directory_iterator(_path);
-    } catch (const std::exception& ex) {
+    } catch (const std::exception& /*ex*/) {
         it = end;
     }
 
@@ -255,16 +265,19 @@ void Engine::Implementation::addApplicationFiles(ApplicationStub& _rapp, const f
 
 uint64_t Engine::usedSize() const
 {
+    lock_guard<mutex> lock{pimpl_->mutex_};
     return pimpl_->current_size_;
 }
 
 size_t Engine::fileCount() const
 {
+    lock_guard<mutex> lock{pimpl_->mutex_};
     return pimpl_->file_dq_.size() - pimpl_->file_free_index_stack_.size();
 }
 
 size_t Engine::applicationCount() const
 {
+    lock_guard<mutex> lock{pimpl_->mutex_};
     return pimpl_->app_map_.size();
 }
 
@@ -285,13 +298,19 @@ void Engine::open(FileData& _rfd, const uint64_t _size, const std::string& _app_
 
     _rfd.cache_index_     = -1;
     ApplicationStub* papp = nullptr;
+
+    lock_guard<mutex> lock{pimpl_->mutex_};
+
     if (pimpl_->exists(_rfd, papp, _app_id, _build_unique, f) || ((papp = pimpl_->application(_app_id, _build_unique)) != nullptr && pimpl_->ensureSpace(_size))) {
 
         fs::path p = configuration().base_path_;
 
         p /= d;
 
-        fs::create_directories(p);
+		boost::system::error_code err;
+		fs::create_directories(p, err);
+
+		string s = err.message();
 
         p /= f;
 
@@ -412,7 +431,8 @@ void Engine::Implementation::eraseFile(const size_t _index)
     solid_log(logger, Info, _index << ' ' << rfs.usage_ << ' ' << rfs.size_);
 
     rfs.papp_->erase(rfs.name_);
-    fs::remove(computeFilePath(rfs.papp_->name_, rfs.papp_->build_, rfs.name_));
+    boost::system::error_code err;
+    fs::remove(computeFilePath(rfs.papp_->name_, rfs.papp_->build_, rfs.name_), err);
     rfs.clear();
 }
 
@@ -467,19 +487,27 @@ void Engine::Implementation::doneUsingFile(FileData& _rfd)
 void Engine::close(FileData& _rfd)
 {
     solid_log(logger, Info, _rfd.cache_index_);
-    flush(_rfd);
+    lock_guard<mutex> lock{pimpl_->mutex_};
+
+    pimpl_->flush(_rfd);
     pimpl_->doneUsingFile(_rfd);
     _rfd.file_.close();
 }
 
-void Engine::flush(FileData& _rfd)
+void Engine::flush(FileData& _rfd){
+    lock_guard<mutex> lock{pimpl_->mutex_};
+
+    pimpl_->flush(_rfd);
+}
+
+void Engine::Implementation::flush(FileData& _rfd)
 {
     solid_check(_rfd.cache_index_ != solid::InvalidIndex());
 
-    FileStub& rfs = pimpl_->file_dq_[_rfd.cache_index_];
-    pimpl_->file_map_.erase(&rfs);
-    rfs.usage_              = pimpl_->computeUsage();
-    pimpl_->file_map_[&rfs] = _rfd.cache_index_;
+    FileStub& rfs = file_dq_[_rfd.cache_index_];
+    file_map_.erase(&rfs);
+    rfs.usage_              = computeUsage();
+    file_map_[&rfs] = _rfd.cache_index_;
     solid_log(logger, Info, _rfd.cache_index_ << ' ' << rfs.usage_);
 
     _rfd.file_.usage(rfs.usage_);
@@ -491,9 +519,10 @@ void Engine::Implementation::removeApplication(ApplicationStub& _rapp)
     solid_log(logger, Info, _rapp.name_ << ' ' << _rapp.build_);
     for (const auto& p : _rapp.file_map_) {
         FileStub& rfs  = file_dq_[p.second];
-        auto      path = computeFilePath(_rapp.name_, _rapp.name_, rfs.name_);
+        auto      path = computeFilePath(_rapp.name_, _rapp.build_, rfs.name_);
 
-        fs::remove(path);
+		boost::system::error_code err;
+        fs::remove(path, err);
         file_map_.erase(&rfs);
         rfs.clear();
         file_free_index_stack_.push(p.second);
@@ -504,7 +533,8 @@ void Engine::Implementation::removeApplication(ApplicationStub& _rapp)
 void Engine::removeApplication(const std::string& _app_id, const std::string& _build_unique)
 {
     solid_log(logger, Info, _app_id << ' ' << _build_unique);
-    auto it = pimpl_->app_map_.find(_app_id);
+    lock_guard<mutex> lock{pimpl_->mutex_};
+    auto              it = pimpl_->app_map_.find(_app_id);
     if (it != pimpl_->app_map_.end()) {
         if (it->second->build_ == _build_unique) {
             pimpl_->removeApplication(*it->second);
@@ -515,11 +545,14 @@ void Engine::removeApplication(const std::string& _app_id, const std::string& _b
 }
 void Engine::removeOldApplications(const CheckApplicationExistFunctionT& _app_check_fnc)
 {
-    auto it = pimpl_->app_map_.begin();
+    lock_guard<mutex> lock{pimpl_->mutex_};
+    auto              it = pimpl_->app_map_.begin();
     while (it != pimpl_->app_map_.end()) {
         if (!_app_check_fnc(it->second->name_, it->second->build_)) {
-            pimpl_->removeApplication(*it->second);
-            it = pimpl_->app_map_.erase(it);
+            auto papp = it->second;
+            it        = pimpl_->app_map_.erase(it);
+            pimpl_->removeApplication(*papp);
+            pimpl_->app_free_stack_.push(papp);
         } else {
             ++it;
         }
@@ -572,15 +605,17 @@ bool File::open(const fs::path& _path, const uint64_t _size)
             if (_size != 0) {
                 if (h.data().size_ != _size) {
                     stream_.close();
-                    fs::remove(_path);
+                    boost::system::error_code err;
+                    fs::remove(_path, err);
                     return false;
                 }
             } else {
                 size_ = h.data().size_;
-			}
+            }
             if (!loadRanges()) {
                 stream_.close();
-                fs::remove(_path);
+                boost::system::error_code err;
+                fs::remove(_path, err);
                 return false;
             }
         } else {
