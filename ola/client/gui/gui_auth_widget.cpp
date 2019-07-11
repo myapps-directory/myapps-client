@@ -23,7 +23,7 @@ AuthWidget::AuthWidget(QWidget* parent)
     pimpl_->form_.setupUi(this);
     setWindowFlags(Qt::Drawer);
 
-	installEventFilter(this);
+    installEventFilter(this);
 
     connect(pimpl_->form_.authButton, SIGNAL(clicked()), this, SLOT(onAuthClick()));
     connect(this, SIGNAL(offlineSignal(bool)), this, SLOT(onOffline(bool)), Qt::QueuedConnection);

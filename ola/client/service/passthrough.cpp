@@ -660,7 +660,7 @@ NTSTATUS FileSystem::Open(
     if (INVALID_HANDLE_VALUE == pFileDesc->Handle) {
         delete pFileDesc;
         DWORD    err = GetLastError();
-        NTSTATUS rv = NtStatusFromWin32(err);
+        NTSTATUS rv  = NtStatusFromWin32(err);
         return rv;
     }
 
@@ -681,7 +681,7 @@ NTSTATUS FileSystem::Overwrite(
     FileInfo* FileInfo)
 {
 
-	{
+    {
         std::lock_guard<mutex> l(gmutex());
         wcout << "OVERWRITE " << endl;
     }
@@ -840,7 +840,7 @@ NTSTATUS FileSystem::GetFileInfo(
 
     NTSTATUS rv = GetFileInfoInternal(Handle, FileInfo);
 
-	return rv;
+    return rv;
 }
 
 NTSTATUS FileSystem::SetBasicInfo(

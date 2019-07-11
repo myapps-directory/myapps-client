@@ -35,6 +35,7 @@ private slots:
 private:
     void closeEvent(QCloseEvent*) override;
     bool eventFilter(QObject* obj, QEvent* event) override;
+
 private:
     struct Data;
     solid::PimplT<Data> pimpl_;

@@ -1,8 +1,8 @@
 #include "shortcut_creator.hpp"
-#include "solid/system/common.hpp"
 #include "boost/filesystem.hpp"
-#include <sstream>
+#include "solid/system/common.hpp"
 #include <fstream>
+#include <sstream>
 #include <thread>
 #ifdef SOLID_ON_WINDOWS
 
@@ -32,11 +32,12 @@ struct ShortcutCreator::Implementation {
     {
     }
 
-    string tempLinkFile() {
+    string tempLinkFile()
+    {
         ostringstream oss;
         oss << temp_folder_ << "\\ola_" << this_thread::get_id() << ".lnk";
         return oss.str();
-	}
+    }
 };
 
 ShortcutCreator::ShortcutCreator(const string& _temp_folder)
@@ -92,10 +93,10 @@ size_t ShortcutCreator::create(
     }
     CoUninitialize();
 
-	string lnk;
+    string lnk;
     size_t read_count = 0;
 
-	if (SUCCEEDED(hres)) {
+    if (SUCCEEDED(hres)) {
         ifstream         ifs{path, ios::binary};
         constexpr size_t buffer_capacity = 4096;
         char             buffer[buffer_capacity];
@@ -104,7 +105,7 @@ size_t ShortcutCreator::create(
                 read_count += buffer_capacity;
                 _ros.write(buffer, buffer_capacity);
             }
-            size_t cnt = ifs.gcount(); 
+            size_t cnt = ifs.gcount();
             _ros.write(buffer, cnt);
             read_count += cnt;
         }

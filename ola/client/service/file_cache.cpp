@@ -307,10 +307,10 @@ void Engine::open(FileData& _rfd, const uint64_t _size, const std::string& _app_
 
         p /= d;
 
-		boost::system::error_code err;
-		fs::create_directories(p, err);
+        boost::system::error_code err;
+        fs::create_directories(p, err);
 
-		string s = err.message();
+        string s = err.message();
 
         p /= f;
 
@@ -494,7 +494,8 @@ void Engine::close(FileData& _rfd)
     _rfd.file_.close();
 }
 
-void Engine::flush(FileData& _rfd){
+void Engine::flush(FileData& _rfd)
+{
     lock_guard<mutex> lock{pimpl_->mutex_};
 
     pimpl_->flush(_rfd);
@@ -506,7 +507,7 @@ void Engine::Implementation::flush(FileData& _rfd)
 
     FileStub& rfs = file_dq_[_rfd.cache_index_];
     file_map_.erase(&rfs);
-    rfs.usage_              = computeUsage();
+    rfs.usage_      = computeUsage();
     file_map_[&rfs] = _rfd.cache_index_;
     solid_log(logger, Info, _rfd.cache_index_ << ' ' << rfs.usage_);
 
@@ -521,7 +522,7 @@ void Engine::Implementation::removeApplication(ApplicationStub& _rapp)
         FileStub& rfs  = file_dq_[p.second];
         auto      path = computeFilePath(_rapp.name_, _rapp.build_, rfs.name_);
 
-		boost::system::error_code err;
+        boost::system::error_code err;
         fs::remove(path, err);
         file_map_.erase(&rfs);
         rfs.clear();

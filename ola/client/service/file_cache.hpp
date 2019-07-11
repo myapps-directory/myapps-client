@@ -80,9 +80,10 @@ public:
         return range_vec_.size();
     }
 
-    uint64_t size() const {
+    uint64_t size() const
+    {
         return size_;
-	}
+    }
 
 private:
     void addRange(const uint64_t _offset, const uint64_t _size);

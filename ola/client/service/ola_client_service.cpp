@@ -84,9 +84,9 @@ private:
 
     NTSTATUS InitSecurityDescriptor();
 
-    NTSTATUS        Init(PVOID Host) override;
-    NTSTATUS        GetVolumeInfo(
-               VolumeInfo* VolumeInfo) override;
+    NTSTATUS Init(PVOID Host) override;
+    NTSTATUS GetVolumeInfo(
+        VolumeInfo* VolumeInfo) override;
     NTSTATUS GetSecurityByName(
         PWSTR                FileName,
         PUINT32              PFileAttributes /* or ReparsePointIndex */,

@@ -1458,18 +1458,17 @@ void Engine::Implementation::remoteFetchApplication(
                       std::shared_ptr<front::FetchBuildConfigurationResponse>& _rrecv_msg_ptr,
                       ErrorConditionT const&                                   _rerror) mutable {
         if (_rrecv_msg_ptr) {
-			
-			++_app_index;
+
+            ++_app_index;
 
             this->workpool_.push(
                 [this, recv_msg_ptr = std::move(_rrecv_msg_ptr), app_id = _rsent_msg_ptr->app_id_, is_last = _app_index >= apps_response->app_id_vec_.size()]() mutable {
-					insertApplicationEntry(app_id, recv_msg_ptr);
+                    insertApplicationEntry(app_id, recv_msg_ptr);
                     if (is_last) {
                         //done with all applications
                         onAllApplicationsFetched();
-					}
-				}
-			);
+                    }
+                });
 
             if (_app_index < apps_response->app_id_vec_.size()) {
                 remoteFetchApplication(apps_response, _rsent_msg_ptr, _app_index);
@@ -1493,7 +1492,7 @@ void Engine::Implementation::onAllApplicationsFetched()
             auto pad = entry_ptr->applicationData();
             if (pad != nullptr) {
                 return pad->build_unique_ == _build_unique;
-			}
+            }
         }
         return false;
     };

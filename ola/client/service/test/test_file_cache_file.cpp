@@ -54,7 +54,7 @@ bool check(const char* _pbuf, uint64_t _offset, uint64_t _size, istream& _ris)
         size_t toread = buf_cap;
         if (toread > _size) {
             toread = _size;
-		}
+        }
         _ris.read(buf, toread);
         solid_check(memcmp(_pbuf, buf, toread) == 0);
         _size -= toread;
@@ -74,7 +74,7 @@ int test_file_cache_file(int argc, char* argv[])
     ioss.seekg(0, ios::end);
     const uint64_t data_size = ioss.tellg();
 
-	fs::remove("test.data");
+    fs::remove("test.data");
 
     {
         constexpr size_t buf_cap = 1024 * 100;
