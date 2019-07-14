@@ -123,6 +123,7 @@ struct Engine {
     }
 
     void onConnectionStart(frame::mprpc::ConnectionContext& _ctx);
+    void onConnectionInit(frame::mprpc::ConnectionContext& _ctx);
     void authRun();
     void onAuthResponse(frame::mprpc::ConnectionContext& _ctx, AuthResponse& _rresponse);
 
@@ -1192,6 +1193,27 @@ void Engine::authRun(){
 //-----------------------------------------------------------------------------
 
 void Engine::onConnectionStart(frame::mprpc::ConnectionContext &_ctx){
+    auto req_ptr = std::make_shared<InitRequest>();
+    auto lambda = [this](
+        frame::mprpc::ConnectionContext&        _rctx,
+        std::shared_ptr<InitRequest>&  _rsent_msg_ptr,
+        std::shared_ptr<InitResponse>& _rrecv_msg_ptr,
+        ErrorConditionT const&                  _rerror
+    ){
+        if(_rrecv_msg_ptr){
+            if(_rrecv_msg_ptr->error_ == 0){
+                onConnectionInit(_rctx);
+            }else{
+                cout<<"ERROR initiating connection: version "<<_rctx.peerVersionMajor()<<'.'<<_rctx.peerVersionMinor()<<" error "<<_rrecv_msg_ptr->error_<<':'<<_rrecv_msg_ptr->message_<<endl;
+            }
+        }
+    };
+    
+    rpcService().sendRequest(_ctx.recipientId(), req_ptr, lambda);
+}
+//-----------------------------------------------------------------------------
+
+void Engine::onConnectionInit(frame::mprpc::ConnectionContext &_ctx){
     string auth_token;
     {
         std::lock_guard<mutex> lock(mutex_);
