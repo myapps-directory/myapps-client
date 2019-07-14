@@ -10,7 +10,7 @@
 
 #include "solid/system/log.hpp"
 
-#include "ola/common/utility/crypto.hpp"
+#include "ola/common/utility/encode.hpp"
 
 #include "ola/common/ola_front_protocol.hpp"
 
@@ -84,10 +84,9 @@ private:
 
     NTSTATUS InitSecurityDescriptor();
 
-    static NTSTATUS GetFileInfoInternal(HANDLE Handle, FileInfo* FileInfo);
-    NTSTATUS        Init(PVOID Host) override;
-    NTSTATUS        GetVolumeInfo(
-               VolumeInfo* VolumeInfo) override;
+    NTSTATUS Init(PVOID Host) override;
+    NTSTATUS GetVolumeInfo(
+        VolumeInfo* VolumeInfo) override;
     NTSTATUS GetSecurityByName(
         PWSTR                FileName,
         PUINT32              PFileAttributes /* or ReparsePointIndex */,
@@ -280,6 +279,19 @@ string envLogPathPrefix()
     string r = v;
     r += "\\OLA\\client";
     return r;
+}
+
+string envTempPrefix()
+{
+    const char* v = getenv("TEMP");
+    if (v == nullptr) {
+        v = getenv("TMP");
+        if (v == nullptr) {
+            v = "c:";
+        }
+    }
+
+    return v;
 }
 
 // -- FileSystemService -------------------------------------------------------
@@ -559,6 +571,8 @@ NTSTATUS FileSystemService::OnStart(ULONG argc, PWSTR *argv)
     cfg.compress_ = params_.compress_;
     cfg.front_endpoint_ = params_.front_endpoint_;
 	cfg.path_prefix_ = envConfigPathPrefix();
+	cfg.mount_prefix_ = utility::narrow(params_.mount_point_);
+	cfg.temp_folder_ = envTempPrefix();
 	cfg.gui_fail_fnc_ = [this](){
 		onGuiFail();
 	};
@@ -592,16 +606,6 @@ wstring a2w(const string &_a) {
 }
 
 void FileSystemService::onGuiStart(int _port){
-#if 0
-	DWORD dwSessionId = GetSessionIdOfUser(NULL, NULL); 
-    if (dwSessionId == 0xFFFFFFFF) 
-    { 
-        // Log the error and exit. 
-        WriteErrorLogEntry(L"GetSessionIdOfUser", GetLastError()); 
-        return; 
-    }
-	RevertToSelf();
-#endif
 	wostringstream oss;
 	oss<<L"ola_client_gui.exe --front "<<a2w(params_.front_endpoint_)<<L" --local "<<_port;
     DWORD dwExitCode;
@@ -668,23 +672,6 @@ uint32_t node_type_to_attributes(ola::client::service::NodeTypeE _node_type){
 	return attr;
 }
 
-#if 0
-struct Descriptor
-{
-	using EntryIdT = ola::client::service::EntryIdT;
-
-    PVOID  DirBuffer = nullptr;
-	EntryIdT	entry_id_;
-
-	~Descriptor(){
-		FileSystem::DeleteDirectoryBuffer(&DirBuffer);
-	}
-
-	void clear(){
-		entry_id_.clear();
-	}
-};
-#endif
 //-----------------------------------------------------------------------------
 
 FileSystem::FileSystem(ola::client::service::Engine &_rengine) :  rengine_(_rengine)
@@ -825,7 +812,7 @@ NTSTATUS FileSystem::Open(
     if(*PFileDesc != nullptr){
         return GetFileInfo(*PFileNode, *PFileDesc, &OpenFileInfo->FileInfo);
     }else{
-        return STATUS_OBJECT_NAME_INVALID;
+        return NtStatusFromWin32(ERROR_FILE_NOT_FOUND);
     }
 }
 
@@ -1029,26 +1016,7 @@ NTSTATUS FileSystem::ReadDirectoryEntry(
 	uint32_t  attributes = FILE_ATTRIBUTE_READONLY | FILE_ATTRIBUTE_NOT_CONTENT_INDEXED;
 	NodeTypeE	node_type;
 
-#if 0
-    PVOID &rvctx = *pContext;
-	size_t &rctx = reinterpret_cast<size_t&>(rvctx);
-	if(rctx == 0){
-		//.
-		name = L".";
-		attributes |= FILE_ATTRIBUTE_DIRECTORY;
-		++rctx;
-	}else if(rctx == 1){
-		name = L"..";
-		attributes |= FILE_ATTRIBUTE_DIRECTORY;
-		++rctx;
-	}else if(engine().node(pFileNode, pFileDesc, pContext, name, size, entry_type)){
-		attributes |= entry_type_to_attributes(entry_type);
-	}else{
-		return STATUS_NO_MORE_FILES;
-	}
-#endif
-
-    if(engine().node(static_cast<service::Descriptor*>(pFileDesc), *pContext, name, node_type, size)){
+    if(engine().list(static_cast<service::Descriptor*>(pFileDesc), *pContext, name, node_type, size)){
 		attributes |= node_type_to_attributes(node_type);
 	}else{
 		return STATUS_NO_MORE_FILES;
@@ -1075,74 +1043,4 @@ NTSTATUS FileSystem::ReadDirectoryEntry(
 //-----------------------------------------------------------------------------
 
 //-----------------------------------------------------------------------------
-
-#if 0
-NTSTATUS FileSystem::ReadDirectoryEntry(
-    PVOID FileNode,
-    PVOID FileDesc0,
-    PWSTR Pattern,
-    PWSTR Marker,
-    PVOID *PContext,
-    DirInfo *DirInfo)
-{
-    FileDesc *pFileDesc = (FileDesc *)FileDesc0;
-    HANDLE Handle = pFileDesc->Handle;
-    WCHAR FullPath[FULLPATH_SIZE];
-    ULONG Length, PatternLength;
-    HANDLE FindHandle;
-    WIN32_FIND_DATAW FindData;
-
-    if (0 == *PContext)
-    {
-        if (0 == Pattern)
-            Pattern = L"*";
-        PatternLength = (ULONG)wcslen(Pattern);
-
-        Length = GetFinalPathNameByHandleW(Handle, FullPath, FULLPATH_SIZE - 1, 0);
-        if (0 == Length)
-            return NtStatusFromWin32(GetLastError());
-        if (Length + 1 + PatternLength >= FULLPATH_SIZE)
-            return STATUS_OBJECT_NAME_INVALID;
-
-        if (L'\\' != FullPath[Length - 1])
-            FullPath[Length++] = L'\\';
-        memcpy(FullPath + Length, Pattern, PatternLength * sizeof(WCHAR));
-        FullPath[Length + PatternLength] = L'\0';
-
-        FindHandle = FindFirstFileW(FullPath, &FindData);
-        if (INVALID_HANDLE_VALUE == FindHandle)
-            return STATUS_NO_MORE_FILES;
-
-        *PContext = FindHandle;
-    }
-    else
-    {
-        FindHandle = *PContext;
-        if (!FindNextFileW(FindHandle, &FindData))
-        {
-            FindClose(FindHandle);
-            return STATUS_NO_MORE_FILES;
-        }
-    }
-
-    memset(DirInfo, 0, sizeof *DirInfo);
-    Length = (ULONG)wcslen(FindData.cFileName);
-    DirInfo->Size = (UINT16)(FIELD_OFFSET(FileSystem::DirInfo, FileNameBuf) + Length * sizeof(WCHAR));
-    DirInfo->FileInfo.FileAttributes = FindData.dwFileAttributes;
-    DirInfo->FileInfo.ReparseTag = 0;
-    DirInfo->FileInfo.FileSize =
-        ((UINT64)FindData.nFileSizeHigh << 32) | (UINT64)FindData.nFileSizeLow;
-    DirInfo->FileInfo.AllocationSize = (DirInfo->FileInfo.FileSize + ALLOCATION_UNIT - 1)
-        / ALLOCATION_UNIT * ALLOCATION_UNIT;
-    DirInfo->FileInfo.CreationTime = ((PLARGE_INTEGER)&FindData.ftCreationTime)->QuadPart;
-    DirInfo->FileInfo.LastAccessTime = ((PLARGE_INTEGER)&FindData.ftLastAccessTime)->QuadPart;
-    DirInfo->FileInfo.LastWriteTime = ((PLARGE_INTEGER)&FindData.ftLastWriteTime)->QuadPart;
-    DirInfo->FileInfo.ChangeTime = DirInfo->FileInfo.LastWriteTime;
-    DirInfo->FileInfo.IndexNumber = 0;
-    DirInfo->FileInfo.HardLinks = 0;
-    memcpy(DirInfo->FileNameBuf, FindData.cFileName, Length * sizeof(WCHAR));
-
-    return STATUS_SUCCESS;
-}
-#endif
 }//namespace

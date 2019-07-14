@@ -6,7 +6,9 @@
 #define NOMINMAX
 #endif
 #include <strsafe.h>
-#include <winfsp/winfsp.hpp>
+#include <winfsp.hpp>
+
+#include <iostream>
 
 #include "solid/frame/manager.hpp"
 #include "solid/frame/scheduler.hpp"
@@ -19,7 +21,7 @@
 #include "solid/frame/mprpc/mprpcservice.hpp"
 #include "solid/frame/mprpc/mprpcsocketstub_openssl.hpp"
 
-#include "ola/common/utility/crypto.hpp"
+#include "ola/common/utility/encode.hpp"
 
 #include "ola/common/ola_front_protocol.hpp"
 
@@ -429,6 +431,12 @@ NTSTATUS FileSystem::SetPath(PWSTR Path)
     return STATUS_SUCCESS;
 }
 
+std::mutex& gmutex()
+{
+    static std::mutex m;
+    return m;
+}
+
 NTSTATUS FileSystem::GetFileInfoInternal(HANDLE Handle, FileInfo* FileInfo)
 {
     BY_HANDLE_FILE_INFORMATION ByHandleFileInfo;
@@ -436,7 +444,8 @@ NTSTATUS FileSystem::GetFileInfoInternal(HANDLE Handle, FileInfo* FileInfo)
     if (!GetFileInformationByHandle(Handle, &ByHandleFileInfo))
         return NtStatusFromWin32(GetLastError());
 
-    FileInfo->FileAttributes = ByHandleFileInfo.dwFileAttributes;
+    FileInfo->FileAttributes = FILE_ATTRIBUTE_READONLY | FILE_ATTRIBUTE_NOT_CONTENT_INDEXED | (ByHandleFileInfo.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_NORMAL));
+    ;
     FileInfo->ReparseTag     = 0;
     FileInfo->FileSize       = ((UINT64)ByHandleFileInfo.nFileSizeHigh << 32) | (UINT64)ByHandleFileInfo.nFileSizeLow;
     FileInfo->AllocationSize = (FileInfo->FileSize + ALLOCATION_UNIT - 1)
@@ -447,7 +456,10 @@ NTSTATUS FileSystem::GetFileInfoInternal(HANDLE Handle, FileInfo* FileInfo)
     FileInfo->ChangeTime     = FileInfo->LastWriteTime;
     FileInfo->IndexNumber    = 0;
     FileInfo->HardLinks      = 0;
-
+    {
+        std::lock_guard<mutex> l(gmutex());
+        wcout << "INFO: " << Handle << " attrs " << FileInfo->FileAttributes << endl;
+    }
     return STATUS_SUCCESS;
 }
 
@@ -501,7 +513,7 @@ NTSTATUS FileSystem::GetSecurityByName(
     if (!ConcatPath(FileName, FullPath))
         return STATUS_OBJECT_NAME_INVALID;
 
-    Handle = CreateFileW(FullPath,
+    Handle = CreateFileW(L"C:\\Users\\vipal\\work\\bubbles_release\\bubbles_client.exe",
         FILE_READ_ATTRIBUTES | READ_CONTROL,
         0,
         0,
@@ -522,7 +534,7 @@ NTSTATUS FileSystem::GetSecurityByName(
             goto exit;
         }
 
-        *PFileAttributes = AttributeTagInfo.FileAttributes;
+        *PFileAttributes = FILE_ATTRIBUTE_READONLY | FILE_ATTRIBUTE_NOT_CONTENT_INDEXED | (AttributeTagInfo.FileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_NORMAL));
     }
 
     if (0 != PSecurityDescriptorSize) {
@@ -544,7 +556,10 @@ NTSTATUS FileSystem::GetSecurityByName(
 exit:
     if (INVALID_HANDLE_VALUE != Handle)
         CloseHandle(Handle);
-
+    {
+        std::lock_guard<mutex> l(gmutex());
+        wcout << "SECURITYb: " << FileName << " attrs " << *PFileAttributes << endl;
+    }
     return Result;
 }
 
@@ -559,6 +574,11 @@ NTSTATUS FileSystem::Create(
     PVOID*               PFileDesc,
     OpenFileInfo*        OpenFileInfo)
 {
+    {
+        std::lock_guard<mutex> l(gmutex());
+        wcout << "CREATE: " << FileName << endl;
+    }
+
     WCHAR               FullPath[FULLPATH_SIZE];
     SECURITY_ATTRIBUTES SecurityAttributes;
     ULONG               CreateFlags;
@@ -639,11 +659,16 @@ NTSTATUS FileSystem::Open(
         0);
     if (INVALID_HANDLE_VALUE == pFileDesc->Handle) {
         delete pFileDesc;
-        return NtStatusFromWin32(GetLastError());
+        DWORD    err = GetLastError();
+        NTSTATUS rv  = NtStatusFromWin32(err);
+        return rv;
     }
 
     *PFileDesc = pFileDesc;
-
+    {
+        std::lock_guard<mutex> l(gmutex());
+        wcout << "OPEN: " << FileName << " as " << pFileDesc << endl;
+    }
     return GetFileInfoInternal(pFileDesc->Handle, &OpenFileInfo->FileInfo);
 }
 
@@ -655,6 +680,11 @@ NTSTATUS FileSystem::Overwrite(
     UINT64    AllocationSize,
     FileInfo* FileInfo)
 {
+
+    {
+        std::lock_guard<mutex> l(gmutex());
+        wcout << "OVERWRITE " << endl;
+    }
     HANDLE                  Handle         = HandleFromFileDesc(pFileDesc);
     FILE_BASIC_INFO         BasicInfo      = {0};
     FILE_ALLOCATION_INFO    AllocationInfo = {0};
@@ -719,6 +749,10 @@ VOID FileSystem::Close(
     FileDesc* pFileDesc = (FileDesc*)pFileDesc0;
 
     delete pFileDesc;
+    {
+        std::lock_guard<mutex> l(gmutex());
+        wcout << "CLOSE: " << pFileDesc << endl;
+    }
 }
 
 NTSTATUS FileSystem::Read(
@@ -735,9 +769,14 @@ NTSTATUS FileSystem::Read(
     Overlapped.Offset     = (DWORD)Offset;
     Overlapped.OffsetHigh = (DWORD)(Offset >> 32);
 
-    if (!ReadFile(Handle, Buffer, Length, PBytesTransferred, &Overlapped))
+    if (!ReadFile(Handle, Buffer, Length, PBytesTransferred, &Overlapped)) {
+        wcout << "READ ERROR: " << pFileDesc << " " << Offset << " " << Length << " " << *PBytesTransferred << endl;
         return NtStatusFromWin32(GetLastError());
-
+    }
+    {
+        std::lock_guard<mutex> l(gmutex());
+        wcout << "READ: " << pFileDesc << " " << Offset << " " << Length << " " << *PBytesTransferred << endl;
+    }
     return STATUS_SUCCESS;
 }
 
@@ -799,7 +838,9 @@ NTSTATUS FileSystem::GetFileInfo(
 {
     HANDLE Handle = HandleFromFileDesc(pFileDesc);
 
-    return GetFileInfoInternal(Handle, FileInfo);
+    NTSTATUS rv = GetFileInfoInternal(Handle, FileInfo);
+
+    return rv;
 }
 
 NTSTATUS FileSystem::SetBasicInfo(
@@ -937,7 +978,10 @@ NTSTATUS FileSystem::GetSecurity(
     }
 
     *PSecurityDescriptorSize = SecurityDescriptorSizeNeeded;
-
+    {
+        std::lock_guard<mutex> l(gmutex());
+        wcout << "SECURITY: " << pFileDesc << endl;
+    }
     return STATUS_SUCCESS;
 }
 
@@ -1022,7 +1066,8 @@ NTSTATUS FileSystem::ReadDirectoryEntry(
     memset(DirInfo, 0, sizeof *DirInfo);
     Length                           = (ULONG)wcslen(FindData.cFileName);
     DirInfo->Size                    = (UINT16)(FIELD_OFFSET(FileSystem::DirInfo, FileNameBuf) + Length * sizeof(WCHAR));
-    DirInfo->FileInfo.FileAttributes = FindData.dwFileAttributes;
+    DirInfo->FileInfo.FileAttributes = FILE_ATTRIBUTE_READONLY | FILE_ATTRIBUTE_NOT_CONTENT_INDEXED | (FindData.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_NORMAL));
+    ;
     DirInfo->FileInfo.ReparseTag     = 0;
     DirInfo->FileInfo.FileSize       = ((UINT64)FindData.nFileSizeHigh << 32) | (UINT64)FindData.nFileSizeLow;
     DirInfo->FileInfo.AllocationSize = (DirInfo->FileInfo.FileSize + ALLOCATION_UNIT - 1)

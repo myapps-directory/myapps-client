@@ -12,18 +12,24 @@
 #include "solid/frame/mprpc/mprpcservice.hpp"
 #include "solid/frame/mprpc/mprpcsocketstub_openssl.hpp"
 
-#include "ola/common/utility/crypto.hpp"
+#include "ola/common/utility/encode.hpp"
 
 #include "ola/client/gui/gui_protocol.hpp"
 #include "ola/client/utility/locale.hpp"
 
+#include "file_cache.hpp"
 #include "ola/common/ola_front_protocol.hpp"
+#include "shortcut_creator.hpp"
 
-#include "boost/filesystem.hpp"
+#include <boost/algorithm/string/predicate.hpp>
+#include <boost/filesystem.hpp>
+#include <boost/functional/hash.hpp>
+
 #include <condition_variable>
 #include <fstream>
 #include <mutex>
 #include <unordered_map>
+#include <variant>
 
 using namespace solid;
 using namespace std;
@@ -52,64 +58,199 @@ enum struct EntryStatusE : uint8_t {
     Fetched
 };
 
-struct Entry;
-using EntryPointerT = std::shared_ptr<Entry>;
-
-struct EntryData {
-    virtual ~EntryData() {}
-
-    bool isDirectory() const
+/*
+struct Hash {
+    size_t operator()(const std::reference_wrapper<const string>& _rrw) const
     {
-        const auto t = type();
-        return t == EntryTypeE::Directory || t == EntryTypeE::Application;
-    }
-
-    virtual EntryTypeE type() const
-    {
-        return EntryTypeE::Unknown;
-    }
-
-    virtual void erase(const EntryPointerT& _rentry_ptr)
-    {
-    }
-
-    virtual EntryPointerT find(const string& _path) const
-    {
-        return EntryPointerT{};
-    }
-
-    virtual bool read(void* _pbuf, uint64_t _offset, unsigned long _length, unsigned long& _rbytes_transfered)
-    {
-        return false;
-    }
-
-    virtual bool node(void*& _rpctx, std::wstring& _rname, NodeTypeE& _rnode_type, uint64_t& _rsize) const
-    {
-        return false;
-    }
-
-    virtual void insertEntry(EntryPointerT&& _uentry_ptr)
-    {
-    }
-
-    virtual bool empty() const
-    {
-        return false;
+        std::hash<string> h;
+        return h(_rrw.get());
     }
 };
 
-using EntryDataPtrT = std::unique_ptr<EntryData>;
+struct Equal {
+    bool operator()(const std::reference_wrapper<const string>& _rrw1, const std::reference_wrapper<const string>& _rrw2) const
+    {
+        return _rrw1.get() == _rrw2.get();
+    }
+};
+*/
+
+struct Equal {
+    bool operator()(const std::reference_wrapper<const string>& _rrw1, const std::reference_wrapper<const string>& _rrw2) const
+    {
+        return boost::algorithm::iequals(_rrw1.get(), _rrw2.get(), std::locale());
+    }
+};
+
+struct Hash {
+    std::size_t operator()(const std::reference_wrapper<const string>& _rrw) const
+    {
+        std::size_t seed = 0;
+        std::locale locale;
+
+        for (std::string::const_iterator it = _rrw.get().begin();
+             it != _rrw.get().end(); ++it) {
+            boost::hash_combine(seed, std::toupper(*it, locale));
+        }
+
+        return seed;
+    }
+};
+
+struct Entry;
+using EntryPointerT = std::shared_ptr<Entry>;
+using EntryMapT     = std::unordered_map<const std::reference_wrapper<const string>, EntryPointerT, Hash, Equal>;
+
+struct DirectoryData {
+    EntryMapT entry_map_;
+
+    void erase(const EntryPointerT& _rentry_ptr);
+
+    EntryPointerT find(const string& _path) const;
+
+    void insertEntry(EntryPointerT&& _uentry_ptr);
+
+    bool empty() const
+    {
+        return entry_map_.empty();
+    }
+};
+
+struct ReadData {
+    size_t    bytes_transfered_ = 0;
+    char*     pbuffer_;
+    uint64_t  offset_;
+    size_t    size_;
+    ReadData* pnext_ = nullptr;
+    ReadData* pprev_ = nullptr;
+    bool      done_  = false;
+
+    ReadData(
+        char*    _pbuffer,
+        uint64_t _offset,
+        size_t   _size)
+        : pbuffer_(_pbuffer)
+        , offset_(_offset)
+        , size_(_size)
+    {
+    }
+};
+
+struct FetchStub {
+    enum StatusE {
+        NotUsedE,
+        PendingE,
+        FetchedE,
+        WaitE,
+    };
+
+    uint64_t                              offset_ = 0;
+    size_t                                size_   = 0;
+    StatusE                               status_ = NotUsedE;
+    shared_ptr<FetchStoreRequest>         request_ptr_;
+    shared_ptr<front::FetchStoreResponse> response_ptr_;
+};
+
+struct FileData : file_cache::FileData {
+    enum StatusE {
+        PendingE,
+        ErrorE,
+    };
+    ReadData* pfront_ = nullptr;
+    ReadData* pback_  = nullptr;
+    StatusE   status_ = PendingE;
+    FetchStub fetch_stubs_[2];
+    string    storage_id_;
+    string    remote_path_;
+    uint64_t  prefetch_offset_;
+    size_t    contiguous_read_count_;
+
+    FileData(const string& _storage_id, const string& _remote_path)
+        : storage_id_(_storage_id)
+        , remote_path_(_remote_path)
+    {
+    }
+
+    bool readFromCache(ReadData& _rdata)
+    {
+        size_t bytes_transfered = 0;
+        bool   b                = file_cache::FileData::readFromCache(_rdata.pbuffer_, _rdata.offset_, _rdata.size_, bytes_transfered);
+        _rdata.bytes_transfered_ += bytes_transfered;
+        _rdata.pbuffer_ += bytes_transfered;
+        _rdata.offset_ += bytes_transfered;
+        _rdata.size_ -= bytes_transfered;
+        return b;
+    }
+
+    bool readFromResponses(ReadData& _rdata, bool _is_front);
+
+    bool enqueue(ReadData& _rdata)
+    {
+        _rdata.pnext_ = pback_;
+        _rdata.pprev_ = nullptr;
+        if (pback_ == nullptr) {
+            pback_ = pfront_ = &_rdata;
+            return true;
+        } else {
+            pback_->pprev_ = &_rdata;
+            pback_         = &_rdata;
+            return false;
+        }
+    }
+
+    void erase(ReadData& _rdata)
+    {
+        if (_rdata.pprev_ != nullptr) {
+            _rdata.pprev_->pnext_ = _rdata.pnext_;
+        } else {
+            pfront_ = _rdata.pnext_;
+        }
+        if (_rdata.pnext_ != nullptr) {
+            _rdata.pnext_->pprev_ = _rdata.pprev_;
+        } else {
+            pback_ = _rdata.pprev_;
+        }
+    }
+    size_t findAvailableFetchIndex() const;
+    size_t isReadHandledByPendingFetch(const ReadData& _rread_data) const;
+    bool   readFromResponse(const size_t _idx, ReadData& _rdata, bool _is_front);
+    void   updateContiguousRead(uint64_t _offset, uint64_t _size);
+};
+
+struct ApplicationData : DirectoryData {
+    std::string app_id_;
+    std::string build_unique_;
+
+    ApplicationData(const std::string& _app_id, const std::string& _build_unique)
+        : app_id_(_app_id)
+        , build_unique_(_build_unique)
+    {
+    }
+};
+
+struct ShortcutData {
+    stringstream ioss_;
+};
+
+using DirectoryDataPointerT   = std::unique_ptr<DirectoryData>;
+using FileDataPointerT        = std::unique_ptr<FileData>;
+using ApplicationDataPointerT = std::unique_ptr<ApplicationData>;
+using ShortcutDataPointerT    = std::unique_ptr<ShortcutData>;
+using UniqueIdT               = solid::frame::UniqueId;
+using EntryDataVariantT       = std::variant<
+    UniqueIdT,
+    DirectoryDataPointerT, ApplicationDataPointerT, FileDataPointerT, ShortcutDataPointerT>; //the order should be consistent with EntryTypeE
 
 struct Entry {
     std::mutex&              rmutex_;
     std::condition_variable& rcv_;
     string                   name_;
     string                   remote_;
-    EntryDataPtrT            data_ptr_;
     EntryTypeE               type_   = EntryTypeE::Unknown;
     EntryStatusE             status_ = EntryStatusE::FetchRequired;
     std::weak_ptr<Entry>     parent_;
     uint64_t                 size_ = 0;
+    EntryDataVariantT        data_var_;
 
     Entry(
         const EntryTypeE _type, EntryPointerT& _rparent_ptr, std::mutex& _rmutex, std::condition_variable& _rcv, const string& _name,
@@ -133,19 +274,49 @@ struct Entry {
     {
     }
 
+    bool isDirectory() const
+    {
+        return type_ == EntryTypeE::Application || type_ == EntryTypeE::Directory;
+    }
+
+    bool isFile() const
+    {
+        return type_ == EntryTypeE::File;
+    }
+
+    inline DirectoryData* directoryData() const
+    {
+        DirectoryData* pdd = nullptr;
+        if (auto pd = std::get_if<DirectoryDataPointerT>(&data_var_)) {
+            pdd = pd->get();
+        } else if (auto pd = std::get_if<ApplicationDataPointerT>(&data_var_)) {
+            pdd = pd->get();
+        }
+        return pdd;
+    }
+
+    inline ApplicationData* applicationData() const
+    {
+        ApplicationData* pad = nullptr;
+        if (auto pa = std::get_if<ApplicationDataPointerT>(&data_var_)) {
+            pad = pa->get();
+        }
+        return pad;
+    }
+
     EntryPointerT find(const string& _path) const
     {
         EntryPointerT entry_ptr;
-        if (data_ptr_) {
-            entry_ptr = data_ptr_->find(_path);
+        if (auto pd = directoryData(); pd != nullptr) {
+            entry_ptr = pd->find(_path);
         }
         return entry_ptr;
     }
 
     void erase(const EntryPointerT& _rentry_ptr)
     {
-        if (data_ptr_) {
-            data_ptr_->erase(_rentry_ptr);
+        if (auto pd = directoryData(); pd != nullptr) {
+            pd->erase(_rentry_ptr);
         }
     }
 
@@ -176,18 +347,6 @@ struct Entry {
         }
     }
 
-    bool node(void*& _rpctx, std::wstring& _rname, NodeTypeE& _rnode_type, uint64_t& _rsize)
-    {
-        solid_check(data_ptr_, "NO entry data");
-        return data_ptr_->node(_rpctx, _rname, _rnode_type, _rsize);
-    }
-
-    bool read(void* _pbuf, uint64_t _offset, unsigned long _length, unsigned long& _rbytes_transfered)
-    {
-        solid_check(data_ptr_, "NO entry data");
-        return data_ptr_->read(_pbuf, _offset, _length, _rbytes_transfered);
-    }
-
     bool canInsertUnkownEntry() const
     {
         if (
@@ -197,130 +356,45 @@ struct Entry {
         return true;
     }
 
-    bool isErasable() const
+    bool empty() const
     {
-        return (status_ == EntryStatusE::FetchRequired || status_ == EntryStatusE::FetchError) && (!data_ptr_ || data_ptr_->empty());
-    }
-};
-
-struct Hash {
-    size_t operator()(const std::reference_wrapper<const string>& _rrw) const
-    {
-        std::hash<string> h;
-        return h(_rrw.get());
-    }
-};
-
-struct Equal {
-    bool operator()(const std::reference_wrapper<const string>& _rrw1, const std::reference_wrapper<const string>& _rrw2) const
-    {
-        return _rrw1.get() == _rrw2.get();
-    }
-};
-
-using EntryMapT = std::unordered_map<const std::reference_wrapper<const string>, EntryPointerT, Hash, Equal>;
-
-struct DirectoryData : EntryData {
-    EntryMapT entry_map_;
-
-    EntryTypeE type() const override
-    {
-        return EntryTypeE::Directory;
-    }
-
-    void erase(const EntryPointerT& _rentry_ptr)
-    {
-        auto it = entry_map_.find(_rentry_ptr->name_);
-        if (it != entry_map_.end() && it->second == _rentry_ptr) {
-            entry_map_.erase(it);
-        }
-    }
-
-    EntryPointerT find(const string& _path) const override
-    {
-        auto it = entry_map_.find(_path);
-        if (it != entry_map_.end()) {
-            return atomic_load(&it->second);
-        }
-        return EntryPointerT{};
-    }
-
-    void insertEntry(EntryPointerT&& _uentry_ptr) override
-    {
-        entry_map_.emplace(_uentry_ptr->name_, std::move(_uentry_ptr));
-    }
-
-    bool node(void*& _rpctx, std::wstring& _rname, NodeTypeE& _rnode_type, uint64_t& _rsize) const override
-    {
-        using ContextT = pair<int, EntryMapT::const_iterator>;
-        ContextT* pctx = nullptr;
-        if (_rpctx) {
-            pctx = static_cast<ContextT*>(_rpctx);
-        } else {
-            pctx   = new pair<int, EntryMapT::const_iterator>(0, entry_map_.begin());
-            _rpctx = pctx;
-        }
-
-        if (pctx->first == 0) {
-            //L".";
-            _rname      = L".";
-            _rsize      = 0;
-            _rnode_type = NodeTypeE::Directory;
-            ++pctx->first;
+        if (auto pd = std::get_if<UniqueIdT>(&data_var_); pd != nullptr) {
             return true;
-        } else if (pctx->first == 1) {
-            //L"..";
-            _rname      = L"..";
-            _rsize      = 0;
-            _rnode_type = NodeTypeE::Directory;
-            ++pctx->first;
-            return true;
-        } else {
-
-            while (pctx->second != entry_map_.end()) {
-                const EntryPointerT& rentry_ptr = pctx->second->second;
-
-                if (rentry_ptr->type_ == EntryTypeE::Unknown) {
-                    ++pctx->second;
-                    continue;
-                }
-
-                _rname       = utility::widen(pctx->second->second->name_);
-                _rsize       = pctx->second->second->size_;
-                const auto t = pctx->second->second->type_;
-                _rnode_type  = t == EntryTypeE::Application || t == EntryTypeE::Directory ? NodeTypeE::Directory : NodeTypeE::File;
-                ++pctx->second;
-                return true;
-            }
-
-            delete pctx;
-            _rpctx = nullptr;
+        } else if (auto pd = std::get_if<DirectoryDataPointerT>(&data_var_); pd != nullptr) {
+            return (*pd)->empty();
         }
-
         return false;
     }
 
-    bool empty() const
+    bool isErasable() const
     {
-        return entry_map_.empty();
-    }
-};
-
-struct FileData : EntryData {
-    EntryTypeE type() const override
-    {
-        return EntryTypeE::File;
-    }
-};
-
-struct ApplicationData : DirectoryData {
-    EntryTypeE type() const override
-    {
-        return EntryTypeE::Application;
+        return (status_ == EntryStatusE::FetchRequired || status_ == EntryStatusE::FetchError) && empty();
     }
 };
 
 using AioSchedulerT = frame::Scheduler<frame::aio::Reactor>;
+
+void DirectoryData::erase(const EntryPointerT& _rentry_ptr)
+{
+    auto it = entry_map_.find(_rentry_ptr->name_);
+    if (it != entry_map_.end() && it->second == _rentry_ptr) {
+        entry_map_.erase(it);
+    }
+}
+
+EntryPointerT DirectoryData::find(const string& _path) const
+{
+    auto it = entry_map_.find(_path);
+    if (it != entry_map_.end()) {
+        return atomic_load(&it->second);
+    }
+    return EntryPointerT{};
+}
+
+void DirectoryData::insertEntry(EntryPointerT&& _uentry_ptr)
+{
+    entry_map_.emplace(_uentry_ptr->name_, std::move(_uentry_ptr));
+}
 
 } //namespace
 
@@ -360,6 +434,8 @@ struct Engine::Implementation {
     CVDequeT                  cv_dq_;
     string                    os_id_;
     string                    language_id_;
+    ShortcutCreator           shortcut_creator_;
+    file_cache::Engine        file_cache_engine_;
 
 public:
     Implementation(
@@ -369,6 +445,7 @@ public:
         , resolver_{workpool_}
         , front_rpc_service_{manager_}
         , gui_rpc_service_{manager_}
+        , shortcut_creator_{config_.temp_folder_}
     {
     }
 
@@ -392,23 +469,42 @@ public:
         frame::mprpc::ConnectionContext&          _ctx,
         std::shared_ptr<front::ListAppsResponse>& _rrecv_msg_ptr);
 
+    void onAllApplicationsFetched();
+
     EntryPointerT createEntry(EntryPointerT& _rparent_ptr, const string& _name, const EntryTypeE _type = EntryTypeE::Unknown, const uint64_t _size = 0);
 
     EntryPointerT tryInsertUnknownEntry(EntryPointerT& _rparent_ptr, const string& _path);
 
     void eraseEntryFromParent(EntryPointerT&& _uentry_ptr, unique_lock<mutex>&& _ulock);
 
-    void createEntryData(EntryPointerT& _rentry_ptr, const std::string& _path_str, ListNodeDequeT& _rnode_dq);
+    void createEntryData(unique_lock<mutex>& _lock, EntryPointerT& _rentry_ptr, const std::string& _path_str, ListNodeDequeT& _rnode_dq);
 
-    void insertDirectoryEntry(EntryPointerT& _rparent_ptr, const string& _name);
-    void insertFileEntry(EntryPointerT& _rparent_ptr, const string& _name, uint64_t _size);
-
-    void createFileEntryData(EntryPointerT& _rentry_ptr, const std::string& _path_str);
-    void createDirectoryEntryData(EntryPointerT& _rentry_ptr, const std::string& _path_str);
+    void insertDirectoryEntry(unique_lock<mutex>& _lock, EntryPointerT& _rparent_ptr, const string& _name);
+    void insertFileEntry(unique_lock<mutex>& _lock, EntryPointerT& _rparent_ptr, const string& _name, uint64_t _size);
 
     void createRootEntry();
 
     bool entry(const fs::path& _path, EntryPointerT& _rentry_ptr, unique_lock<mutex>& _rlock);
+
+    void asyncFetch(EntryPointerT& _rentry_ptr, const size_t _fetch_index, const uint64_t _offset, uint64_t _size);
+
+    bool list(
+        EntryPointerT& _rentry_ptr,
+        void*&         _rpctx,
+        std::wstring& _rname, NodeTypeE& _rnode_type, uint64_t& _rsize);
+    bool read(
+        EntryPointerT& _rentry_ptr,
+        char*          _pbuf,
+        uint64_t _offset, unsigned long _length, unsigned long& _rbytes_transfered);
+    void tryFetch(EntryPointerT& _rentry_ptr, ReadData& _rread_data);
+    void tryPreFetch(EntryPointerT& _rentry_ptr);
+
+    fs::path cachePath() const
+    {
+        fs::path p = config_.path_prefix_;
+        p /= "cache";
+        return p;
+    }
 
 private:
     void getAuthToken(const frame::mprpc::RecipientId& _recipient_id, string& _rtoken, const string* const _ptoken = nullptr);
@@ -430,8 +526,20 @@ private:
 
     void storeAuthData(const string& _user, const string& _token);
 
-    void insertApplicationEntry(std::shared_ptr<front::FetchBuildConfigurationResponse>& _rrecv_msg_ptr);
-    void Implementation::insertMountEntry(EntryPointerT& _rparent_ptr, const fs::path& _local, const string& _remote);
+    void insertApplicationEntry(const std::string& _app_id, std::shared_ptr<front::FetchBuildConfigurationResponse>& _rrecv_msg_ptr);
+    void insertMountEntry(EntryPointerT& _rparent_ptr, const fs::path& _local, const string& _remote);
+    bool canPreFetch(const EntryPointerT& _rentry_ptr) const;
+
+    bool readFromFile(
+        EntryPointerT&      _rentry_ptr,
+        unique_lock<mutex>& _rlock,
+        char*               _pbuf,
+        uint64_t _offset, unsigned long _length, unsigned long& _rbytes_transfered);
+
+    bool readFromShortcut(
+        EntryPointerT& _rentry_ptr,
+        char*          _pbuf,
+        uint64_t _offset, unsigned long _length, unsigned long& _rbytes_transfered);
 
     void remoteFetchApplication(
         std::shared_ptr<front::ListAppsResponse>&               _apps_response,
@@ -495,6 +603,20 @@ void Engine::start(const Configuration& _rcfg)
     solid_log(logger, Verbose, "");
     pimpl_ = make_unique<Implementation>(_rcfg);
 
+    {
+        pimpl_->mutex_dq_.resize(pimpl_->config_.mutex_count_);
+        pimpl_->cv_dq_.resize(pimpl_->config_.cv_count_);
+    }
+
+    pimpl_->createRootEntry();
+
+    {
+        file_cache::Configuration config;
+        config.base_path_ = pimpl_->cachePath();
+        //TODO: set other configuration fields
+        pimpl_->file_cache_engine_.start(std::move(config));
+    }
+
     pimpl_->scheduler_.start(1);
 
     pimpl_->loadAuthData();
@@ -513,7 +635,11 @@ void Engine::start(const Configuration& _rcfg)
             auto connection_start_lambda = [this](frame::mprpc::ConnectionContext& _ctx) {
                 pimpl_->onFrontConnectionStart(_ctx);
             };
+            auto connection_stop_lambda = [this](frame::mprpc::ConnectionContext& _ctx) {
+                solid_log(logger, Verbose, "Connection stopping");
+            };
             cfg.client.connection_start_fnc = std::move(connection_start_lambda);
+            cfg.connection_stop_fnc         = std::move(connection_stop_lambda);
         }
 
         if (_rcfg.secure_) {
@@ -545,13 +671,6 @@ void Engine::start(const Configuration& _rcfg)
 
         pimpl_->gui_rpc_service_.start(std::move(cfg));
     }
-
-    {
-        pimpl_->mutex_dq_.resize(pimpl_->config_.mutex_count_);
-        pimpl_->cv_dq_.resize(pimpl_->config_.cv_count_);
-    }
-
-    pimpl_->createRootEntry();
 
     auto err = pimpl_->front_rpc_service_.createConnectionPool(_rcfg.front_endpoint_.c_str(), 1);
     solid_check(!err, "creating connection pool: " << err.message());
@@ -593,8 +712,10 @@ bool Engine::info(const fs::path& _path, NodeTypeE& _rnode_type, uint64_t& _rsiz
 
     if (pimpl_->entry(_path, entry_ptr, lock)) {
         entry_ptr->info(_rnode_type, _rsize);
+        solid_log(logger, Verbose, "INFO: " << _path.generic_path() << " " << static_cast<int>(_rnode_type) << " " << _rsize);
         return true;
     }
+    solid_log(logger, Verbose, "INFO: FAIL " << _path.generic_path());
     return false;
 }
 
@@ -606,7 +727,9 @@ Descriptor* Engine::open(const fs::path& _path)
     unique_lock<mutex> lock{rmutex};
 
     if (pimpl_->entry(_path, entry_ptr, lock)) {
-        return new Descriptor(std::move(entry_ptr));
+        auto pdesc = new Descriptor(std::move(entry_ptr));
+        solid_log(logger, Verbose, "OPEN: " << _path.generic_path() << " -> " << pdesc << " entry: " << pdesc->entry_ptr_.get());
+        return pdesc;
     }
     return nullptr;
 }
@@ -617,17 +740,35 @@ void Engine::cleanup(Descriptor* _pdesc)
 
 void Engine::close(Descriptor* _pdesc)
 {
+    if (_pdesc->entry_ptr_->type_ == EntryTypeE::File) {
+        mutex&             rmutex = _pdesc->entry_ptr_->mutex();
+        unique_lock<mutex> lock{rmutex};
+        size_t             use_cnt = _pdesc->entry_ptr_.use_count();
+
+        solid_log(logger, Verbose, "CLOSE: " << _pdesc << " entry: " << _pdesc->entry_ptr_.get() << " use count = " << use_cnt);
+        if (use_cnt == 2) {
+            pimpl_->file_cache_engine_.close(*get<FileDataPointerT>(_pdesc->entry_ptr_->data_var_));
+            _pdesc->entry_ptr_->data_var_ = UniqueIdT();
+
+        } else {
+            pimpl_->file_cache_engine_.flush(*get<FileDataPointerT>(_pdesc->entry_ptr_->data_var_));
+        }
+    } else {
+        solid_log(logger, Verbose, "CLOSE: " << _pdesc << " entry: " << _pdesc->entry_ptr_.get());
+    }
     delete _pdesc;
 }
 
 bool Engine::Implementation::entry(const fs::path& _path, EntryPointerT& _rentry_ptr, unique_lock<mutex>& _rlock)
 {
-    auto   generic_path_str = _path.generic_string();
-    string remote_path;
-    string storage_id;
+    auto          generic_path_str = _path.generic_string();
+    string        remote_path;
+    const string* pstorage_id   = nullptr;
+    const string* papp_id       = nullptr;
+    const string* pbuild_unique = nullptr;
 
     for (const auto& e : _path) {
-        string        s  = e.generic_string();
+        string        s     = e.generic_string();
         EntryPointerT e_ptr = _rentry_ptr->find(s);
 
         solid_log(logger, Verbose, "\t" << s);
@@ -649,13 +790,22 @@ bool Engine::Implementation::entry(const fs::path& _path, EntryPointerT& _rentry
 
             if (_rentry_ptr->type_ == EntryTypeE::Application) {
                 remote_path.clear();
-                storage_id = _rentry_ptr->remote_;
+                pstorage_id = &_rentry_ptr->remote_;
+
+                auto pfd = get_if<ApplicationDataPointerT>(&_rentry_ptr->data_var_);
+                if (pfd && pfd->get()) {
+                    papp_id       = &_rentry_ptr->name_; //&pfd->get()->app_id_;
+                    pbuild_unique = &pfd->get()->build_unique_;
+                } else {
+                    solid_assert(false);
+                }
+
             } else if (!_rentry_ptr->remote_.empty()) {
                 remote_path += '/';
                 remote_path += _rentry_ptr->remote_;
             } else {
                 remote_path += '/';
-                remote_path += s;
+                remote_path += _rentry_ptr->name_;
             }
         }
     }
@@ -670,11 +820,11 @@ bool Engine::Implementation::entry(const fs::path& _path, EntryPointerT& _rentry
                           std::shared_ptr<front::ListStoreRequest>&  _rsent_msg_ptr,
                           std::shared_ptr<front::ListStoreResponse>& _rrecv_msg_ptr,
                           ErrorConditionT const&                     _rerror) mutable {
-            auto&             m = entry_ptr->mutex();
-            lock_guard<mutex> lock{m};
+            auto&              m = entry_ptr->mutex();
+            unique_lock<mutex> lock{m};
             if (_rrecv_msg_ptr && _rrecv_msg_ptr->error_ == 0) {
                 entry_ptr->status_ = EntryStatusE::Fetched;
-                createEntryData(entry_ptr, generic_path_str, _rrecv_msg_ptr->node_dq_);
+                createEntryData(lock, entry_ptr, generic_path_str, _rrecv_msg_ptr->node_dq_);
             } else {
                 entry_ptr->status_ = EntryStatusE::FetchError;
             }
@@ -683,7 +833,7 @@ bool Engine::Implementation::entry(const fs::path& _path, EntryPointerT& _rentry
 
         auto req_ptr         = make_shared<ListStoreRequest>();
         req_ptr->path_       = remote_path;
-        req_ptr->storage_id_ = storage_id;
+        req_ptr->storage_id_ = *pstorage_id;
 
         front_rpc_service_.sendRequest(config_.front_endpoint_.c_str(), req_ptr, lambda);
     }
@@ -696,10 +846,21 @@ bool Engine::Implementation::entry(const fs::path& _path, EntryPointerT& _rentry
         if (_rentry_ptr->type_ == EntryTypeE::Unknown) {
             eraseEntryFromParent(std::move(_rentry_ptr), std::move(_rlock));
         }
+        solid_log(logger, Verbose, "Fail open: " << _path.generic_path());
 
         return false;
     } else {
         solid_check(_rentry_ptr->type_ > EntryTypeE::Unknown);
+
+        if (_rentry_ptr->type_ == EntryTypeE::File) {
+            if (holds_alternative<UniqueIdT>(_rentry_ptr->data_var_)) {
+                _rentry_ptr->data_var_ = make_unique<FileData>(*pstorage_id, remote_path);
+                file_cache_engine_.open(*get<FileDataPointerT>(_rentry_ptr->data_var_), _rentry_ptr->size_, *papp_id, *pbuild_unique, remote_path);
+            }
+        }
+
+        solid_log(logger, Verbose, "Open " << _rentry_ptr.get() << " " << _path.generic_path() << " type: " << static_cast<uint16_t>(_rentry_ptr->type_) << " remote: " << remote_path);
+
         //success
         return true;
     }
@@ -713,23 +874,397 @@ void Engine::info(Descriptor* _pdesc, NodeTypeE& _rnode_type, uint64_t& _rsize)
     _pdesc->entry_ptr_->info(_rnode_type, _rsize);
 }
 
-bool Engine::node(Descriptor* _pdesc, void*& _rpctx, std::wstring& _rname, NodeTypeE& _rnode_type, uint64_t& _rsize)
+bool Engine::list(Descriptor* _pdesc, void*& _rpctx, std::wstring& _rname, NodeTypeE& _rnode_type, uint64_t& _rsize)
 {
-    auto&             m = _pdesc->entry_ptr_->mutex();
-    lock_guard<mutex> lock(m);
-
-    return _pdesc->entry_ptr_->node(_rpctx, _rname, _rnode_type, _rsize);
+    return pimpl_->list(_pdesc->entry_ptr_, _rpctx, _rname, _rnode_type, _rsize);
 }
 
 bool Engine::read(Descriptor* _pdesc, void* _pbuf, uint64_t _offset, unsigned long _length, unsigned long& _rbytes_transfered)
 {
-    auto&             m = _pdesc->entry_ptr_->mutex();
-    lock_guard<mutex> lock(m);
-
-    return _pdesc->entry_ptr_->read(_pbuf, _offset, _length, _rbytes_transfered);
+    return pimpl_->read(_pdesc->entry_ptr_, static_cast<char*>(_pbuf), _offset, _length, _rbytes_transfered);
 }
 
 // -- Implementation --------------------------------------------------------------------
+
+bool Engine::Implementation::list(
+    EntryPointerT& _rentry_ptr,
+    void*&         _rpctx,
+    std::wstring& _rname, NodeTypeE& _rnode_type, uint64_t& _rsize)
+{
+    using ContextT = pair<int, EntryMapT::const_iterator>;
+
+    auto&              m{_rentry_ptr->mutex()};
+    unique_lock<mutex> lock(m);
+    ContextT*          pctx = nullptr;
+    DirectoryData*     pdd  = _rentry_ptr->directoryData();
+
+    if (_rpctx) {
+        pctx = static_cast<ContextT*>(_rpctx);
+    } else {
+        pctx   = new pair<int, EntryMapT::const_iterator>(0, pdd->entry_map_.begin());
+        _rpctx = pctx;
+    }
+
+    if (pctx->first == 0) {
+        //L".";
+        _rname      = L".";
+        _rsize      = 0;
+        _rnode_type = NodeTypeE::Directory;
+        ++pctx->first;
+        return true;
+    } else if (pctx->first == 1) {
+        //L"..";
+        _rname      = L"..";
+        _rsize      = 0;
+        _rnode_type = NodeTypeE::Directory;
+        ++pctx->first;
+        return true;
+    } else {
+
+        while (pctx->second != pdd->entry_map_.end()) {
+            const EntryPointerT& rentry_ptr = pctx->second->second;
+
+            if (rentry_ptr->type_ == EntryTypeE::Unknown) {
+                ++pctx->second;
+                continue;
+            }
+
+            _rname       = utility::widen(pctx->second->second->name_);
+            _rsize       = pctx->second->second->size_;
+            const auto t = pctx->second->second->type_;
+            _rnode_type  = t == EntryTypeE::Application || t == EntryTypeE::Directory ? NodeTypeE::Directory : NodeTypeE::File;
+            ++pctx->second;
+            return true;
+        }
+
+        delete pctx;
+        _rpctx = nullptr;
+    }
+
+    return false;
+}
+
+bool FileData::readFromResponses(ReadData& _rdata, const bool _is_front)
+{
+    if (fetch_stubs_[0].offset_ < fetch_stubs_[1].offset_) {
+        if (readFromResponse(0, _rdata, _is_front))
+            return true;
+        return readFromResponse(1, _rdata, _is_front);
+    } else {
+        if (readFromResponse(1, _rdata, _is_front))
+            return true;
+        return readFromResponse(0, _rdata, _is_front);
+    }
+}
+
+void check_file(char* _pbuf, uint64_t _offset, unsigned long _length)
+{
+    static ifstream ifs("C:\\Users\\vipal\\work\\bubbles_release\\bubbles_client.exe", ios::binary);
+    solid_assert(ifs);
+    char buf[1024 * 256];
+
+    ifs.seekg(_offset);
+    ifs.read(buf, _length);
+    solid_assert(memcmp(_pbuf, buf, _length) == 0);
+}
+
+bool Engine::Implementation::read(
+    EntryPointerT& _rentry_ptr,
+    char*          _pbuf,
+    uint64_t _offset, unsigned long _length, unsigned long& _rbytes_transfered)
+{
+
+    auto&              m = _rentry_ptr->mutex();
+    unique_lock<mutex> lock(m);
+
+    if (_offset >= _rentry_ptr->size_) {
+        _rbytes_transfered = 0;
+        solid_log(logger, Verbose, "READ: " << _rentry_ptr.get() << " zero");
+        return true;
+    }
+
+    {
+        size_t remaining_len = _rentry_ptr->size_ - _offset;
+        if (_length > remaining_len) {
+            _length = remaining_len;
+        }
+    }
+
+    switch (_rentry_ptr->type_) {
+    case EntryTypeE::File:
+        return readFromFile(_rentry_ptr, lock, _pbuf, _offset, _length, _rbytes_transfered);
+    case EntryTypeE::Shortcut:
+        return readFromShortcut(_rentry_ptr, _pbuf, _offset, _length, _rbytes_transfered);
+    default:
+        solid_throw("Try read from unknown entry type");
+    }
+}
+
+bool Engine::Implementation::readFromFile(
+    EntryPointerT&      _rentry_ptr,
+    unique_lock<mutex>& _rlock,
+    char*               _pbuf,
+    uint64_t _offset, unsigned long _length, unsigned long& _rbytes_transfered)
+{
+    FileData& rfile_data = *get<FileDataPointerT>(_rentry_ptr->data_var_);
+    ReadData  read_data{_pbuf, _offset, _length};
+
+    if (rfile_data.readFromCache(read_data)) {
+        _rbytes_transfered = read_data.bytes_transfered_;
+        solid_log(logger, Verbose, "READ: " << _rentry_ptr.get() << " read from cache " << _rbytes_transfered);
+        return true;
+    }
+
+    if (rfile_data.readFromResponses(read_data, false)) {
+        _rbytes_transfered = read_data.bytes_transfered_;
+        solid_log(logger, Verbose, "READ: " << _rentry_ptr.get() << " read from responses " << _rbytes_transfered);
+        return true;
+    }
+
+    if (rfile_data.enqueue(read_data)) {
+        //the queue was empty
+        tryFetch(_rentry_ptr, read_data);
+        tryPreFetch(_rentry_ptr);
+    }
+    solid_log(logger, Verbose, _rentry_ptr.get() << " wait");
+    _rentry_ptr->conditionVariable().wait(_rlock, [&read_data]() { return read_data.done_; });
+
+    if (rfile_data.status_ == FileData::ErrorE) {
+        solid_log(logger, Verbose, "READ: " << _rentry_ptr.get() << " error reading");
+        return false;
+    }
+
+    _rbytes_transfered = read_data.bytes_transfered_;
+    solid_log(logger, Verbose, "READ: " << _rentry_ptr.get() << " " << _offset << " " << _length << " " << _rbytes_transfered);
+    return true;
+}
+
+bool Engine::Implementation::readFromShortcut(
+    EntryPointerT& _rentry_ptr,
+    char*          _pbuf,
+    uint64_t _offset, unsigned long _length, unsigned long& _rbytes_transfered)
+{
+    ShortcutData& rshortcut_data = *get<ShortcutDataPointerT>(_rentry_ptr->data_var_);
+
+    rshortcut_data.ioss_.seekg(_offset);
+    rshortcut_data.ioss_.read(_pbuf, _length);
+    _rbytes_transfered = rshortcut_data.ioss_.gcount();
+    return true;
+}
+
+size_t FileData::isReadHandledByPendingFetch(const ReadData& _rread_data) const
+{
+    size_t fetch_index = InvalidIndex();
+
+    {
+        auto& rfetch_stub = fetch_stubs_[0];
+        if (rfetch_stub.status_ == FetchStub::PendingE) {
+            if (
+                rfetch_stub.offset_ <= _rread_data.offset_ && _rread_data.offset_ < (rfetch_stub.offset_ + rfetch_stub.size_)) {
+                return 0;
+            }
+        }
+    }
+    {
+        auto& rfetch_stub = fetch_stubs_[1];
+        if (rfetch_stub.status_ == FetchStub::PendingE) {
+            if (
+                rfetch_stub.offset_ <= _rread_data.offset_ && _rread_data.offset_ < (rfetch_stub.offset_ + rfetch_stub.size_)) {
+                return 1;
+            }
+        }
+    }
+
+    return InvalidIndex();
+}
+
+size_t FileData::findAvailableFetchIndex() const
+{
+    auto& rfetch_stub0 = fetch_stubs_[0];
+    auto& rfetch_stub1 = fetch_stubs_[1];
+
+    if (rfetch_stub0.status_ == FetchStub::NotUsedE)
+        return 0;
+    if (rfetch_stub1.status_ == FetchStub::NotUsedE)
+        return 1;
+
+    if (rfetch_stub0.status_ == FetchStub::FetchedE)
+        return 0;
+    if (rfetch_stub1.status_ == FetchStub::FetchedE)
+        return 1;
+    return InvalidIndex();
+}
+
+void Engine::Implementation::tryFetch(EntryPointerT& _rentry_ptr, ReadData& _rread_data)
+{
+    FileData& rfile_data = *get<FileDataPointerT>(_rentry_ptr->data_var_);
+
+    //try to avoid double prefetching
+    if (auto fetch_index = rfile_data.isReadHandledByPendingFetch(_rread_data); fetch_index != InvalidIndex() && rfile_data.fetch_stubs_[fetch_index].size_ != 0) {
+        solid_log(logger, Verbose, _rentry_ptr.get() << " read handled by pending " << fetch_index);
+        //check if we can use the secondary buffer to speed-up fetching
+        auto&  rfs         = rfile_data.fetch_stubs_[fetch_index];
+        auto   next_offset = rfs.offset_ + rfs.size_;
+        size_t second_fetch_index;
+        if (canPreFetch(_rentry_ptr) && next_offset < _rentry_ptr->size_ && (second_fetch_index = rfile_data.findAvailableFetchIndex()) != InvalidIndex()) {
+            solid_log(logger, Verbose, _rentry_ptr.get() << " prefetch " << second_fetch_index << " " << next_offset);
+            asyncFetch(_rentry_ptr, second_fetch_index, next_offset, config_.max_stream_size_ /*_rread_data.size_*/);
+        }
+        return;
+    }
+
+    if (auto fetch_index = rfile_data.findAvailableFetchIndex(); fetch_index != InvalidIndex()) {
+        solid_log(logger, Verbose, _rentry_ptr.get() << " read " << fetch_index << " " << _rread_data.offset_);
+        asyncFetch(_rentry_ptr, fetch_index, _rread_data.offset_, canPreFetch(_rentry_ptr) ? config_.max_stream_size_ : _rread_data.size_);
+
+        auto&  rfetch_stub = rfile_data.fetch_stubs_[fetch_index];
+        auto   next_offset = rfetch_stub.offset_ + rfetch_stub.size_;
+        size_t second_fetch_index;
+
+        if (canPreFetch(_rentry_ptr) && next_offset < _rentry_ptr->size_ && (second_fetch_index = rfile_data.findAvailableFetchIndex()) != InvalidIndex()) {
+            asyncFetch(_rentry_ptr, second_fetch_index, next_offset, config_.max_stream_size_);
+        }
+    }
+}
+
+void copy_stream(ReadData& _rread_data, const uint64_t _offset, istream& _ris, uint64_t _size)
+{
+    solid_check(_offset <= _rread_data.offset_);
+    _ris.clear();
+    _ris.seekg(_rread_data.offset_ - _offset);
+    _ris.read(_rread_data.pbuffer_, _size);
+    uint64_t sz = _ris.gcount();
+    _rread_data.offset_ += sz;
+    _rread_data.pbuffer_ += sz;
+    _rread_data.bytes_transfered_ += sz;
+    _rread_data.size_ -= sz;
+}
+
+bool FileData::readFromResponse(const size_t _idx, ReadData& _rdata, bool _is_front)
+{
+    FetchStub& rfetch_stub = fetch_stubs_[_idx];
+    if (rfetch_stub.status_ != FetchStub::FetchedE && rfetch_stub.status_ != FetchStub::WaitE) {
+        return false;
+    }
+
+    if (rfetch_stub.offset_ <= _rdata.offset_ && _rdata.offset_ < (rfetch_stub.offset_ + rfetch_stub.size_)) {
+        uint64_t tocopy = (rfetch_stub.offset_ + rfetch_stub.size_) - _rdata.offset_;
+        if (tocopy > _rdata.size_) {
+            tocopy = _rdata.size_;
+        }
+
+        copy_stream(_rdata, rfetch_stub.offset_, rfetch_stub.response_ptr_->ioss_, tocopy);
+
+        if (_is_front && rfetch_stub.status_ == FetchStub::WaitE) {
+            rfetch_stub.status_ = FetchStub::FetchedE;
+        }
+        return _rdata.size_ == 0;
+    }
+    return false;
+}
+
+void FileData::updateContiguousRead(uint64_t _offset, uint64_t _size)
+{
+    if (_offset == prefetch_offset_) {
+        ++contiguous_read_count_;
+    } else {
+        contiguous_read_count_ = 0;
+    }
+    prefetch_offset_ = _offset + _size;
+}
+
+bool Engine::Implementation::canPreFetch(const EntryPointerT& _rentry_ptr) const
+{
+    const FileData& rfile_data = *get<FileDataPointerT>(_rentry_ptr->data_var_);
+    return (rfile_data.contiguous_read_count_ >= config_.min_contiguous_read_count_) && rfile_data.prefetch_offset_ < _rentry_ptr->size_;
+}
+
+void Engine::Implementation::tryPreFetch(EntryPointerT& _rentry_ptr)
+{
+    FileData& rfile_data = *get<FileDataPointerT>(_rentry_ptr->data_var_);
+    size_t    fetch_index;
+    if (canPreFetch(_rentry_ptr) && ((fetch_index = rfile_data.findAvailableFetchIndex()) != InvalidIndex())) {
+        solid_log(logger, Verbose, _rentry_ptr.get() << " " << fetch_index << " " << rfile_data.prefetch_offset_);
+        asyncFetch(_rentry_ptr, fetch_index, rfile_data.prefetch_offset_, 0);
+    }
+}
+
+void Engine::Implementation::asyncFetch(EntryPointerT& _rentry_ptr, const size_t _fetch_index, const uint64_t _offset, uint64_t _size)
+{
+    solid_log(logger, Verbose, _rentry_ptr.get() << " " << _fetch_index << " " << _offset << " " << _size);
+    FileData& rfile_data  = *get<FileDataPointerT>(_rentry_ptr->data_var_);
+    auto&     rfetch_stub = rfile_data.fetch_stubs_[_fetch_index];
+
+    rfetch_stub.status_ = FetchStub::PendingE;
+    rfetch_stub.offset_ = _offset;
+    rfetch_stub.size_   = _size;
+
+    auto lambda = [entry_ptr = _rentry_ptr, this, _fetch_index](
+                      frame::mprpc::ConnectionContext&            _rctx,
+                      std::shared_ptr<front::FetchStoreRequest>&  _rsent_msg_ptr,
+                      std::shared_ptr<front::FetchStoreResponse>& _rrecv_msg_ptr,
+                      ErrorConditionT const&                      _rerror) mutable {
+        solid_check(_rrecv_msg_ptr, _rerror.message());
+        solid_log(logger, Verbose, "recv data: " << _rsent_msg_ptr->offset_ << " " << _rrecv_msg_ptr->size_);
+        auto&             m = entry_ptr->mutex();
+        lock_guard<mutex> lock{m};
+        FileDataPointerT* pfd = get_if<FileDataPointerT>(&entry_ptr->data_var_);
+        if (pfd == nullptr) {
+            return;
+        }
+        FileData& rfile_data  = *(*pfd);
+        auto&     rfetch_stub = rfile_data.fetch_stubs_[_fetch_index];
+
+        rfetch_stub.status_       = FetchStub::FetchedE;
+        rfetch_stub.response_ptr_ = std::move(_rrecv_msg_ptr);
+
+        rfile_data.writeToCache(_rsent_msg_ptr->offset_, rfetch_stub.response_ptr_->ioss_);
+
+        rfetch_stub.size_ = rfetch_stub.response_ptr_->size_ >= 0 ? rfetch_stub.response_ptr_->size_ : -rfetch_stub.response_ptr_->size_;
+
+        for (auto* prd = rfile_data.pfront_; prd != nullptr;) {
+            if (prd->offset_ >= rfetch_stub.offset_ && prd->offset_ < (rfetch_stub.offset_ + rfetch_stub.size_)) {
+                uint64_t tocopy = (rfetch_stub.offset_ + rfetch_stub.size_) - prd->offset_;
+                if (tocopy > prd->size_) {
+                    tocopy = prd->size_;
+                }
+
+                copy_stream(*prd, rfetch_stub.offset_, rfetch_stub.response_ptr_->ioss_, tocopy);
+            } else if (prd == rfile_data.pfront_ && prd->offset_ >= rfetch_stub.offset_ && rfetch_stub.offset_ < (prd->offset_ + prd->size_)) {
+                //TODO: maybe more checks are needed
+                rfetch_stub.status_ = FetchStub::WaitE;
+            }
+
+            if (prd->size_ == 0) {
+                auto tmp = prd;
+                prd      = prd->pprev_;
+                rfile_data.erase(*tmp);
+                tmp->done_ = true;
+                entry_ptr->conditionVariable().notify_all();
+            } else {
+                rfile_data.readFromResponses(*prd, prd == rfile_data.pfront_);
+                prd = prd->pprev_;
+            }
+        }
+
+        for (auto* prd = rfile_data.pfront_; prd != nullptr; prd = prd->pprev_) {
+            tryFetch(entry_ptr, *prd);
+        }
+        tryPreFetch(entry_ptr);
+    };
+
+    if (!rfetch_stub.request_ptr_) {
+        rfetch_stub.request_ptr_ = make_shared<FetchStoreRequest>();
+    }
+    rfetch_stub.request_ptr_->path_       = rfile_data.remote_path_;
+    rfetch_stub.request_ptr_->storage_id_ = rfile_data.storage_id_;
+    rfetch_stub.request_ptr_->offset_     = rfetch_stub.offset_;
+    rfetch_stub.request_ptr_->size_       = rfetch_stub.size_;
+
+    front_rpc_service_.sendRequest(config_.front_endpoint_.c_str(), rfetch_stub.request_ptr_, lambda);
+}
+
+//-----------------------------------------------------------------------------
 
 void Engine::Implementation::getAuthToken(const frame::mprpc::RecipientId& _recipient_id, string& _rtoken, const string* const _ptoken)
 {
@@ -923,8 +1458,18 @@ void Engine::Implementation::remoteFetchApplication(
                       std::shared_ptr<front::FetchBuildConfigurationResponse>& _rrecv_msg_ptr,
                       ErrorConditionT const&                                   _rerror) mutable {
         if (_rrecv_msg_ptr) {
-            insertApplicationEntry(_rrecv_msg_ptr);
+
             ++_app_index;
+
+            this->workpool_.push(
+                [this, recv_msg_ptr = std::move(_rrecv_msg_ptr), app_id = _rsent_msg_ptr->app_id_, is_last = _app_index >= apps_response->app_id_vec_.size()]() mutable {
+                    insertApplicationEntry(app_id, recv_msg_ptr);
+                    if (is_last) {
+                        //done with all applications
+                        onAllApplicationsFetched();
+                    }
+                });
+
             if (_app_index < apps_response->app_id_vec_.size()) {
                 remoteFetchApplication(apps_response, _rsent_msg_ptr, _app_index);
             }
@@ -932,6 +1477,26 @@ void Engine::Implementation::remoteFetchApplication(
     };
 
     front_rpc_service_.sendRequest(config_.front_endpoint_.c_str(), _rsent_msg_ptr, lambda);
+}
+
+void Engine::Implementation::onAllApplicationsFetched()
+{
+    auto check_application_exist_lambda = [this](const std::string& _app_name, const std::string& _build_unique) {
+        unique_lock<mutex> lock{root_mutex_};
+        auto               entry_ptr = root_entry_ptr_->find(_app_name);
+        if (entry_ptr) {
+            //mutex& rmutex = entry_ptr->mutex();
+            //lock.unlock(); //no overlapping locks
+            //unique_lock<mutex> tlock{rmutex};
+            //lock.swap(tlock);
+            auto pad = entry_ptr->applicationData();
+            if (pad != nullptr) {
+                return pad->build_unique_ == _build_unique;
+            }
+        }
+        return false;
+    };
+    file_cache_engine_.removeOldApplications(check_application_exist_lambda);
 }
 
 void Engine::Implementation::onFrontListAppsResponse(
@@ -947,14 +1512,17 @@ void Engine::Implementation::onFrontListAppsResponse(
     //TODO:
     req_ptr->lang_  = "US_en";
     req_ptr->os_id_ = "Windows10x86_64";
+    req_ptr->property_vec_.emplace_back("description");
 
     remoteFetchApplication(_rrecv_msg_ptr, req_ptr, 0);
 }
 
 void Engine::Implementation::createRootEntry()
 {
+    lock_guard<mutex> lock{root_mutex_};
+
     root_entry_ptr_            = make_shared<Entry>(EntryTypeE::Directory, root_mutex_, cv_dq_[0], "");
-    root_entry_ptr_->data_ptr_ = make_unique<DirectoryData>();
+    root_entry_ptr_->data_var_ = make_unique<DirectoryData>();
     root_entry_ptr_->status_   = EntryStatusE::Fetched;
 }
 
@@ -963,15 +1531,15 @@ void Engine::Implementation::insertMountEntry(EntryPointerT& _rparent_ptr, const
     EntryPointerT entry_ptr   = _rparent_ptr;
     string        remote_path = "./";
     for (const auto& e : _local) {
-        string        s  = e.generic_string();
+        string        s     = e.generic_string();
         EntryPointerT e_ptr = entry_ptr->find(s);
 
         solid_log(logger, Verbose, "\t" << s);
 
         if (!e_ptr) {
             entry_ptr->status_ = EntryStatusE::FetchRequired;
-            auto ep = tryInsertUnknownEntry(entry_ptr, s);
-            entry_ptr->status_  = EntryStatusE::Fetched;
+            auto ep            = tryInsertUnknownEntry(entry_ptr, s);
+            entry_ptr->status_ = EntryStatusE::Fetched;
             solid_check(ep);
             entry_ptr = ep;
             remote_path += "./";
@@ -986,15 +1554,27 @@ void Engine::Implementation::insertMountEntry(EntryPointerT& _rparent_ptr, const
     entry_ptr->status_ = EntryStatusE::FetchRequired;
 }
 
+string to_system_path(const string& _path)
+{
+    string to;
+    to.reserve(_path.size());
+    for (char c : _path) {
+        if (c == '/') {
+            c = '\\';
+        }
+        to += c;
+    }
+    return to;
+}
 
-void Engine::Implementation::insertApplicationEntry(std::shared_ptr<front::FetchBuildConfigurationResponse>& _rrecv_msg_ptr)
+void Engine::Implementation::insertApplicationEntry(const string& _app_id, std::shared_ptr<front::FetchBuildConfigurationResponse>& _rrecv_msg_ptr)
 {
     auto entry_ptr = createEntry(
         root_entry_ptr_, _rrecv_msg_ptr->build_configuration_.directory_,
         EntryTypeE::Application);
 
     entry_ptr->remote_   = _rrecv_msg_ptr->storage_id_;
-    entry_ptr->data_ptr_ = make_unique<ApplicationData>();
+    entry_ptr->data_var_ = make_unique<ApplicationData>(_app_id, _rrecv_msg_ptr->build_unique_);
 
     if (!_rrecv_msg_ptr->build_configuration_.mount_vec_.empty()) {
 #if 0
@@ -1012,10 +1592,37 @@ void Engine::Implementation::insertApplicationEntry(std::shared_ptr<front::Fetch
 
     solid_log(logger, Info, entry_ptr->name_);
 
-    auto&             rm = root_entry_ptr_->mutex();
-    lock_guard<mutex> lock{rm};
-    //TODO: also create coresponding shortcuts
-    root_entry_ptr_->data_ptr_->insertEntry(std::move(entry_ptr));
+    auto& rm = root_entry_ptr_->mutex();
+    {
+        lock_guard<mutex> lock{rm};
+        //TODO: also create coresponding shortcuts
+
+        get<DirectoryDataPointerT>(root_entry_ptr_->data_var_)->insertEntry(std::move(entry_ptr));
+    }
+
+    const auto& app_folder_name = _rrecv_msg_ptr->build_configuration_.directory_;
+
+    if (!_rrecv_msg_ptr->build_configuration_.shortcut_vec_.empty()) {
+        for (const auto& sh : _rrecv_msg_ptr->build_configuration_.shortcut_vec_) {
+            auto skt_entry_ptr = createEntry(
+                root_entry_ptr_, sh.name_ + ".lnk",
+                EntryTypeE::Shortcut);
+
+            skt_entry_ptr->status_   = EntryStatusE::Fetched;
+            skt_entry_ptr->data_var_ = make_unique<ShortcutData>();
+
+            skt_entry_ptr->size_ = shortcut_creator_.create(
+                get<ShortcutDataPointerT>(skt_entry_ptr->data_var_)->ioss_,
+                to_system_path(config_.mount_prefix_ + '/' + app_folder_name + '/' + sh.command_),
+                sh.arguments_,
+                to_system_path(config_.mount_prefix_ + '/' + app_folder_name + '/' + sh.run_folder_),
+                to_system_path(config_.mount_prefix_ + '/' + app_folder_name + '/' + sh.icon_),
+                _rrecv_msg_ptr->build_configuration_.property_vec_.front().second);
+
+            lock_guard<mutex> lock{rm};
+            get<DirectoryDataPointerT>(root_entry_ptr_->data_var_)->insertEntry(std::move(skt_entry_ptr));
+        }
+    }
 }
 
 EntryPointerT Engine::Implementation::createEntry(EntryPointerT& _rparent_ptr, const string& _name, const EntryTypeE _type, const uint64_t _size)
@@ -1025,43 +1632,44 @@ EntryPointerT Engine::Implementation::createEntry(EntryPointerT& _rparent_ptr, c
     return make_shared<Entry>(_type, _rparent_ptr, mutex_dq_[index % mutex_dq_.size()], cv_dq_[index % cv_dq_.size()], _name, _size);
 }
 
-void Engine::Implementation::insertDirectoryEntry(EntryPointerT& _rparent_ptr, const string& _name)
+void Engine::Implementation::insertDirectoryEntry(unique_lock<mutex>& _lock, EntryPointerT& _rparent_ptr, const string& _name)
 {
     solid_log(logger, Info, _rparent_ptr->name_ << " " << _name);
 
-    solid_check(_rparent_ptr->data_ptr_ && _rparent_ptr->data_ptr_->isDirectory());
-    auto entry_ptr = _rparent_ptr->data_ptr_->find(_name);
+    auto entry_ptr = _rparent_ptr->directoryData()->find(_name);
 
     if (!entry_ptr) {
-        _rparent_ptr->data_ptr_->insertEntry(createEntry(_rparent_ptr, _name, EntryTypeE::Directory));
+        _rparent_ptr->directoryData()->insertEntry(createEntry(_rparent_ptr, _name, EntryTypeE::Directory));
     } else {
+        _lock.unlock();
         //make sure the entry is directory
         auto&             rm = entry_ptr->mutex();
         lock_guard<mutex> lock{rm};
         entry_ptr->type_ = EntryTypeE::Directory;
-        if (entry_ptr->data_ptr_ && !entry_ptr->data_ptr_->isDirectory()) {
-            entry_ptr->data_ptr_.reset();
+
+        if (entry_ptr->directoryData() == nullptr) {
+            entry_ptr->data_var_ = make_unique<DirectoryData>();
         }
     }
 }
 
-void Engine::Implementation::insertFileEntry(EntryPointerT& _rparent_ptr, const string& _name, uint64_t _size)
+void Engine::Implementation::insertFileEntry(unique_lock<mutex>& _lock, EntryPointerT& _rparent_ptr, const string& _name, uint64_t _size)
 {
     solid_log(logger, Info, _rparent_ptr->name_ << " " << _name << " " << _size);
 
-    solid_check(_rparent_ptr->data_ptr_ && _rparent_ptr->data_ptr_->isDirectory());
-    auto entry_ptr = _rparent_ptr->data_ptr_->find(_name);
+    auto entry_ptr = _rparent_ptr->directoryData()->find(_name);
 
     if (!entry_ptr) {
-        _rparent_ptr->data_ptr_->insertEntry(createEntry(_rparent_ptr, _name, EntryTypeE::File));
+        _rparent_ptr->directoryData()->insertEntry(createEntry(_rparent_ptr, _name, EntryTypeE::File));
     } else {
+        _lock.unlock();
         //make sure the entry is file
         auto&             rm = entry_ptr->mutex();
         lock_guard<mutex> lock{rm};
         entry_ptr->type_ = EntryTypeE::File;
         entry_ptr->size_ = _size;
-        if (entry_ptr->data_ptr_ && entry_ptr->data_ptr_->isDirectory()) {
-            entry_ptr->data_ptr_.reset();
+        if (entry_ptr->directoryData() == nullptr) {
+            entry_ptr->data_var_ = UniqueIdT{};
         }
     }
 }
@@ -1074,15 +1682,13 @@ EntryPointerT Engine::Implementation::tryInsertUnknownEntry(EntryPointerT& _rpar
         return EntryPointerT{};
     }
 
-    if (!_rparent_ptr->data_ptr_) {
-        _rparent_ptr->data_ptr_ = make_unique<DirectoryData>();
+    if (_rparent_ptr->directoryData() == nullptr) {
+        _rparent_ptr->data_var_ = make_unique<DirectoryData>();
     }
-
-    solid_check(_rparent_ptr->data_ptr_->isDirectory());
 
     auto entry_ptr     = createEntry(_rparent_ptr, _name);
     entry_ptr->status_ = EntryStatusE::FetchRequired;
-    _rparent_ptr->data_ptr_->insertEntry(EntryPointerT(entry_ptr));
+    _rparent_ptr->directoryData()->insertEntry(EntryPointerT(entry_ptr));
     return entry_ptr;
 }
 
@@ -1101,40 +1707,30 @@ void Engine::Implementation::eraseEntryFromParent(EntryPointerT&& _uentry_ptr, u
 
     if (parent_ptr) {
         unique_lock<mutex> lock{parent_ptr->mutex()};
-        parent_ptr->erase(entry_ptr);
+        if (parent_ptr->status_ != EntryStatusE::Fetched) {
+            parent_ptr->erase(entry_ptr);
 
-        if (parent_ptr->isErasable()) {
-            eraseEntryFromParent(std::move(parent_ptr), std::move(lock));
+            if (parent_ptr->isErasable()) {
+                eraseEntryFromParent(std::move(parent_ptr), std::move(lock));
+            }
         }
     }
 }
 
-void Engine::Implementation::createFileEntryData(EntryPointerT& _rentry_ptr, const std::string& _path_str)
-{
-    solid_log(logger, Info, _path_str);
-    //TODO: implement chaching
-    _rentry_ptr->data_ptr_ = make_unique<FileData>();
-}
-
-void Engine::Implementation::createDirectoryEntryData(EntryPointerT& _rentry_ptr, const std::string& _path_str)
-{
-    solid_log(logger, Info, _path_str);
-    //TODO: implement chaching
-    _rentry_ptr->data_ptr_ = make_unique<DirectoryData>();
-}
-
-void Engine::Implementation::createEntryData(EntryPointerT& _rentry_ptr, const std::string& _path_str, ListNodeDequeT& _rnode_dq)
+void Engine::Implementation::createEntryData(unique_lock<mutex>& _lock, EntryPointerT& _rentry_ptr, const std::string& _path_str, ListNodeDequeT& _rnode_dq)
 {
     solid_log(logger, Info, _path_str);
     if (_rnode_dq.size() == 1 && _rnode_dq.front().name_.empty()) {
         _rentry_ptr->type_ = EntryTypeE::File;
         _rentry_ptr->size_ = _rnode_dq.front().size_;
 
-        createFileEntryData(_rentry_ptr, _path_str);
+        _rentry_ptr->data_var_ = UniqueIdT{};
         return;
     }
 
-    createDirectoryEntryData(_rentry_ptr, _path_str);
+    if (_rentry_ptr->directoryData() == nullptr) {
+        _rentry_ptr->data_var_ = make_unique<DirectoryData>();
+    }
 
     for (const auto& n : _rnode_dq) {
         //TODO: we do not create the EntryData here
@@ -1142,9 +1738,9 @@ void Engine::Implementation::createEntryData(EntryPointerT& _rentry_ptr, const s
         if (n.name_.back() == '/') {
             string name = n.name_;
             name.pop_back();
-            insertDirectoryEntry(_rentry_ptr, name);
+            insertDirectoryEntry(_lock, _rentry_ptr, name);
         } else {
-            insertFileEntry(_rentry_ptr, n.name_, n.size_);
+            insertFileEntry(_lock, _rentry_ptr, n.name_, n.size_);
         }
     }
 }

@@ -30,7 +30,7 @@
 #include "solid/frame/mprpc/mprpcservice.hpp"
 #include "solid/frame/mprpc/mprpcsocketstub_openssl.hpp"
 
-#include "ola/common/utility/crypto.hpp"
+#include "ola/common/utility/encode.hpp"
 
 #include "gui_protocol.hpp"
 #include "ola/common/ola_front_protocol.hpp"
@@ -208,7 +208,7 @@ int main(int argc, char* argv[])
 
     auth_widget.start(
         [&engine](const std::string& _user, const std::string& _pass) {
-            engine.onAuthStart(_user, ola::utility::sha256(_pass));
+            engine.onAuthStart(_user, ola::utility::sha256hex(_pass));
         });
 
     front_configure_service(engine, params, front_rpc_service, aioscheduler, resolver);
@@ -346,8 +346,8 @@ void local_configure_service(const Parameters& _params, frame::mprpc::ServiceT& 
         auto connection_stop_lambda = [](frame::mprpc::ConnectionContext& _ctx) {
             QApplication::quit();
         };
-        
-        cfg.connection_stop_fnc         = std::move(connection_stop_lambda);
+
+        cfg.connection_stop_fnc = std::move(connection_stop_lambda);
     }
 
     _rsvc.start(std::move(cfg));

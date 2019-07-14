@@ -34,6 +34,7 @@ private slots:
 
 private:
     void closeEvent(QCloseEvent*) override;
+    bool eventFilter(QObject* obj, QEvent* event) override;
 
 private:
     struct Data;

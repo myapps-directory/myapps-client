@@ -1,10 +1,10 @@
 #pragma once
 
+#include "boost/filesystem.hpp"
+#include "ola/client/utility/arrvec.hpp"
 #include <functional>
 #include <memory>
 #include <string>
-#include "boost/filesystem.hpp"
-#include "ola/client/utility/arrvec.hpp"
 
 namespace ola {
 namespace client {
@@ -15,8 +15,8 @@ namespace fs = boost::filesystem;
 using EntryIdT = ola::client::utility::ArrVec<16, size_t>;
 
 enum struct NodeTypeE {
-	Directory,
-	File
+    Directory,
+    File
 };
 
 struct GuiProtocolSetup;
@@ -27,18 +27,20 @@ struct Configuration {
     using GuiFailFunctionT  = std::function<void()>;
 
     bool              compress_ = true;
-    bool              secure_ = true;
+    bool              secure_   = true;
     std::string       front_endpoint_;
     std::string       path_prefix_;
+    std::string       temp_folder_;
+    std::string       mount_prefix_;
     GuiStartFunctionT gui_start_fnc_;
     GuiFailFunctionT  gui_fail_fnc_;
     size_t            mutex_count_ = 1;
-    size_t            cv_count_ = 1;
-    std::string            os_;
-    std::string            language_;
+    size_t            cv_count_    = 1;
+    std::string       os_;
+    std::string       language_;
+    uint64_t          max_stream_size_           = 100 * 1024;
+    size_t            min_contiguous_read_count_ = 3;
 };
-
-
 
 class Engine {
     friend struct GuiProtocolSetup;
@@ -51,19 +53,19 @@ public:
     void start(const Configuration& _rcfg);
     void stop();
 
-    Descriptor* open(const fs::path &_path);
+    Descriptor* open(const fs::path& _path);
 
     void cleanup(Descriptor* _pdesc);
 
     void close(Descriptor* _pdesc);
 
     void*& buffer(Descriptor& _rdesc);
-    
+
     bool info(const fs::path& _path, NodeTypeE& _rnode_type, uint64_t& _rsize);
 
     void info(Descriptor* _pdesc, NodeTypeE& _rnode_type, uint64_t& _rsize);
 
-	bool node(Descriptor* _pdesc, void*& _rpctx, std::wstring& _rname, NodeTypeE& _rentry_type, uint64_t& _rsize);
+    bool list(Descriptor* _pdesc, void*& _rpctx, std::wstring& _rname, NodeTypeE& _rentry_type, uint64_t& _rsize);
 
     bool read(Descriptor* _pdesc, void* _pbuf, uint64_t _offset, unsigned long _length, unsigned long& _rbytes_transfered);
 };

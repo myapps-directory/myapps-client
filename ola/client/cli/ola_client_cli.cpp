@@ -12,7 +12,7 @@
 #include "solid/frame/mprpc/mprpcservice.hpp"
 #include "solid/frame/mprpc/mprpcsocketstub_openssl.hpp"
 
-#include "ola/common/utility/crypto.hpp"
+#include "ola/common/utility/encode.hpp"
 
 #include "ola/common/ola_front_protocol.hpp"
 
@@ -574,10 +574,11 @@ ostream& operator<<(ostream &_ros, const utility::Build::Configuration &c){
     _ros<<endl;
     _ros<<"Shortcuts: {\n";
     for(const auto &s: c.shortcut_vec_){
-        _ros<<"Name:   "<<s.name_<<endl;
-        _ros<<"Command:"<<s.command_<<endl;
-        _ros<<"Run Fld:"<<s.run_folder_<<endl;
-        _ros<<"Icon:   "<<s.icon_<<endl;
+        _ros<<"Name:      "<<s.name_<<endl;
+        _ros<<"Command:   "<<s.command_<<endl;
+        _ros<<"Arguments: "<<s.arguments_<<endl;
+        _ros<<"Run Fld:   "<<s.run_folder_<<endl;
+        _ros<<"Icon:      "<<s.icon_<<endl;
         _ros<<endl;
     }
     _ros<<"}\n";
@@ -668,6 +669,7 @@ void handle_fetch_config(istream& _ris, Engine &_reng){
         if(_rrecv_msg_ptr && _rrecv_msg_ptr->error_ == 0){
             cout<<"{\n";
             cout<<"Remote Root: "<<utility::base64_encode(_rrecv_msg_ptr->storage_id_)<<endl;
+            cout<<"Build unique: "<<_rrecv_msg_ptr->build_unique_<<endl;
             cout<<_rrecv_msg_ptr->build_configuration_;
             cout<<endl;
             cout<<"}"<<endl;
@@ -683,6 +685,86 @@ void handle_fetch_config(istream& _ris, Engine &_reng){
     solid_check(prom.get_future().wait_for(chrono::seconds(100)) == future_status::ready, "Taking too long - waited 100 secs");
 }
 
+uint64_t stream_copy(std::ostream &_ros, std::istream &_ris){
+    constexpr size_t buffer_size = 1024 * 32;
+    char buffer[buffer_size];
+    uint64_t size = 0;
+    
+    do{
+        _ris.read(buffer, buffer_size);
+        auto read_count = _ris.gcount();
+        if(read_count){
+            _ros.write(buffer, read_count);
+            size += read_count;
+        }
+    }while(!_ris.eof());
+    return size;
+}
+
+bool fetch_remote_file(Engine &_reng, promise<uint32_t> &_rprom, ofstream &_rofs, std::shared_ptr<FetchStoreRequest>&  _rreq_msg_ptr, uint64_t &_rfile_size){
+    
+    auto lambda = [&_rprom, &_rofs, &_reng, &_rfile_size](
+        frame::mprpc::ConnectionContext&        _rctx,
+        std::shared_ptr<FetchStoreRequest>&  _rsent_msg_ptr,
+        std::shared_ptr<FetchStoreResponse>& _rrecv_msg_ptr,
+        ErrorConditionT const&                  _rerror
+    ){
+        
+        if(_rrecv_msg_ptr){
+            if(_rrecv_msg_ptr->error_ == 0){
+                _rrecv_msg_ptr->ioss_.seekg(0);
+                _rfile_size += stream_copy(_rofs, _rrecv_msg_ptr->ioss_);
+                if(_rrecv_msg_ptr->size_ > 0){
+                    _rsent_msg_ptr->offset_ = _rfile_size;
+                    fetch_remote_file(_reng, _rprom, _rofs, _rsent_msg_ptr, _rfile_size);
+                }else{
+                    _rprom.set_value(0);
+                }
+            }else{
+                _rprom.set_value(_rrecv_msg_ptr->error_);
+            }
+        }else{
+            _rprom.set_value(-1);
+        }
+    };
+    
+    auto err = _reng.rpcService().sendRequest(_reng.serverEndpoint().c_str(), _rreq_msg_ptr, lambda);
+    if(err){
+        _rprom.set_value(-1);
+    }
+    
+}
+
+void handle_fetch_store(istream& _ris, Engine &_reng){
+    auto req_ptr = make_shared<FetchStoreRequest>();
+    string local_path;
+    
+    _ris>>req_ptr->storage_id_;
+    _ris>>req_ptr->path_;
+    _ris>>local_path;
+    
+    req_ptr->storage_id_ = utility::base64_decode(req_ptr->storage_id_);
+    
+    ofstream ofs(local_path);
+    
+    if(ofs){
+        promise<uint32_t> prom;
+        uint64_t file_size = 0;
+        fetch_remote_file(_reng, prom, ofs, req_ptr, file_size);
+        
+        auto fut = prom.get_future();
+        solid_check(fut.wait_for(chrono::seconds(100)) == future_status::ready, "Taking too long - waited 100 secs");
+        auto err = fut.get();
+        if(err == 0){
+            cout<<"File transferred: "<<file_size<<endl;
+        }else{
+            cout<<"File transfer failed: "<<err<<endl; 
+        }
+    }else{
+        cout<<"Error opening for writing local file: "<<local_path<<endl;
+    }
+}
+
 //-----------------------------------------------------------------------------
 
 void handle_fetch(istream& _ris, Engine& _reng){
@@ -695,6 +777,8 @@ void handle_fetch(istream& _ris, Engine& _reng){
         handle_fetch_build(_ris, _reng);
     }else if(what == "config"){
         handle_fetch_config(_ris, _reng);
+    }else if(what == "store"){
+        handle_fetch_store(_ris, _reng);
     }
 }
 
@@ -839,7 +923,7 @@ void handle_create_build(istream& _ris, Engine &_reng){
     {
         ifstream ifs(zip_path, std::ifstream::binary);
         if(ifs){
-            req_ptr->sha_sum_ = ola::utility::sha256(ifs);
+            req_ptr->sha_sum_ = ola::utility::sha256hex(ifs);
             cout<<"sha_sum for "<<zip_path<<": "<<req_ptr->sha_sum_<<endl;
         }else{
             cout<<"could not open "<<zip_path<<" for reading"<<endl;
@@ -936,15 +1020,15 @@ void handle_generate_app(istream& _ris, Engine &_reng){
     cfg.dictionary_dq_ = {
         {"", "en-US"},
         {"NAME", "bubbles"},
-        {"DESC", "bubbles description"},
+        {"DESCRIPTION", "bubbles description"},
         {"", "ro-RO"},
         {"NAME", "bule"},
-        {"DESC", "descriere bule"},
+        {"DESCRIPTION", "descriere bule"},
     };
     
     cfg.property_vec_ = {
         {"name", "${NAME}"},
-        {"desc", "${DESC}"}
+        {"description", "${DESCRIPTION}"}
     };
     store_app_config(cfg, path(config_path));
     {
@@ -968,15 +1052,15 @@ void handle_generate_buid(istream& _ris, Engine &_reng){
     cfg.dictionary_dq_ = {
         {"", "en-US"},
         {"NAME", "Bubbles"},
-        {"DESC", "Bubbles description"},
+        {"DESCRIPTION", "Bubbles description"},
         {"", "ro-RO"},
         {"NAME", "Bule"},
-        {"DESC", "Descriere Bule"},
+        {"DESCRIPTION", "Descriere Bule"},
     };
     
     cfg.property_vec_ = {
         {"name", "${NAME}"},
-        {"desc", "${DESC}"}
+        {"description", "${DESCRIPTION}"}
     };
     
     cfg.configuration_vec_ = ola::utility::Build::ConfigurationVectorT{
@@ -997,7 +1081,7 @@ void handle_generate_buid(istream& _ris, Engine &_reng){
                 },
                 {
                     {"name", "${NAME}"},
-                    {"desc", "${DESC}"}
+                    {"description", "${DESCRIPTION}"}
                 }//properties
             },
             {
@@ -1016,7 +1100,7 @@ void handle_generate_buid(istream& _ris, Engine &_reng){
                 },
                 {
                     {"name", "${NAME}"},
-                    {"desc", "${DESC}"}
+                    {"description", "${DESCRIPTION}"}
                 }//properties
             }
         }
@@ -1101,7 +1185,7 @@ void Engine::authRun(){
             cout<<"User: "<<flush;cin>>req_ptr->auth_;
             cout<<"Pass: "<<flush;cin>>req_ptr->pass_;
         
-            req_ptr->pass_ = ola::utility::sha256(req_ptr->pass_);
+            req_ptr->pass_ = ola::utility::sha256hex(req_ptr->pass_);
         }
         
         promise<int> prom;
@@ -1538,6 +1622,7 @@ bool load_build_config(ola::utility::Build &_rcfg, const string &_path){
                     
                     it->lookupValue("name", s.name_);
                     it->lookupValue("command", s.command_);
+                    it->lookupValue("arguments", s.arguments_);
                     it->lookupValue("run_folder", s.run_folder_);
                     it->lookupValue("icon", s.icon_);
                     
@@ -1631,6 +1716,7 @@ bool store_build_config(const ola::utility::Build &_rcfg, const string &_path){
                 Setting &g  = shortcut_list.add(Setting::TypeGroup);
                 g.add("name", Setting::TypeString) = v.name_;
                 g.add("command", Setting::TypeString) = v.command_;
+                g.add("arguments", Setting::TypeString) = v.arguments_;
                 g.add("icon", Setting::TypeString) = v.icon_;
                 g.add("run_folder", Setting::TypeString) = v.run_folder_;
             }

@@ -1,5 +1,6 @@
 #include "gui_auth_widget.hpp"
 #include "ui_gui_auth_form.h"
+#include <QKeyEvent>
 
 #include "solid/system/log.hpp"
 
@@ -21,6 +22,9 @@ AuthWidget::AuthWidget(QWidget* parent)
 {
     pimpl_->form_.setupUi(this);
     setWindowFlags(Qt::Drawer);
+
+    installEventFilter(this);
+
     connect(pimpl_->form_.authButton, SIGNAL(clicked()), this, SLOT(onAuthClick()));
     connect(this, SIGNAL(offlineSignal(bool)), this, SLOT(onOffline(bool)), Qt::QueuedConnection);
     connect(this, SIGNAL(authFailSignal()), this, SLOT(onAuthFail()), Qt::QueuedConnection);
@@ -81,6 +85,21 @@ void AuthWidget::onAuthSuccess()
 void AuthWidget::closeEvent(QCloseEvent*)
 {
     QApplication::quit();
+}
+bool AuthWidget::eventFilter(QObject* obj, QEvent* event)
+{
+    if (event->type() == QEvent::KeyPress) {
+        QKeyEvent* key = static_cast<QKeyEvent*>(event);
+        if ((key->key() == Qt::Key_Enter) || (key->key() == Qt::Key_Return)) {
+            onAuthClick();
+        } else {
+            return QObject::eventFilter(obj, event);
+        }
+        return true;
+    } else {
+        return QObject::eventFilter(obj, event);
+    }
+    return false;
 }
 
 } //namespace gui
