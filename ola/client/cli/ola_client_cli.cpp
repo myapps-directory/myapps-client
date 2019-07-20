@@ -732,7 +732,7 @@ bool fetch_remote_file(Engine &_reng, promise<uint32_t> &_rprom, ofstream &_rofs
     if(err){
         _rprom.set_value(-1);
     }
-    
+    return true;
 }
 
 void handle_fetch_store(istream& _ris, Engine &_reng){

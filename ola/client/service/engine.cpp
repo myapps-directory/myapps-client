@@ -451,6 +451,7 @@ public:
 
 public:
     void onFrontConnectionStart(frame::mprpc::ConnectionContext& _ctx);
+    void onFrontConnectionInit(frame::mprpc::ConnectionContext& _ctx);
     void onFrontAuthResponse(
         frame::mprpc::ConnectionContext&      _ctx,
         const front::AuthRequest&             _rreq,
@@ -1310,6 +1311,26 @@ void Engine::Implementation::tryAuthenticate(frame::mprpc::ConnectionContext& _c
 }
 
 void Engine::Implementation::onFrontConnectionStart(frame::mprpc::ConnectionContext& _ctx)
+{
+    auto req_ptr = std::make_shared<front::InitRequest>();
+    auto lambda  = [this](
+                      frame::mprpc::ConnectionContext&      _rctx,
+                      std::shared_ptr<front::InitRequest>&  _rsent_msg_ptr,
+                      std::shared_ptr<front::InitResponse>& _rrecv_msg_ptr,
+                      ErrorConditionT const&                _rerror) {
+        if (_rrecv_msg_ptr) {
+            if (_rrecv_msg_ptr->error_ == 0) {
+                onFrontConnectionInit(_rctx);
+            } else {
+                cout << "ERROR initiating connection: version " << _rctx.peerVersionMajor() << '.' << _rctx.peerVersionMinor() << " error " << _rrecv_msg_ptr->error_ << ':' << _rrecv_msg_ptr->message_ << endl;
+            }
+        }
+    };
+
+    _ctx.service().sendRequest(_ctx.recipientId(), req_ptr, lambda);
+}
+
+void Engine::Implementation::onFrontConnectionInit(frame::mprpc::ConnectionContext& _ctx)
 {
     tryAuthenticate(_ctx);
 }
