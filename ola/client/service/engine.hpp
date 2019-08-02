@@ -53,7 +53,7 @@ public:
     void start(const Configuration& _rcfg);
     void stop();
 
-    Descriptor* open(const fs::path& _path);
+    Descriptor* open(const fs::path& _path, uint32_t _create_flags);
 
     void cleanup(Descriptor* _pdesc);
 

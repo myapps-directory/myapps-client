@@ -585,6 +585,9 @@ NTSTATUS FileSystemService::OnStart(ULONG argc, PWSTR *argv)
 	
 	EnableBackupRestorePrivileges();
 
+	host_.SetCaseSensitiveSearch(TRUE);
+	host_.SetFlushAndPurgeOnCleanup(TRUE);
+
 	Result = host_.Mount(const_cast<PWSTR>(params_.mount_point_.c_str()), 0, FALSE, DebugFlags);
 	if (!NT_SUCCESS(Result)) {
 		log_fail(L"cannot mount file system");
@@ -807,7 +810,7 @@ NTSTATUS FileSystem::Open(
 {
     //skip the first separator
     ++FileName;
-    *PFileDesc = engine().open(FileName);
+    *PFileDesc = engine().open(FileName, CreateOptions);
 
     if(*PFileDesc != nullptr){
         return GetFileInfo(*PFileNode, *PFileDesc, &OpenFileInfo->FileInfo);

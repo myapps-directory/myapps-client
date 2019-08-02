@@ -30,6 +30,7 @@
 #include <mutex>
 #include <unordered_map>
 #include <variant>
+#include <atomic>
 
 using namespace solid;
 using namespace std;
@@ -436,6 +437,7 @@ struct Engine::Implementation {
     string                    language_id_;
     ShortcutCreator           shortcut_creator_;
     file_cache::Engine        file_cache_engine_;
+	atomic<size_t>			  open_count_ = 0;
 
 public:
     Implementation(
@@ -720,16 +722,16 @@ bool Engine::info(const fs::path& _path, NodeTypeE& _rnode_type, uint64_t& _rsiz
     return false;
 }
 
-Descriptor* Engine::open(const fs::path& _path)
+Descriptor* Engine::open(const fs::path& _path, uint32_t _create_flags)
 {
-
     EntryPointerT      entry_ptr = atomic_load(&pimpl_->root_entry_ptr_);
     mutex&             rmutex    = entry_ptr->mutex();
     unique_lock<mutex> lock{rmutex};
 
     if (pimpl_->entry(_path, entry_ptr, lock)) {
         auto pdesc = new Descriptor(std::move(entry_ptr));
-        solid_log(logger, Verbose, "OPEN: " << _path.generic_path() << " -> " << pdesc << " entry: " << pdesc->entry_ptr_.get());
+        ++pimpl_->open_count_;
+        solid_log(logger, Verbose, "OPEN: " << _create_flags<<' '<< _path.generic_path() << " -> " << pdesc << " entry: " << pdesc->entry_ptr_.get() << " open_count = " << pimpl_->open_count_);
         return pdesc;
     }
     return nullptr;
@@ -737,16 +739,19 @@ Descriptor* Engine::open(const fs::path& _path)
 
 void Engine::cleanup(Descriptor* _pdesc)
 {
+    solid_log(logger, Verbose, "CLEANUP: " << _pdesc << " entry: " << _pdesc->entry_ptr_.get() << " open_count = " << pimpl_->open_count_);
 }
 
 void Engine::close(Descriptor* _pdesc)
 {
+    --pimpl_->open_count_;
+
     if (_pdesc->entry_ptr_->type_ == EntryTypeE::File) {
         mutex&             rmutex = _pdesc->entry_ptr_->mutex();
         unique_lock<mutex> lock{rmutex};
         size_t             use_cnt = _pdesc->entry_ptr_.use_count();
 
-        solid_log(logger, Verbose, "CLOSE: " << _pdesc << " entry: " << _pdesc->entry_ptr_.get() << " use count = " << use_cnt);
+        solid_log(logger, Verbose, "CLOSE: " << _pdesc << " entry: " << _pdesc->entry_ptr_.get() << " use count = " << use_cnt << " open_count = " << pimpl_->open_count_);
         if (use_cnt == 2) {
             pimpl_->file_cache_engine_.close(*get<FileDataPointerT>(_pdesc->entry_ptr_->data_var_));
             _pdesc->entry_ptr_->data_var_ = UniqueIdT();
@@ -755,7 +760,7 @@ void Engine::close(Descriptor* _pdesc)
             pimpl_->file_cache_engine_.flush(*get<FileDataPointerT>(_pdesc->entry_ptr_->data_var_));
         }
     } else {
-        solid_log(logger, Verbose, "CLOSE: " << _pdesc << " entry: " << _pdesc->entry_ptr_.get());
+        solid_log(logger, Verbose, "CLOSE: " << _pdesc << " entry: " << _pdesc->entry_ptr_.get() << " open_count = " << pimpl_->open_count_);
     }
     delete _pdesc;
 }

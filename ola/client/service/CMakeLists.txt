@@ -49,5 +49,26 @@ if(WIN32)
         ${Boost_FILESYSTEM_LIBRARY}
     )
 
+    add_executable(passthrough_c passthrough_c.cpp)
+
+    if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+        target_link_options(passthrough_c PRIVATE /DELAYLOAD:winfsp-x64.dll)
+    else()
+        target_link_options(passthrough_c PRIVATE /DELAYLOAD:winfsp-x86.dll)
+    endif()
+
+    target_link_libraries(passthrough_c
+        ${FUSE_LIBRARY}
+		ola_utility
+        solid_frame_mprpc
+        solid_frame_aio_openssl
+        solid_serialization_v2
+        ${OPENSSL_LIBRARIES}
+		${SNAPPY_LIB}
+        ${Boost_PROGRAM_OPTIONS_LIBRARY}
+        ${Boost_SYSTEM_LIBRARY}
+        ${Boost_FILESYSTEM_LIBRARY}
+    )
+
     add_executable(test_security test_security.cpp)
 endif(WIN32)
