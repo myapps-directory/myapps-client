@@ -25,12 +25,12 @@
 #include <boost/filesystem.hpp>
 #include <boost/functional/hash.hpp>
 
+#include <atomic>
 #include <condition_variable>
 #include <fstream>
 #include <mutex>
 #include <unordered_map>
 #include <variant>
-#include <atomic>
 
 using namespace solid;
 using namespace std;
@@ -437,7 +437,7 @@ struct Engine::Implementation {
     string                    language_id_;
     ShortcutCreator           shortcut_creator_;
     file_cache::Engine        file_cache_engine_;
-	atomic<size_t>			  open_count_ = 0;
+    atomic<size_t>            open_count_ = 0;
 
 public:
     Implementation(
@@ -731,7 +731,7 @@ Descriptor* Engine::open(const fs::path& _path, uint32_t _create_flags)
     if (pimpl_->entry(_path, entry_ptr, lock)) {
         auto pdesc = new Descriptor(std::move(entry_ptr));
         ++pimpl_->open_count_;
-        solid_log(logger, Verbose, "OPEN: " << _create_flags<<' '<< _path.generic_path() << " -> " << pdesc << " entry: " << pdesc->entry_ptr_.get() << " open_count = " << pimpl_->open_count_);
+        solid_log(logger, Verbose, "OPEN: " << _create_flags << ' ' << _path.generic_path() << " -> " << pdesc << " entry: " << pdesc->entry_ptr_.get() << " open_count = " << pimpl_->open_count_);
         return pdesc;
     }
     return nullptr;
