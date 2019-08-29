@@ -201,12 +201,12 @@ int main(int argc, char* argv[])
     scheduler.start(1);
 
     {
-        string home = get_home_env();
+        boost::filesystem::path home = get_home_env();
         if (home.empty()) {
-            home = '.';
+            home = ".";
         }
-        home += "/.ola";
-        engine.path_prefix_ = std::move(home);
+        home /= ".ola";
+        engine.path_prefix_ = home.string();
     }
 
     engine.start();
@@ -285,6 +285,7 @@ int main(int argc, char* argv[])
         }
     }
     rx.history_save(history_file);
+    cout << "command history written to: " << history_file << endl;
 #else
     string line;
 
@@ -1445,18 +1446,47 @@ void Engine::onAuthResponse(frame::mprpc::ConnectionContext &_ctx, AuthResponse 
 
 string get_home_env()
 {
+#ifdef SOLID_ON_WINDOWS
+	const char* pname = getenv("HOME");
+	if(pname == nullptr){
+		const char *pdrive = getenv("HOMEDRIVE");
+		if(pdrive == nullptr){
+			return "c:";
+		}else{
+			pname = getenv("HOMEPATH");
+			if(pname == nullptr){
+				return pdrive; 
+			}else{
+				return string(pdrive) + pname;
+			}
+		}
+	}
+#else
     const char* pname = getenv("HOME");
 
     return pname == nullptr ? "" : pname;
+#endif
 }
 
 string get_temp_env()
 {
+#ifdef SOLID_ON_WINDOWS
+	const char* v = getenv("TEMP");
+    if (v == nullptr) {
+        v = getenv("TMP");
+        if (v == nullptr) {
+            v = "c:";
+        }
+    }
+
+    return v;
+#else
     const char* pname = getenv("temp");
     if(pname == nullptr){
         pname = getenv("tmp");
     }
     return pname == nullptr ? "/tmp" : pname;
+#endif
 }
 
 //-----------------------------------------------------------------------------

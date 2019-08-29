@@ -12,7 +12,11 @@ ExternalProject_Add(
 set(LIBREPLXX_FOUND TRUE)
 
 if(WIN32)
-    set(LIBREPLXX_LIBRARIES libreplxx)
+    if(CMAKE_BUILD_TYPE MATCHES "debug")
+        set(LIBREPLXX_LIBRARIES replxx-d)
+    else()
+        set(LIBREPLXX_LIBRARIES replxx)
+    endif()
 else()
     set(LIBREPLXX_LIBRARIES replxx)
 endif()
