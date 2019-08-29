@@ -14,8 +14,9 @@ target_link_libraries (ola_client_cli
     ${SYSTEM_DYNAMIC_LOAD_LIBRARY}
     ${LIBCONFIG_LIBRARIES}
     ${LIBZIP_LIBRARIES}
+    ${LIBREPLXX_LIBRARIES}
     Threads::Threads
 )
 
-add_dependencies(ola_client_cli build-snappy build-config build-libzip)
+add_dependencies(ola_client_cli build-snappy build-config build-libzip build-replxx)
 

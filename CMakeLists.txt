@@ -83,6 +83,8 @@ include(cmake/build-config.cmake)
 
 include(cmake/build-libzip.cmake)
 
+include(cmake/build-replxx.cmake)
+
 if(UNIX AND NOT APPLE)
     set(LINUX TRUE)
 endif()

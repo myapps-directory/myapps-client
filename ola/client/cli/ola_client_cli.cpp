@@ -22,6 +22,9 @@
 
 #include "boost/filesystem.hpp"
 
+#include <iomanip>
+
+#include "replxx.hxx"
 #include "zip.h"
 
 #define LIBCONFIGXX_STATIC
@@ -39,6 +42,8 @@ using namespace std;
 using namespace solid;
 using namespace ola;
 using namespace ola::front;
+
+using Replxx = replxx::Replxx;
 
 namespace {
 
@@ -208,6 +213,79 @@ int main(int argc, char* argv[])
 
     configure_service(engine, scheduler, resolver);
 
+    Replxx rx;
+    rx.install_window_change_handler();
+
+    // the path to the history file
+    const std::string history_file{engine.path_prefix_ + "/history.txt"};
+
+    // load the history file if it exists
+    rx.history_load(history_file);
+
+    // set the max history size
+    rx.set_max_history_size(128);
+
+    // set the max number of hint rows to show
+    rx.set_max_hint_rows(3);
+
+#if 1
+    const std::string prompt{"> "};
+    for (;;) {
+        // display the prompt and retrieve input from the user
+        char const* cinput{nullptr};
+
+        do {
+            cinput = rx.input(prompt);
+        } while ((cinput == nullptr) && (errno == EAGAIN));
+
+        if (cinput == nullptr) {
+            break;
+        }
+
+        // change cinput into a std::string
+        // easier to manipulate
+        string        line{cinput};
+        istringstream iss(cinput);
+        string        cmd;
+        iss >> cmd;
+
+        if (line == "q" || line == "Q" || line == "quit") {
+            rx.history_add(line);
+            break;
+        }
+
+        if (cmd == "list") {
+            handle_list(iss, engine);
+            rx.history_add(line);
+        } else if (cmd == "fetch") {
+            handle_fetch(iss, engine);
+            rx.history_add(line);
+        } else if (cmd == "create") {
+            handle_create(iss, engine);
+            rx.history_add(line);
+        } else if (cmd == "generate") {
+            handle_generate(iss, engine);
+            rx.history_add(line);
+        } else if (cmd == "acquire") {
+            handle_acquire(iss, engine);
+            rx.history_add(line);
+        } else if (cmd == "help" || line == "h") {
+            handle_help(iss, engine);
+            rx.history_add(line);
+        } else if (cmd == "clear") {
+            rx.clear_screen();
+
+            rx.history_add(line);
+        } else if (cmd == "history") {
+            for (size_t i = 0, sz = rx.history_size(); i < sz; ++i) {
+                std::cout << std::setw(4) << i << ": " << rx.history_line(i) << "\n";
+            }
+
+            rx.history_add(line);
+        }
+    }
+    rx.history_save(history_file);
+#else
     string line;
 
     while (true) {
@@ -238,6 +316,8 @@ int main(int argc, char* argv[])
             handle_help(iss, engine);
         }
     }
+
+#endif
     engine.stop();
     rpc_service.stop(); //need this because rpc_service uses the engine
     return 0;
