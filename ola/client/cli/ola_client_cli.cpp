@@ -460,7 +460,7 @@ void handle_help(istream& _ris, Engine &_reng){
 //  List
 //-----------------------------------------------------------------------------
 
-void handle_list_oses(istream& _ris, Engine &_reng){
+void handle_list_oses(istream& /*_ris*/, Engine &_reng){
     auto req_ptr = make_shared<ListOSesRequest>();
     
     promise<void> prom;
@@ -529,8 +529,8 @@ void handle_list_apps(istream& _ris, Engine &_reng){
 void handle_list_store(istream& _ris, Engine &_reng){
     auto req_ptr = make_shared<ListStoreRequest>();
     
-    _ris>>req_ptr->storage_id_;
-    _ris>>req_ptr->path_;
+    _ris>>std::quoted(req_ptr->storage_id_);
+    _ris>>std::quoted(req_ptr->path_);
     
     req_ptr->storage_id_ = utility::base64_decode(req_ptr->storage_id_);
     
@@ -566,7 +566,7 @@ void handle_list_store(istream& _ris, Engine &_reng){
 
 void handle_list(istream& _ris, Engine &_reng){
     string what;
-    _ris>>what;
+    _ris>>std::quoted(what);
     
     if(what == "oses"){
         handle_list_oses(_ris, _reng);
@@ -598,8 +598,8 @@ ostream& operator<<(ostream &_ros, const utility::Application &_cfg){
 void handle_fetch_app(istream& _ris, Engine &_reng){
      auto req_ptr = make_shared<FetchAppRequest>();
     
-    _ris>>req_ptr->app_id_;
-    _ris>>req_ptr->lang_;
+    _ris>>std::quoted(req_ptr->app_id_);
+    _ris>>std::quoted(req_ptr->lang_);
     
     req_ptr->app_id_ = utility::base64_decode(req_ptr->app_id_);
     
@@ -690,8 +690,8 @@ ostream& operator<<(ostream &_ros, const utility::Build &_cfg){
 void handle_fetch_build(istream& _ris, Engine &_reng){
     auto req_ptr = make_shared<FetchBuildRequest>();
     
-    _ris>>req_ptr->app_id_;
-    _ris>>req_ptr->build_id_;
+    _ris>>std::quoted(req_ptr->app_id_);
+    _ris>>std::quoted(req_ptr->build_id_);
     
     req_ptr->app_id_ = utility::base64_decode(req_ptr->app_id_);
     req_ptr->build_id_ = utility::base64_decode(req_ptr->build_id_);
@@ -725,9 +725,9 @@ void handle_fetch_build(istream& _ris, Engine &_reng){
 void handle_fetch_config(istream& _ris, Engine &_reng){
     auto req_ptr = make_shared<FetchBuildConfigurationRequest>();
     
-    _ris>>req_ptr->app_id_;
-    _ris>>req_ptr->lang_;
-    _ris>>req_ptr->os_id_;
+    _ris>>std::quoted(req_ptr->app_id_);
+    _ris>>std::quoted(req_ptr->lang_);
+    _ris>>std::quoted(req_ptr->os_id_);
     
     while(_ris){
         string prop;
@@ -820,9 +820,9 @@ void handle_fetch_store(istream& _ris, Engine &_reng){
     auto req_ptr = make_shared<FetchStoreRequest>();
     string local_path;
     
-    _ris>>req_ptr->storage_id_;
-    _ris>>req_ptr->path_;
-    _ris>>local_path;
+    _ris>>std::quoted(req_ptr->storage_id_);
+    _ris>>std::quoted(req_ptr->path_);
+    _ris>>std::quoted(local_path);
     
     req_ptr->storage_id_ = utility::base64_decode(req_ptr->storage_id_);
     
@@ -850,7 +850,7 @@ void handle_fetch_store(istream& _ris, Engine &_reng){
 
 void handle_fetch(istream& _ris, Engine& _reng){
     string what;
-    _ris>>what;
+    _ris>>std::quoted(what);
     
     if(what == "app"){
         handle_fetch_app(_ris, _reng);
@@ -873,7 +873,7 @@ string generate_temp_name();
 
 void handle_create_app ( istream& _ris, Engine &_reng){
     string config_path;
-    _ris>>config_path;
+    _ris>>std::quoted(config_path);
     
     auto req_ptr = make_shared<CreateAppRequest>();
     
@@ -983,8 +983,8 @@ void handle_create_build(istream& _ris, Engine &_reng){
     auto req_ptr = make_shared<CreateBuildRequest>();
     
     string config_path, build_path;
-    _ris>>req_ptr->app_id_>>req_ptr->unique_;
-    _ris>>config_path>>build_path;
+    _ris>>std::quoted(req_ptr->app_id_)>>std::quoted(req_ptr->unique_);
+    _ris>>std::quoted(config_path)>>std::quoted(build_path);
     
     req_ptr->app_id_ = ola::utility::base64_decode(req_ptr->app_id_);
     
@@ -1079,7 +1079,7 @@ void handle_create_build(istream& _ris, Engine &_reng){
 
 void handle_create(istream& _ris, Engine &_reng){
     string what;
-    _ris>>what;
+    _ris>>std::quoted(what);
     
     if(what == "app"){
         handle_create_app(_ris, _reng);
@@ -1094,7 +1094,7 @@ void handle_create(istream& _ris, Engine &_reng){
 
 void handle_generate_app(istream& _ris, Engine &_reng){
     string config_path;
-    _ris>>config_path;
+    _ris>>std::quoted(config_path);
     
     ola::utility::Application cfg;
     
@@ -1123,7 +1123,7 @@ void handle_generate_app(istream& _ris, Engine &_reng){
 
 void handle_generate_buid(istream& _ris, Engine &_reng){
     string config_path;
-    _ris>>config_path;
+    _ris>>std::quoted(config_path);
     
     ola::utility::Build cfg;
     
@@ -1199,7 +1199,7 @@ void handle_generate_buid(istream& _ris, Engine &_reng){
 
 void handle_generate(istream& _ris, Engine &_reng){
     string what;
-    _ris>>what;
+    _ris>>std::quoted(what);
     
     if(what == "app"){
         handle_generate_app(_ris, _reng);
@@ -1216,7 +1216,7 @@ void handle_generate(istream& _ris, Engine &_reng){
 void handle_acquire_app(istream& _ris, Engine &_reng){
     auto req_ptr = make_shared<AcquireAppRequest>();
     
-    _ris>>req_ptr->app_id_;
+    _ris>>std::quoted(req_ptr->app_id_);
     
     req_ptr->app_id_ = ola::utility::base64_decode(req_ptr->app_id_);
     
@@ -1244,7 +1244,7 @@ void handle_acquire_app(istream& _ris, Engine &_reng){
 
 void handle_acquire(istream& _ris, Engine &_reng){
     string what;
-    _ris>>what;
+    _ris>>std::quoted(what);
     
     if(what == "app"){
         handle_acquire_app(_ris, _reng);

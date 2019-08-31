@@ -18,5 +18,5 @@ target_link_libraries (ola_client_cli
     Threads::Threads
 )
 
-add_dependencies(ola_client_cli build-snappy build-config build-libzip build-replxx)
+add_dependencies(ola_client_cli build-snappy build-config build-libzip build-replxx build-cereal)
 
