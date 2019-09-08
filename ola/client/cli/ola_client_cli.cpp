@@ -440,7 +440,7 @@ void handle_help(istream& _ris, Engine &_reng){
     cout<<"> fetch config APP_ID LANGUAGE_ID OS_ID\n\n"; 
     cout<<"> generate app ~/path/to/app.cfg\n\n";
     cout<<"> generate build ~/path/to/build.cfg\n\n";
-    cout<<"> create app ~/path/to/app.cfg\n\n";
+    cout<<"> create app\n\n";
     cout<<"> create build APP_ID BUILD_TAG ~/path/to/build.cfg ~/path/to/build_folder\n";
     cout<<"\nExamples:\n:";
     cout<<"> create app bubbles.app\n";
@@ -866,20 +866,23 @@ void handle_fetch(istream& _ris, Engine& _reng){
 //-----------------------------------------------------------------------------
 //  Create
 //-----------------------------------------------------------------------------
-
+#ifdef APP_CONFIG
 bool load_app_config(ola::utility::Application &_rcfg, const string &_path);
 bool store_app_config(const ola::utility::Application &_rcfg, const string &_path);
+#endif
 string generate_temp_name();
 
 void handle_create_app ( istream& _ris, Engine &_reng){
-    string config_path;
-    _ris>>std::quoted(config_path);
-    
     auto req_ptr = make_shared<CreateAppRequest>();
+    
+#ifdef APP_CONFIG
+    string config_path;
+    //_ris>>std::quoted(config_path);
     
     if(!load_app_config(req_ptr->application_, path(config_path))){
         return;
     }
+#endif
     
     promise<void> prom;
     
@@ -1091,7 +1094,7 @@ void handle_create(istream& _ris, Engine &_reng){
 //-----------------------------------------------------------------------------
 //  Generate
 //-----------------------------------------------------------------------------
-
+#ifdef APP_CONFIG
 void handle_generate_app(istream& _ris, Engine &_reng){
     string config_path;
     _ris>>std::quoted(config_path);
@@ -1118,6 +1121,7 @@ void handle_generate_app(istream& _ris, Engine &_reng){
         solid_check(cfg == cfg_check);
     }
 }
+#endif
 
 //-----------------------------------------------------------------------------
 
@@ -1200,10 +1204,13 @@ void handle_generate_buid(istream& _ris, Engine &_reng){
 void handle_generate(istream& _ris, Engine &_reng){
     string what;
     _ris>>std::quoted(what);
-    
+
+#ifdef APP_CONFIG
     if(what == "app"){
         handle_generate_app(_ris, _reng);
-    }else if(what == "build"){
+    }else
+#endif
+    if(what == "build"){
         handle_generate_buid(_ris, _reng);
     }
 }
