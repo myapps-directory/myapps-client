@@ -440,8 +440,8 @@ void handle_help(istream& _ris, Engine &_reng){
     cout<<"> fetch config APP_ID LANGUAGE_ID OS_ID\n\n"; 
     cout<<"> generate app ~/path/to/app.cfg\n\n";
     cout<<"> generate build ~/path/to/build.cfg\n\n";
-    cout<<"> create app\n\n";
-    cout<<"> create build APP_ID BUILD_TAG ~/path/to/build.cfg ~/path/to/build_folder\n";
+    cout<<"> create app APP_NAME\n\n";
+    cout<<"> create build APP_ID BUILD_TAG ~/path/to/build.cfg ~/path/to/build_folder ~/path/to/build_icon.png\n";
     cout<<"\nExamples:\n:";
     cout<<"> create app bubbles.app\n";
     cout<<"> create build l/AQPpeZWqoR1Fcngt3t2w== first bubbles.bld ~/tmp/bubbles_client\n";
@@ -582,16 +582,8 @@ void handle_list(istream& _ris, Engine &_reng){
 //-----------------------------------------------------------------------------
 
 ostream& operator<<(ostream &_ros, const utility::Application &_cfg){
-    _ros<<"Dictionary:{";
-    for(const auto& p: _cfg.dictionary_dq_){
-        _ros<<"{["<<p.first<<"]["<<p.second<<"]} ";
-    }
-    _ros<<'}'<<endl;
-    _ros<<"Properties:{";
-    for(const auto& p: _cfg.property_vec_){
-        _ros<<"{["<<p.first<<"]["<<p.second<<"]} ";
-    }
-    _ros<<'}'<<endl;
+
+    _ros<<"Name: "<<_cfg.name_<<endl;
     return _ros;
 }
 
@@ -883,6 +875,8 @@ void handle_create_app ( istream& _ris, Engine &_reng){
         return;
     }
 #endif
+
+    _ris>>req_ptr->application_.name_;
     
     promise<void> prom;
     
@@ -981,17 +975,44 @@ void on_upload_receive_response(
 }
 
 //-----------------------------------------------------------------------------
+bool load_icon(std::vector<char> &_ricon_blob, const std::string &_path){
+    std::ifstream ifs{_path, std::ios::binary};
+    
+    if(!ifs){
+        cout<<"Cannot open: "<<_path<<endl;
+        return false;
+    }
+    
+    std::streampos fsize = 0;
+    fsize = ifs.tellg();
+    ifs.seekg( 0, std::ios::end );
+    fsize = ifs.tellg() - fsize;
+    ifs.seekg(0);
+    
+    _ricon_blob.reserve(fsize);
+    
+    
+    char *pbuf = const_cast<char*>(_ricon_blob.data());
+    
+    ifs.read(pbuf, fsize);
+    
+    return ifs.gcount() == fsize;
+}
 
 void handle_create_build(istream& _ris, Engine &_reng){
     auto req_ptr = make_shared<CreateBuildRequest>();
     
-    string config_path, build_path;
+    string config_path, build_path, icon_path;
     _ris>>std::quoted(req_ptr->app_id_)>>std::quoted(req_ptr->unique_);
-    _ris>>std::quoted(config_path)>>std::quoted(build_path);
+    _ris>>std::quoted(config_path)>>std::quoted(build_path)>>std::quoted(icon_path);
     
     req_ptr->app_id_ = ola::utility::base64_decode(req_ptr->app_id_);
     
     if(!load_build_config(req_ptr->build_, path(config_path))){
+        return;
+    }
+    
+    if(!load_icon(req_ptr->icon_blob_, path(icon_path))){
         return;
     }
     
@@ -1153,6 +1174,7 @@ void handle_generate_buid(istream& _ris, Engine &_reng){
             {
                 "windows32bit",
                 "${NAME}",//directory
+                ola::utility::Build::Configuration::compute_flags({"HiddenDirectory"}),
                 {"Windows10x86_32", "Windows10x86_64"},
                 {{"bin", "bin32"}, {"lib", "lib32"}},
                 {"bin/bubbles.exe"},
@@ -1172,6 +1194,7 @@ void handle_generate_buid(istream& _ris, Engine &_reng){
             {
                 "windows64bit",
                 "${NAME}",//directory
+                ola::utility::Build::Configuration::compute_flags({}),
                 {"Windows10x86_64"},
                 {{"bin", "bin64"}, {"lib", "lib64"}},
                 {"bin/bubbles.exe"},
@@ -1516,7 +1539,7 @@ bool read(string& _rs, istream& _ris, size_t _sz)
 }
 
 //-----------------------------------------------------------------------------
-
+#ifdef APP_CONFIG
 bool load_app_config(ola::utility::Application &_rcfg, const string &_path){
     using namespace libconfig;
     Config cfg;
@@ -1613,6 +1636,7 @@ bool store_app_config(const ola::utility::Application &_rcfg, const string &_pat
     }
     return true;
 }
+#endif
 
 //-----------------------------------------------------------------------------
 
@@ -1696,6 +1720,13 @@ bool load_build_config(ola::utility::Build &_rcfg, const string &_path){
                 return false;
             }
             
+            
+            if(it->exists("flags")){
+                Setting &flags = it->lookup("flags");
+                for(auto it = flags.begin(); it != flags.end(); ++it){
+                    c.flags_ |= ola::utility::Build::Configuration::flag(static_cast<const string&>(*it).c_str());
+                }
+            }
             
             if(it->exists("exes")){
                 Setting &exes = it->lookup("exes");
@@ -1805,6 +1836,15 @@ bool store_build_config(const ola::utility::Build &_rcfg, const string &_path){
         {
             cmp_g.add("name", Setting::TypeString) = component.name_;
             cmp_g.add("directory", Setting::TypeString) = component.directory_;
+            if(component.flags_){
+                Setting &flags = cmp_g.add("flags", Setting::TypeArray);
+                ola::utility::Build::Configuration::for_each_flag(
+                    component.flags_,
+                    [&flags](const char *_name){
+                        flags.add(Setting::TypeString) = std::string(_name);
+                    });
+            }
+            
             Setting &oses = cmp_g.add("oses", Setting::TypeArray);
             for(auto &v: component.os_vec_){
                 oses.add(Setting::TypeString) = v;
