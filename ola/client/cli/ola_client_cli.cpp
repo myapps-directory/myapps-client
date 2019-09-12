@@ -607,7 +607,8 @@ void handle_fetch_app(istream& _ris, Engine &_reng){
             cout<<"{\n";
             cout<<"Builds: ";
             for(const auto& build_id: _rrecv_msg_ptr->build_id_vec_){
-                cout<<utility::base64_encode(build_id)<<endl;
+                //cout<<utility::base64_encode(build_id)<<endl;
+                cout<<build_id<<endl;
             }
             cout<<endl;
             cout<<_rrecv_msg_ptr->application_;
@@ -686,7 +687,7 @@ void handle_fetch_build(istream& _ris, Engine &_reng){
     _ris>>std::quoted(req_ptr->build_id_);
     
     req_ptr->app_id_ = utility::base64_decode(req_ptr->app_id_);
-    req_ptr->build_id_ = utility::base64_decode(req_ptr->build_id_);
+    req_ptr->build_id_ = req_ptr->build_id_;//utility::base64_decode(req_ptr->build_id_);
     
     promise<void> prom;
     
@@ -699,6 +700,7 @@ void handle_fetch_build(istream& _ris, Engine &_reng){
         if(_rrecv_msg_ptr && _rrecv_msg_ptr->error_ == 0){
             cout<<"{\n";
             cout<<"Remote Root: "<<utility::base64_encode(_rrecv_msg_ptr->storage_id_)<<endl;
+            cout<<"Icon of size: "<<_rrecv_msg_ptr->icon_blob_.size()<<endl;
             cout<<_rrecv_msg_ptr->build_;
             cout<<endl;
             cout<<"}"<<endl;
@@ -990,7 +992,7 @@ bool load_icon(std::vector<char> &_ricon_blob, const std::string &_path){
     ifs.seekg(0);
     
     _ricon_blob.reserve(fsize);
-    
+    _ricon_blob.resize(fsize);
     
     char *pbuf = const_cast<char*>(_ricon_blob.data());
     
