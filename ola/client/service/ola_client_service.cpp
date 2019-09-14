@@ -661,17 +661,21 @@ NTSTATUS error_to_status(const ErrorE _err) {
 	};
 }
 
-uint32_t node_type_to_attributes(ola::client::service::NodeTypeE _node_type){
-	using ola::client::service::NodeTypeE;
+uint32_t node_flags_to_attributes(ola::client::service::NodeFlagsT _node_flags){
+	using ola::client::service::NodeFlagsE;
+	using ola::client::service::NodeFlagsT;
 	uint32_t attr = 0;
-	switch(_node_type){
-		case NodeTypeE::Directory:
-			attr |= FILE_ATTRIBUTE_DIRECTORY;
-			break;
-		case NodeTypeE::File:
-			attr |= FILE_ATTRIBUTE_NORMAL;
-			break;
+
+	if(_node_flags & node_flag(NodeFlagsE::Directory)){
+		attr |= FILE_ATTRIBUTE_DIRECTORY;
 	}
+	if(_node_flags & node_flag(NodeFlagsE::File)){
+		attr |= FILE_ATTRIBUTE_NORMAL;
+	}
+	if(_node_flags & node_flag(NodeFlagsE::Hidden)){
+		attr |= FILE_ATTRIBUTE_HIDDEN;
+	}
+
 	return attr;
 }
 
@@ -754,15 +758,15 @@ NTSTATUS FileSystem::GetSecurityByName(
     PSECURITY_DESCRIPTOR SecurityDescriptor,
     SIZE_T *PSecurityDescriptorSize)
 {
-    using ola::client::service::NodeTypeE;
+    using ola::client::service::NodeFlagsT;
 
 	if(PFileAttributes != nullptr){
 		++FileName;
-        NodeTypeE node_type;
+        NodeFlagsT node_flags;
 	    uint64_t size = 0;
-        if(engine().info(FileName, node_type, size)){
+        if(engine().info(FileName, node_flags, size)){
 
-		    *PFileAttributes = FILE_ATTRIBUTE_READONLY | FILE_ATTRIBUTE_NOT_CONTENT_INDEXED | node_type_to_attributes(node_type);
+		    *PFileAttributes = FILE_ATTRIBUTE_READONLY | FILE_ATTRIBUTE_NOT_CONTENT_INDEXED | node_flags_to_attributes(node_flags);
 
         }else{
             *PFileAttributes = 0;
@@ -894,13 +898,13 @@ NTSTATUS FileSystem::GetFileInfo(
     PVOID pFileDesc,
     FileInfo *FileInfo)
 {
-	using ola::client::service::NodeTypeE;
-    NodeTypeE node_type;
+	using ola::client::service::NodeFlagsT;
+    NodeFlagsT node_flags;
 	uint64_t size = 0;
     
-	engine().info(static_cast<service::Descriptor*>(pFileDesc), node_type, size);
+	engine().info(static_cast<service::Descriptor*>(pFileDesc), node_flags, size);
 
-	FileInfo->FileAttributes = FILE_ATTRIBUTE_READONLY | FILE_ATTRIBUTE_NOT_CONTENT_INDEXED | node_type_to_attributes(node_type);
+	FileInfo->FileAttributes = FILE_ATTRIBUTE_READONLY | FILE_ATTRIBUTE_NOT_CONTENT_INDEXED | node_flags_to_attributes(node_flags);
     FileInfo->ReparseTag     = 0;
     FileInfo->FileSize       = size;
     FileInfo->AllocationSize = (FileInfo->FileSize + ALLOCATION_UNIT - 1)
@@ -1017,10 +1021,10 @@ NTSTATUS FileSystem::ReadDirectoryEntry(
 	wstring	  name;
 	uint64_t	  size = 0;
 	uint32_t  attributes = FILE_ATTRIBUTE_READONLY | FILE_ATTRIBUTE_NOT_CONTENT_INDEXED;
-	NodeTypeE	node_type;
+	NodeFlagsT	node_flags;
 
-    if(engine().list(static_cast<service::Descriptor*>(pFileDesc), *pContext, name, node_type, size)){
-		attributes |= node_type_to_attributes(node_type);
+    if(engine().list(static_cast<service::Descriptor*>(pFileDesc), *pContext, name, node_flags, size)){
+		attributes |= node_flags_to_attributes(node_flags);
 	}else{
 		return STATUS_NO_MORE_FILES;
 	}

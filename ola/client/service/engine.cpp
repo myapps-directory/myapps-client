@@ -52,6 +52,16 @@ enum struct EntryTypeE : uint8_t {
     Shortcut
 };
 
+enum struct EntryFlagsE : uint8_t {
+    Hidden,
+};
+
+using EntryFlagsT = std::underlying_type<EntryFlagsE>::type;
+
+inline EntryFlagsT entry_flag(const EntryFlagsE _flag) {
+    return 1 << static_cast<EntryFlagsT>(_flag);
+}
+
 enum struct EntryStatusE : uint8_t {
     FetchRequired,
     FetchPending,
@@ -249,6 +259,7 @@ struct Entry {
     string                   remote_;
     EntryTypeE               type_   = EntryTypeE::Unknown;
     EntryStatusE             status_ = EntryStatusE::FetchRequired;
+    EntryFlagsT              flags_  = 0;
     std::weak_ptr<Entry>     parent_;
     uint64_t                 size_ = 0;
     EntryDataVariantT        data_var_;
@@ -321,6 +332,11 @@ struct Entry {
         }
     }
 
+    void flag(const EntryFlagsE _flag)
+    {
+        flags_ |= entry_flag(_flag);
+    }
+
     std::mutex& mutex() const
     {
         return rmutex_;
@@ -330,21 +346,26 @@ struct Entry {
         return rcv_;
     }
 
-    void info(NodeTypeE& _rnode_type, uint64_t& _rsize) const
+    void info(NodeFlagsT& _rnode_flags, uint64_t& _rsize) const
     {
-        _rsize = size_;
+        _rnode_flags = 0;
+        _rsize       = size_;
         switch (type_) {
         case EntryTypeE::Unknown:
             solid_throw("Unknown entry type");
             break;
         case EntryTypeE::File:
         case EntryTypeE::Shortcut:
-            _rnode_type = NodeTypeE::File;
+            _rnode_flags |= node_flag(NodeFlagsE::File);
             break;
         case EntryTypeE::Application:
         case EntryTypeE::Directory:
-            _rnode_type = NodeTypeE::Directory;
+            _rnode_flags |= node_flag(NodeFlagsE::Directory);
             break;
+        }
+
+        if (flags_ & entry_flag(EntryFlagsE::Hidden)) {
+            _rnode_flags |= node_flag(NodeFlagsE::Hidden);
         }
     }
 
@@ -494,7 +515,7 @@ public:
     bool list(
         EntryPointerT& _rentry_ptr,
         void*&         _rpctx,
-        std::wstring& _rname, NodeTypeE& _rnode_type, uint64_t& _rsize);
+        std::wstring& _rname, NodeFlagsT& _rnode_flags, uint64_t& _rsize);
     bool read(
         EntryPointerT& _rentry_ptr,
         char*          _pbuf,
@@ -707,15 +728,15 @@ void*& Engine::buffer(Descriptor& _rdesc)
     return _rdesc.pdirectory_buffer_;
 }
 
-bool Engine::info(const fs::path& _path, NodeTypeE& _rnode_type, uint64_t& _rsize)
+bool Engine::info(const fs::path& _path, NodeFlagsT& _rnode_flags, uint64_t& _rsize)
 {
     EntryPointerT      entry_ptr = atomic_load(&pimpl_->root_entry_ptr_);
     mutex&             rmutex    = entry_ptr->mutex();
     unique_lock<mutex> lock{rmutex};
 
     if (pimpl_->entry(_path, entry_ptr, lock)) {
-        entry_ptr->info(_rnode_type, _rsize);
-        solid_log(logger, Verbose, "INFO: " << _path.generic_path() << " " << static_cast<int>(_rnode_type) << " " << _rsize);
+        entry_ptr->info(_rnode_flags, _rsize);
+        solid_log(logger, Verbose, "INFO: " << _path.generic_path() << " " << static_cast<int>(_rnode_flags) << " " << _rsize);
         return true;
     }
     solid_log(logger, Verbose, "INFO: FAIL " << _path.generic_path());
@@ -872,17 +893,17 @@ bool Engine::Implementation::entry(const fs::path& _path, EntryPointerT& _rentry
     }
 }
 
-void Engine::info(Descriptor* _pdesc, NodeTypeE& _rnode_type, uint64_t& _rsize)
+void Engine::info(Descriptor* _pdesc, NodeFlagsT& _rnode_flags, uint64_t& _rsize)
 {
     auto&             m = _pdesc->entry_ptr_->mutex();
     lock_guard<mutex> lock(m);
 
-    _pdesc->entry_ptr_->info(_rnode_type, _rsize);
+    _pdesc->entry_ptr_->info(_rnode_flags, _rsize);
 }
 
-bool Engine::list(Descriptor* _pdesc, void*& _rpctx, std::wstring& _rname, NodeTypeE& _rnode_type, uint64_t& _rsize)
+bool Engine::list(Descriptor* _pdesc, void*& _rpctx, std::wstring& _rname, NodeFlagsT& _rnode_flags, uint64_t& _rsize)
 {
-    return pimpl_->list(_pdesc->entry_ptr_, _rpctx, _rname, _rnode_type, _rsize);
+    return pimpl_->list(_pdesc->entry_ptr_, _rpctx, _rname, _rnode_flags, _rsize);
 }
 
 bool Engine::read(Descriptor* _pdesc, void* _pbuf, uint64_t _offset, unsigned long _length, unsigned long& _rbytes_transfered)
@@ -895,7 +916,7 @@ bool Engine::read(Descriptor* _pdesc, void* _pbuf, uint64_t _offset, unsigned lo
 bool Engine::Implementation::list(
     EntryPointerT& _rentry_ptr,
     void*&         _rpctx,
-    std::wstring& _rname, NodeTypeE& _rnode_type, uint64_t& _rsize)
+    std::wstring& _rname, NodeFlagsT& _rnode_flags, uint64_t& _rsize)
 {
     using ContextT = pair<int, EntryMapT::const_iterator>;
 
@@ -913,16 +934,16 @@ bool Engine::Implementation::list(
 
     if (pctx->first == 0) {
         //L".";
-        _rname      = L".";
-        _rsize      = 0;
-        _rnode_type = NodeTypeE::Directory;
+        _rname       = L".";
+        _rsize       = 0;
+        _rnode_flags = node_flag(NodeFlagsE::Directory);
         ++pctx->first;
         return true;
     } else if (pctx->first == 1) {
         //L"..";
-        _rname      = L"..";
-        _rsize      = 0;
-        _rnode_type = NodeTypeE::Directory;
+        _rname       = L"..";
+        _rsize       = 0;
+        _rnode_flags = node_flag(NodeFlagsE::Directory);
         ++pctx->first;
         return true;
     } else {
@@ -938,7 +959,10 @@ bool Engine::Implementation::list(
             _rname       = utility::widen(pctx->second->second->name_);
             _rsize       = pctx->second->second->size_;
             const auto t = pctx->second->second->type_;
-            _rnode_type  = t == EntryTypeE::Application || t == EntryTypeE::Directory ? NodeTypeE::Directory : NodeTypeE::File;
+            _rnode_flags = node_flag(t == EntryTypeE::Application || t == EntryTypeE::Directory ? NodeFlagsE::Directory : NodeFlagsE::File);
+            if (pctx->second->second->flags_ & entry_flag(EntryFlagsE::Hidden)) {
+                _rnode_flags |= node_flag(NodeFlagsE::Hidden);
+            }
             ++pctx->second;
             return true;
         }
@@ -1601,6 +1625,10 @@ void Engine::Implementation::insertApplicationEntry(const string& _app_id, std::
 
     entry_ptr->remote_   = _rrecv_msg_ptr->storage_id_;
     entry_ptr->data_var_ = make_unique<ApplicationData>(_app_id, _rrecv_msg_ptr->build_unique_);
+
+    if (_rrecv_msg_ptr->build_configuration_.hasHiddenDirectoryFlag()) {
+        entry_ptr->flag(EntryFlagsE::Hidden);
+    }
 
     if (!_rrecv_msg_ptr->build_configuration_.mount_vec_.empty()) {
 #if 0
