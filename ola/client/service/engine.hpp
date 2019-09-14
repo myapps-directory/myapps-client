@@ -22,7 +22,8 @@ enum struct NodeFlagsE : uint32_t {
 
 using NodeFlagsT = std::underlying_type<NodeFlagsE>::type;
 
-inline NodeFlagsT node_flag(const NodeFlagsE _flag) {
+inline NodeFlagsT node_flag(const NodeFlagsE _flag)
+{
     return 1 << static_cast<NodeFlagsT>(_flag);
 }
 

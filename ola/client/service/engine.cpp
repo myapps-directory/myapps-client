@@ -58,7 +58,8 @@ enum struct EntryFlagsE : uint8_t {
 
 using EntryFlagsT = std::underlying_type<EntryFlagsE>::type;
 
-inline EntryFlagsT entry_flag(const EntryFlagsE _flag) {
+inline EntryFlagsT entry_flag(const EntryFlagsE _flag)
+{
     return 1 << static_cast<EntryFlagsT>(_flag);
 }
 
