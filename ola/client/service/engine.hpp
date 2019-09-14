@@ -14,10 +14,18 @@ namespace fs = boost::filesystem;
 
 using EntryIdT = ola::client::utility::ArrVec<16, size_t>;
 
-enum struct NodeTypeE {
-    Directory,
-    File
+enum struct NodeFlagsE : uint32_t {
+    Directory = 0,
+    File,
+    Hidden,
 };
+
+using NodeFlagsT = std::underlying_type<NodeFlagsE>::type;
+
+inline NodeFlagsT node_flag(const NodeFlagsE _flag)
+{
+    return 1 << static_cast<NodeFlagsT>(_flag);
+}
 
 struct GuiProtocolSetup;
 struct Descriptor;
@@ -61,11 +69,11 @@ public:
 
     void*& buffer(Descriptor& _rdesc);
 
-    bool info(const fs::path& _path, NodeTypeE& _rnode_type, uint64_t& _rsize);
+    bool info(const fs::path& _path, NodeFlagsT& _rnode_type, uint64_t& _rsize);
 
-    void info(Descriptor* _pdesc, NodeTypeE& _rnode_type, uint64_t& _rsize);
+    void info(Descriptor* _pdesc, NodeFlagsT& _rnode_type, uint64_t& _rsize);
 
-    bool list(Descriptor* _pdesc, void*& _rpctx, std::wstring& _rname, NodeTypeE& _rentry_type, uint64_t& _rsize);
+    bool list(Descriptor* _pdesc, void*& _rpctx, std::wstring& _rname, NodeFlagsT& _rentry_type, uint64_t& _rsize);
 
     bool read(Descriptor* _pdesc, void* _pbuf, uint64_t _offset, unsigned long _length, unsigned long& _rbytes_transfered);
 };
