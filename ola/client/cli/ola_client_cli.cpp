@@ -440,7 +440,7 @@ void handle_help(istream& _ris, Engine &_reng){
     cout<<"> fetch config APP_ID LANGUAGE_ID OS_ID\n\n"; 
     cout<<"> generate app ~/path/to/app.cfg\n\n";
     cout<<"> generate build ~/path/to/build.cfg\n\n";
-    cout<<"> create app APP_NAME\n\n";
+    cout<<"> create app\n\n";
     cout<<"> create build APP_ID BUILD_TAG ~/path/to/build.cfg ~/path/to/build_folder ~/path/to/build_icon.png\n";
     cout<<"\nExamples:\n:";
     cout<<"> create app bubbles.app\n";
@@ -878,7 +878,7 @@ void handle_create_app ( istream& _ris, Engine &_reng){
     }
 #endif
 
-    _ris>>req_ptr->application_.name_;
+    //_ris>>req_ptr->application_.name_;
     
     promise<void> prom;
     
