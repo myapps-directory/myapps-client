@@ -440,11 +440,13 @@ void handle_help(istream& _ris, Engine &_reng){
     cout<<"> fetch config APP_ID LANGUAGE_ID OS_ID\n\n"; 
     cout<<"> generate app ~/path/to/app.cfg\n\n";
     cout<<"> generate build ~/path/to/build.cfg\n\n";
+    cout<<"> generate media ~/path/to/media.cfg\n\n";
     cout<<"> create app\n\n";
     cout<<"> create build APP_ID BUILD_TAG ~/path/to/build.cfg ~/path/to/build_folder ~/path/to/build_icon.png\n";
     cout<<"\nExamples:\n:";
     cout<<"> create app bubbles.app\n";
     cout<<"> create build l/AQPpeZWqoR1Fcngt3t2w== first bubbles.bld ~/tmp/bubbles_client ~/tmp/bubbles.png\n";
+    cout<<"> create media l/AQPpeZWqoR1Fcngt3t2w== first bubbles.media ~/tmp/bubbles_media\n";
     cout<<"> fetch config l/AQPpeZWqoR1Fcngt3t2w== en-US Windows10x86_64 desc\n";
     cout<<"> fetch config uv0oHriZYsfwec566VTXew== US_en Windows10x86_64\n";
     cout<<"> list store 82zWrPIuni/1jWA8V53N51AlOYx9q9rRXZcyZm73BGpyesjP5aI0YLfG+bZfwg7LDyMtQnn55CN6o/VzgvWYDzn0GeY57wPDDUViKNVVJcw= bubbles_client.exe\n";
@@ -664,6 +666,19 @@ ostream& operator<<(ostream &_ros, const utility::Build::Configuration &c){
     return _ros;
 }
 
+ostream& operator<<(ostream &_ros, const utility::Media::Configuration &c){
+    for(const auto &o: c.os_vec_){
+        _ros<<o<<' ';
+    }
+    _ros<<endl;
+    _ros<<"Entries: ";
+    for(const auto &m: c.entry_vec_){
+        _ros<<'['<<m.thumbnail_path_<<" | "<<m.path_<<']';
+    }
+    _ros<<endl;
+    return _ros;
+}
+
 ostream& operator<<(ostream &_ros, const utility::Build &_cfg){
     _ros<<"Name : "<<_cfg.name_<<endl;
     _ros<<"Tag: "<<_cfg.tag_<<endl;
@@ -744,8 +759,8 @@ void handle_fetch_config(istream& _ris, Engine &_reng){
         if(_rrecv_msg_ptr && _rrecv_msg_ptr->error_ == 0){
             cout<<"{\n";
             cout<<"Remote Root: "<<utility::base64_encode(_rrecv_msg_ptr->storage_id_)<<endl;
-            cout<<"Build unique: "<<_rrecv_msg_ptr->build_unique_<<endl;
-            cout<<_rrecv_msg_ptr->build_configuration_;
+            cout<<"Build unique: "<<_rrecv_msg_ptr->unique_<<endl;
+            cout<<_rrecv_msg_ptr->configuration_;
             cout<<endl;
             cout<<"}"<<endl;
         }else if(!_rrecv_msg_ptr){
@@ -759,6 +774,42 @@ void handle_fetch_config(istream& _ris, Engine &_reng){
     
     solid_check(prom.get_future().wait_for(chrono::seconds(100)) == future_status::ready, "Taking too long - waited 100 secs");
 }
+
+void handle_fetch_media(istream& _ris, Engine &_reng){
+    auto req_ptr = make_shared<FetchMediaConfigurationRequest>();
+    
+    _ris>>std::quoted(req_ptr->app_id_);
+    _ris>>std::quoted(req_ptr->lang_);
+    _ris>>std::quoted(req_ptr->os_id_);
+    
+    req_ptr->app_id_ = utility::base64_decode(req_ptr->app_id_);    
+    promise<void> prom;
+    
+    auto lambda = [&prom](
+        frame::mprpc::ConnectionContext&        _rctx,
+        std::shared_ptr<FetchMediaConfigurationRequest>&  _rsent_msg_ptr,
+        std::shared_ptr<FetchMediaConfigurationResponse>& _rrecv_msg_ptr,
+        ErrorConditionT const&                  _rerror
+    ){
+        if(_rrecv_msg_ptr && _rrecv_msg_ptr->error_ == 0){
+            cout<<"{\n";
+            cout<<"Remote Root: "<<utility::base64_encode(_rrecv_msg_ptr->storage_id_)<<endl;
+            cout<<"Media unique: "<<_rrecv_msg_ptr->unique_<<endl;
+            cout<<_rrecv_msg_ptr->configuration_;
+            cout<<endl;
+            cout<<"}"<<endl;
+        }else if(!_rrecv_msg_ptr){
+            cout<<"Error - no response: "<<_rerror.message()<<endl;
+        }else{
+            cout<<"Error received from server: "<<_rrecv_msg_ptr->error_ <<endl;
+        }
+        prom.set_value();
+    };
+    _reng.rpcService().sendRequest(_reng.serverEndpoint().c_str(), req_ptr, lambda);
+    
+    solid_check(prom.get_future().wait_for(chrono::seconds(100)) == future_status::ready, "Taking too long - waited 100 secs");
+}
+
 
 uint64_t stream_copy(std::ostream &_ros, std::istream &_ris){
     constexpr size_t buffer_size = 1024 * 32;
@@ -854,6 +905,8 @@ void handle_fetch(istream& _ris, Engine& _reng){
         handle_fetch_config(_ris, _reng);
     }else if(what == "store"){
         handle_fetch_store(_ris, _reng);
+    }else if(what == "media"){
+        handle_fetch_media(_ris, _reng);
     }
 }
 
@@ -912,11 +965,14 @@ void handle_create_app ( istream& _ris, Engine &_reng){
 bool load_build_config(ola::utility::Build &_rbuild_cfg, const string &_path);
 bool store_build_config(const ola::utility::Build &_rbuild_cfg, const string &_path);
 
+bool load_media_config(ola::utility::Media &_rmedia_cfg, const string &_path);
+bool store_media_config(const ola::utility::Media &_rmedia_cfg, const string &_path);
+
 bool zip_create(const string &_zip_path, string _root, uint64_t &_rsize);
 
 void on_upload_receive_last_response(
     frame::mprpc::ConnectionContext& _rctx,
-    std::shared_ptr<UploadBuildRequest>&        _rsent_msg_ptr,
+    std::shared_ptr<UploadRequest>&        _rsent_msg_ptr,
     std::shared_ptr<Response>&       _rrecv_msg_ptr,
     ErrorConditionT const&           _rerror,
     promise<void> &prom,
@@ -941,7 +997,7 @@ void on_upload_receive_last_response(
 
 void on_upload_receive_response(
     frame::mprpc::ConnectionContext& _rctx,
-    std::shared_ptr<UploadBuildRequest>&        _rsent_msg_ptr,
+    std::shared_ptr<UploadRequest>&        _rsent_msg_ptr,
     std::shared_ptr<Response>&       _rrecv_msg_ptr,
     ErrorConditionT const&           _rerror,
     promise<void> &prom,
@@ -951,7 +1007,7 @@ void on_upload_receive_response(
     if (!_rsent_msg_ptr->ifs_.eof()) {
         auto lambda = [&prom, &zip_path](
             frame::mprpc::ConnectionContext&        _rctx,
-            std::shared_ptr<UploadBuildRequest>&  _rsent_msg_ptr,
+            std::shared_ptr<UploadRequest>&  _rsent_msg_ptr,
             std::shared_ptr<Response>& _rrecv_msg_ptr,
             ErrorConditionT const&                  _rerror
         ){
@@ -964,7 +1020,7 @@ void on_upload_receive_response(
     } else {
         auto lambda = [&prom, &zip_path](
             frame::mprpc::ConnectionContext&        _rctx,
-            std::shared_ptr<UploadBuildRequest>&  _rsent_msg_ptr,
+            std::shared_ptr<UploadRequest>&  _rsent_msg_ptr,
             std::shared_ptr<Response>& _rrecv_msg_ptr,
             ErrorConditionT const&                  _rerror
         ){
@@ -1055,7 +1111,7 @@ void handle_create_build(istream& _ris, Engine &_reng){
             }else{
                 cout<<"Start uploading build file: "<<zip_path<<" for build tagged: "<<_rsent_msg_ptr->unique_<<endl;
                 //now we must upload the file
-                auto req_ptr = make_shared<UploadBuildRequest>();
+                auto req_ptr = make_shared<UploadRequest>();
                 req_ptr->ifs_.open(zip_path, std::ifstream::binary);
                 solid_check(req_ptr->ifs_, "failed open file: "<<zip_path);
                 req_ptr->header(_rrecv_msg_ptr->header());
@@ -1064,7 +1120,7 @@ void handle_create_build(istream& _ris, Engine &_reng){
                     
                     auto lambda = [&prom, &zip_path](
                         frame::mprpc::ConnectionContext&        _rctx,
-                        std::shared_ptr<UploadBuildRequest>&  _rsent_msg_ptr,
+                        std::shared_ptr<UploadRequest>&  _rsent_msg_ptr,
                         std::shared_ptr<Response>& _rrecv_msg_ptr,
                         ErrorConditionT const&                  _rerror
                     ){
@@ -1079,7 +1135,105 @@ void handle_create_build(istream& _ris, Engine &_reng){
                 } else {
                     auto lambda = [&prom, &zip_path](
                         frame::mprpc::ConnectionContext&        _rctx,
-                        std::shared_ptr<UploadBuildRequest>&  _rsent_msg_ptr,
+                        std::shared_ptr<UploadRequest>&  _rsent_msg_ptr,
+                        std::shared_ptr<Response>& _rrecv_msg_ptr,
+                        ErrorConditionT const&                  _rerror
+                    ){
+                        on_upload_receive_last_response(_rctx, _rsent_msg_ptr, _rrecv_msg_ptr, _rerror, prom, zip_path);
+                    };
+                    
+                    solid_log(logger, Verbose, "client: sending " << zip_path << " to " << _rctx.recipientId() << " last");
+                    frame::mprpc::MessageFlagsT flags{frame::mprpc::MessageFlagsE::ResponseLast, frame::mprpc::MessageFlagsE::AwaitResponse};
+                    _rctx.service().sendMessage(_rctx.recipientId(), req_ptr, lambda, flags);
+                }
+            }
+        }else{
+            cout<<"Error - no response: "<<_rerror.message()<<endl;
+            prom.set_value();
+        }
+    };
+    _reng.rpcService().sendRequest(_reng.serverEndpoint().c_str(), req_ptr, lambda);
+    
+    solid_check(prom.get_future().wait_for(chrono::seconds(100)) == future_status::ready, "Taking too long - waited 100 secs");
+}
+
+//-----------------------------------------------------------------------------
+
+void handle_create_media(istream& _ris, Engine &_reng){
+    auto req_ptr = make_shared<CreateMediaRequest>();
+    
+    string config_path, media_path;
+    _ris>>std::quoted(req_ptr->app_id_)>>std::quoted(req_ptr->unique_);
+    _ris>>std::quoted(config_path)>>std::quoted(media_path);
+    
+    req_ptr->app_id_ = ola::utility::base64_decode(req_ptr->app_id_);
+    
+    if(!load_media_config(req_ptr->media_, path(config_path))){
+        return;
+    }
+    
+    //create archive from build_path/*
+    
+    string zip_path = system_path(get_temp_env() + "/ola_client_cli_" + generate_temp_name() + ".zip");
+
+    
+    if(!zip_create(zip_path, path(media_path), req_ptr->size_)){
+        return;
+    }
+    
+    {
+        ifstream ifs(zip_path, std::ifstream::binary);
+        if(ifs){
+            req_ptr->sha_sum_ = ola::utility::sha256hex(ifs);
+            cout<<"sha_sum for "<<zip_path<<": "<<req_ptr->sha_sum_<<endl;
+        }else{
+            cout<<"could not open "<<zip_path<<" for reading"<<endl;
+            return;
+        }
+    }
+    
+    req_ptr->size_ += boost::filesystem::file_size(zip_path);
+    
+    promise<void> prom;
+    
+    auto lambda = [&prom, &zip_path](
+        frame::mprpc::ConnectionContext&        _rctx,
+        std::shared_ptr<CreateMediaRequest>&  _rsent_msg_ptr,
+        std::shared_ptr<Response>& _rrecv_msg_ptr,
+        ErrorConditionT const&                  _rerror
+    ){
+        if(_rrecv_msg_ptr){
+            if(_rrecv_msg_ptr->error_ != 0){
+                cout<<"Error: "<<_rrecv_msg_ptr->error_<<" message: "<<_rrecv_msg_ptr->message_<<endl;
+                prom.set_value();
+            }else{
+                cout<<"Start uploading build file: "<<zip_path<<" for build tagged: "<<_rsent_msg_ptr->unique_<<endl;
+                //now we must upload the file
+                auto req_ptr = make_shared<UploadRequest>();
+                req_ptr->ifs_.open(zip_path, std::ifstream::binary);
+                solid_check(req_ptr->ifs_, "failed open file: "<<zip_path);
+                req_ptr->header(_rrecv_msg_ptr->header());
+                
+                if (!req_ptr->ifs_.eof()) {
+                    
+                    auto lambda = [&prom, &zip_path](
+                        frame::mprpc::ConnectionContext&        _rctx,
+                        std::shared_ptr<UploadRequest>&  _rsent_msg_ptr,
+                        std::shared_ptr<Response>& _rrecv_msg_ptr,
+                        ErrorConditionT const&                  _rerror
+                    ){
+                        on_upload_receive_response(_rctx, _rsent_msg_ptr, _rrecv_msg_ptr, _rerror, prom, zip_path);
+                    };
+                    
+                    solid_log(logger, Verbose, "client: sending " << zip_path << " to " << _rctx.recipientId());
+                    frame::mprpc::MessageFlagsT flags{frame::mprpc::MessageFlagsE::ResponsePart, frame::mprpc::MessageFlagsE::AwaitResponse};
+                    _rctx.service().sendMessage(_rctx.recipientId(), req_ptr, lambda, flags);
+                    flags.reset(frame::mprpc::MessageFlagsE::AwaitResponse);
+                    _rctx.service().sendMessage(_rctx.recipientId(), req_ptr, flags);
+                } else {
+                    auto lambda = [&prom, &zip_path](
+                        frame::mprpc::ConnectionContext&        _rctx,
+                        std::shared_ptr<UploadRequest>&  _rsent_msg_ptr,
                         std::shared_ptr<Response>& _rrecv_msg_ptr,
                         ErrorConditionT const&                  _rerror
                     ){
@@ -1111,6 +1265,8 @@ void handle_create(istream& _ris, Engine &_reng){
         handle_create_app(_ris, _reng);
     }else if(what == "build"){
         handle_create_build(_ris, _reng);
+    }else if(what == "media"){
+        handle_create_media(_ris, _reng);
     }
 }
 
@@ -1226,6 +1382,55 @@ void handle_generate_buid(istream& _ris, Engine &_reng){
 
 //-----------------------------------------------------------------------------
 
+void handle_generate_media(istream& _ris, Engine &_reng){
+    string config_path;
+    _ris>>std::quoted(config_path);
+    
+    ola::utility::Media cfg;
+    
+    cfg.configuration_vec_ = ola::utility::Media::ConfigurationVectorT{
+        {
+            {"Windows10x86_32", "Windows10x86_64"},
+            {
+                {"windows/screen_shot_1_thumb.png", "window/screen_shot_1.png"},
+                {"windows/screen_shot_2_thumb.png", "window/screen_shot_2.png"},
+                {"windows/screen_shot_3_thumb.png", "window/screen_shot_3.png"},
+                {"windows/screen_shot_4_thumb.png", "window/screen_shot_4.png"},
+                {"windows/video_1_thumb.png", "window/video_1.mp4"},
+            }
+        },
+        {
+            {"linux5x86_32", "linux5x86_64"},
+            {
+                {"linux/screen_shot_1_thumb.png", "linux/screen_shot_1.png"},
+                {"linux/screen_shot_2_thumb.png", "linux/screen_shot_2.png"},
+                {"linux/screen_shot_3_thumb.png", "linux/screen_shot_3.png"},
+                {"linux/screen_shot_4_thumb.png", "linux/screen_shot_4.png"},
+                {"linux/video_1_thumb.png", "linux/video_1.mp4"},
+            }
+        },
+        {
+            {"macos5x86_32", "macos5x86_64"},
+            {
+                {"macos/screen_shot_1_thumb.png", "macos/screen_shot_1.png"},
+                {"macos/screen_shot_2_thumb.png", "macos/screen_shot_2.png"},
+                {"macos/screen_shot_3_thumb.png", "macos/screen_shot_3.png"},
+                {"macos/screen_shot_4_thumb.png", "macos/screen_shot_4.png"},
+                {"macos/video_1_thumb.png", "macos/video_1.mp4"},
+            }
+        }
+    };
+    
+    store_media_config(cfg, path(config_path));
+    {
+        ola::utility::Media cfg_check;
+        load_media_config(cfg_check, path(config_path));
+        solid_check(cfg == cfg_check);
+    }
+}
+
+//-----------------------------------------------------------------------------
+
 void handle_generate(istream& _ris, Engine &_reng){
     string what;
     _ris>>std::quoted(what);
@@ -1237,6 +1442,8 @@ void handle_generate(istream& _ris, Engine &_reng){
 #endif
     if(what == "build"){
         handle_generate_buid(_ris, _reng);
+    }else if(what == "media"){
+        handle_generate_media(_ris, _reng);
     }
 }
 
@@ -1878,6 +2085,120 @@ bool store_build_config(const ola::utility::Build &_rcfg, const string &_path){
                 g.add("arguments", Setting::TypeString) = v.arguments_;
                 g.add("icon", Setting::TypeString) = v.icon_;
                 g.add("run_folder", Setting::TypeString) = v.run_folder_;
+            }
+        }
+
+    }
+    
+    try
+    {
+        cfg.writeFile(_path.c_str());
+        cerr << "Updated configuration successfully written to: " << _path << endl;
+    }
+    catch(const FileIOException &fioex)
+    {
+        cerr << "I/O error while writing file: " << _path << endl;
+        return false;
+    }
+    return true;
+}
+
+//-----------------------------------------------------------------------------
+
+bool load_media_config(ola::utility::Media &_rcfg, const string &_path){
+    using namespace libconfig;
+    Config cfg;
+    cfg.setOptions(Config::OptionFsync
+                 | Config::OptionSemicolonSeparators
+                 | Config::OptionColonAssignmentForGroups
+                 | Config::OptionOpenBraceOnSeparateLine);
+    try
+    {
+        cfg.readFile(_path.c_str());
+    }
+    catch(const FileIOException &fioex)
+    {
+        std::cerr << "I/O error while reading file." << std::endl;
+        return false;
+    }
+    catch(const ParseException &pex)
+    {
+        std::cerr << "Parse error at " << pex.getFile() << ":" << pex.getLine()
+                << " - " << pex.getError() << std::endl;
+        return false;
+    }
+    
+    Setting &root = cfg.getRoot();
+    
+    if(root.exists("configurations")){
+        Setting &components = root.lookup("configurations");
+        for(auto it = components.begin(); it != components.end(); ++it){
+            ola::utility::Media::Configuration c;
+            
+            if(it->exists("oses")){
+                Setting &oses = it->lookup("oses");
+                for(auto it = oses.begin(); it != oses.end(); ++it){
+                    c.os_vec_.emplace_back(static_cast<const string&>(*it));
+                }
+            }else{
+                cout<<"Error: component oses not fount in configuration"<<endl;
+                return false;
+            }
+            
+            if(it->exists("entries")){
+                Setting &entries = it->lookup("entries");
+                
+                for(auto it = entries.begin(); it != entries.end(); ++it){
+                    string thumbnail;
+                    string media;
+                    it->lookupValue("thumbnail", thumbnail);
+                    it->lookupValue("media", media);
+                    
+                    c.entry_vec_.emplace_back(thumbnail, media);
+                }
+            }else{
+                cout<<"Error: component entries not fount in configuration"<<endl;
+                return false;
+            }
+            
+            _rcfg.configuration_vec_.emplace_back(std::move(c));
+        }
+    }else{
+        cout<<"Error: no component found"<<endl;
+        return false;
+    }
+    return true;
+}
+
+//-----------------------------------------------------------------------------
+
+bool store_media_config(const ola::utility::Media &_rcfg, const string &_path){
+    using namespace libconfig;
+    Config cfg;
+    
+    cfg.setOptions(Config::OptionFsync
+                 | Config::OptionSemicolonSeparators
+                 | Config::OptionColonAssignmentForGroups
+                 | Config::OptionOpenBraceOnSeparateLine);
+    
+    Setting &root = cfg.getRoot();
+    
+    
+    Setting &os_specific = root.add("configurations", Setting::TypeList);
+    
+    for(const auto &component: _rcfg.configuration_vec_){
+        Setting &cmp_g = os_specific.add(Setting::TypeGroup);
+        {
+            Setting &oses = cmp_g.add("oses", Setting::TypeArray);
+            for(auto &v: component.os_vec_){
+                oses.add(Setting::TypeString) = v;
+            }
+            
+            Setting &entries = cmp_g.add("entries", Setting::TypeList);
+            for(auto& v: component.entry_vec_){
+                Setting &g  = entries.add(Setting::TypeGroup);
+                g.add("thumbnail", Setting::TypeString) = v.thumbnail_path_;
+                g.add("media", Setting::TypeString) = v.path_;
             }
         }
 
