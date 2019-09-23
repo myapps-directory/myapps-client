@@ -449,6 +449,7 @@ void handle_help(istream& _ris, Engine &_reng){
     cout<<"> create media l/AQPpeZWqoR1Fcngt3t2w== first bubbles.media ~/tmp/bubbles_media\n";
     cout<<"> fetch config l/AQPpeZWqoR1Fcngt3t2w== en-US Windows10x86_64 desc\n";
     cout<<"> fetch config uv0oHriZYsfwec566VTXew== US_en Windows10x86_64\n";
+    cout<<"> fetch media uv0oHriZYsfwec566VTXew== US_en Windows10x86_64\n";
     cout<<"> list store 82zWrPIuni/1jWA8V53N51AlOYx9q9rRXZcyZm73BGpyesjP5aI0YLfG+bZfwg7LDyMtQnn55CN6o/VzgvWYDzn0GeY57wPDDUViKNVVJcw= bubbles_client.exe\n";
     
     cout<<endl;
@@ -1392,31 +1393,31 @@ void handle_generate_media(istream& _ris, Engine &_reng){
         {
             {"Windows10x86_32", "Windows10x86_64"},
             {
-                {"windows/screen_shot_1_thumb.png", "window/screen_shot_1.png"},
-                {"windows/screen_shot_2_thumb.png", "window/screen_shot_2.png"},
-                {"windows/screen_shot_3_thumb.png", "window/screen_shot_3.png"},
-                {"windows/screen_shot_4_thumb.png", "window/screen_shot_4.png"},
-                {"windows/video_1_thumb.png", "window/video_1.mp4"},
+                {"windows/screen_shot_1_thumb.jpg", "windows/screen_shot_1.jpg"},
+                {"windows/screen_shot_2_thumb.jpg", "windows/screen_shot_2.jpg"},
+                {"windows/screen_shot_3_thumb.jpg", "windows/screen_shot_3.jpg"},
+                {"windows/screen_shot_4_thumb.jpg", "windows/screen_shot_4.jpg"},
+                {"windows/video_1_thumb.jpg", "windows/video_1.mp4"},
             }
         },
         {
             {"linux5x86_32", "linux5x86_64"},
             {
-                {"linux/screen_shot_1_thumb.png", "linux/screen_shot_1.png"},
-                {"linux/screen_shot_2_thumb.png", "linux/screen_shot_2.png"},
-                {"linux/screen_shot_3_thumb.png", "linux/screen_shot_3.png"},
-                {"linux/screen_shot_4_thumb.png", "linux/screen_shot_4.png"},
-                {"linux/video_1_thumb.png", "linux/video_1.mp4"},
+                {"linux/screen_shot_1_thumb.jpg", "linux/screen_shot_1.jpg"},
+                {"linux/screen_shot_2_thumb.jpg", "linux/screen_shot_2.jpg"},
+                {"linux/screen_shot_3_thumb.jpg", "linux/screen_shot_3.jpg"},
+                {"linux/screen_shot_4_thumb.jpg", "linux/screen_shot_4.jpg"},
+                {"linux/video_1_thumb.jpg", "linux/video_1.mp4"},
             }
         },
         {
             {"macos5x86_32", "macos5x86_64"},
             {
-                {"macos/screen_shot_1_thumb.png", "macos/screen_shot_1.png"},
-                {"macos/screen_shot_2_thumb.png", "macos/screen_shot_2.png"},
-                {"macos/screen_shot_3_thumb.png", "macos/screen_shot_3.png"},
-                {"macos/screen_shot_4_thumb.png", "macos/screen_shot_4.png"},
-                {"macos/video_1_thumb.png", "macos/video_1.mp4"},
+                {"macos/screen_shot_1_thumb.jpg", "macos/screen_shot_1.jpg"},
+                {"macos/screen_shot_2_thumb.jpg", "macos/screen_shot_2.jpg"},
+                {"macos/screen_shot_3_thumb.jpg", "macos/screen_shot_3.jpg"},
+                {"macos/screen_shot_4_thumb.jpg", "macos/screen_shot_4.jpg"},
+                {"macos/video_1_thumb.jpg", "macos/video_1.mp4"},
             }
         }
     };
