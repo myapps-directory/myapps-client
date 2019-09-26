@@ -793,8 +793,14 @@ void handle_fetch_media(istream& _ris, Engine &_reng){
         ErrorConditionT const&                  _rerror
     ){
         if(_rrecv_msg_ptr && _rrecv_msg_ptr->error_ == 0){
+            string encd = utility::hex_encode(_rrecv_msg_ptr->storage_id_);
+            {
+                //TODO: remove block
+                string decd = utility::hex_decode(encd);
+                solid_check(decd == _rrecv_msg_ptr->storage_id_);
+            }
             cout<<"{\n";
-            cout<<"Remote Root: "<<utility::base64_encode(_rrecv_msg_ptr->storage_id_)<<endl;
+            cout<<"Remote Root: "<<encd<<endl;
             cout<<"Media unique: "<<_rrecv_msg_ptr->unique_<<endl;
             cout<<_rrecv_msg_ptr->configuration_;
             cout<<endl;
