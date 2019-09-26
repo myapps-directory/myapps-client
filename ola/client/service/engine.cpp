@@ -1621,22 +1621,22 @@ string to_system_path(const string& _path)
 void Engine::Implementation::insertApplicationEntry(const string& _app_id, std::shared_ptr<front::FetchBuildConfigurationResponse>& _rrecv_msg_ptr)
 {
     auto entry_ptr = createEntry(
-        root_entry_ptr_, _rrecv_msg_ptr->build_configuration_.directory_,
+        root_entry_ptr_, _rrecv_msg_ptr->configuration_.directory_,
         EntryTypeE::Application);
 
     entry_ptr->remote_   = _rrecv_msg_ptr->storage_id_;
-    entry_ptr->data_var_ = make_unique<ApplicationData>(_app_id, _rrecv_msg_ptr->build_unique_);
+    entry_ptr->data_var_ = make_unique<ApplicationData>(_app_id, _rrecv_msg_ptr->unique_);
 
-    if (_rrecv_msg_ptr->build_configuration_.hasHiddenDirectoryFlag()) {
+    if (_rrecv_msg_ptr->configuration_.hasHiddenDirectoryFlag()) {
         entry_ptr->flag(EntryFlagsE::Hidden);
     }
 
-    if (!_rrecv_msg_ptr->build_configuration_.mount_vec_.empty()) {
+    if (!_rrecv_msg_ptr->configuration_.mount_vec_.empty()) {
 #if 0
         entry_ptr->status_ = EntryStatusE::FetchRequired;
 #else
         entry_ptr->status_ = EntryStatusE::Fetched;
-        for (const auto& me : _rrecv_msg_ptr->build_configuration_.mount_vec_) {
+        for (const auto& me : _rrecv_msg_ptr->configuration_.mount_vec_) {
             insertMountEntry(entry_ptr, me.first, me.second);
         }
 #endif
@@ -1655,10 +1655,10 @@ void Engine::Implementation::insertApplicationEntry(const string& _app_id, std::
         get<DirectoryDataPointerT>(root_entry_ptr_->data_var_)->insertEntry(std::move(entry_ptr));
     }
 
-    const auto& app_folder_name = _rrecv_msg_ptr->build_configuration_.directory_;
+    const auto& app_folder_name = _rrecv_msg_ptr->configuration_.directory_;
 
-    if (!_rrecv_msg_ptr->build_configuration_.shortcut_vec_.empty()) {
-        for (const auto& sh : _rrecv_msg_ptr->build_configuration_.shortcut_vec_) {
+    if (!_rrecv_msg_ptr->configuration_.shortcut_vec_.empty()) {
+        for (const auto& sh : _rrecv_msg_ptr->configuration_.shortcut_vec_) {
             auto skt_entry_ptr = createEntry(
                 root_entry_ptr_, sh.name_ + ".lnk",
                 EntryTypeE::Shortcut);
@@ -1672,7 +1672,7 @@ void Engine::Implementation::insertApplicationEntry(const string& _app_id, std::
                 sh.arguments_,
                 to_system_path(config_.mount_prefix_ + '/' + app_folder_name + '/' + sh.run_folder_),
                 to_system_path(config_.mount_prefix_ + '/' + app_folder_name + '/' + sh.icon_),
-                _rrecv_msg_ptr->build_configuration_.property_vec_.front().second);
+                _rrecv_msg_ptr->configuration_.property_vec_.front().second);
 
             lock_guard<mutex> lock{rm};
             get<DirectoryDataPointerT>(root_entry_ptr_->data_var_)->insertEntry(std::move(skt_entry_ptr));

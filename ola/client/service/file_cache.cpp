@@ -288,9 +288,8 @@ const Configuration& Engine::configuration() const
 
 void Engine::open(FileData& _rfd, const uint64_t _size, const std::string& _app_id, const std::string& _build_unique, const std::string& _remote_path)
 {
-
     string d = _app_id;
-    string f = namefy_b64(_remote_path);
+    string f = utility::hex_encode(utility::sha256(_remote_path));
 
     d += '\\';
     d += _build_unique;
@@ -891,17 +890,6 @@ string denamefy(const std::string& _path)
         }
     }
     return string{std::move(r)};
-}
-
-std::string namefy_b64(const std::string& _txt)
-{
-    string s = utility::base64_encode(utility::sha256(_txt));
-    for (auto& c : s) {
-        if (c == '/') {
-            c = '_';
-        }
-    }
-    return s;
 }
 
 //-----------------------------------------------------------------------------

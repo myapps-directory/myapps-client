@@ -17,8 +17,6 @@ namespace fs = boost::filesystem;
 std::string namefy(const std::string& _path);
 std::string denamefy(const std::string& _path);
 
-std::string namefy_b64(const std::string& _path);
-
 class File {
     struct Header {
         uint64_t size_;

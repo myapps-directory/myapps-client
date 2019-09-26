@@ -9,6 +9,8 @@ if(WIN32)
         shortcut_creator.hpp shortcut_creator.cpp
     )
 
+    set_source_files_properties(engine.cpp PROPERTIES COMPILE_FLAGS -bigobj)
+
     if(CMAKE_SIZEOF_VOID_P EQUAL 8)
         target_link_options(ola_client_service PRIVATE /DELAYLOAD:winfsp-x64.dll)
     else()
