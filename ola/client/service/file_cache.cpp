@@ -486,18 +486,22 @@ void Engine::Implementation::doneUsingFile(FileData& _rfd)
 void Engine::close(FileData& _rfd)
 {
     solid_log(logger, Info, _rfd.cache_index_);
-    lock_guard<mutex> lock{pimpl_->mutex_};
+    if (_rfd.cache_index_ != solid::InvalidIndex()) {
+        lock_guard<mutex> lock{pimpl_->mutex_};
 
-    pimpl_->flush(_rfd);
-    pimpl_->doneUsingFile(_rfd);
-    _rfd.file_.close();
+        pimpl_->flush(_rfd);
+        pimpl_->doneUsingFile(_rfd);
+        _rfd.file_.close();
+    }
 }
 
 void Engine::flush(FileData& _rfd)
 {
-    lock_guard<mutex> lock{pimpl_->mutex_};
+    if (_rfd.cache_index_ != solid::InvalidIndex()) {
+        lock_guard<mutex> lock{pimpl_->mutex_};
 
-    pimpl_->flush(_rfd);
+        pimpl_->flush(_rfd);
+    }
 }
 
 void Engine::Implementation::flush(FileData& _rfd)
