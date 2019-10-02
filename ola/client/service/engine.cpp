@@ -250,9 +250,6 @@ struct ApplicationData : DirectoryData {
     }
 };
 
-struct MediaData : DirectoryData {
-};
-
 struct ShortcutData {
     stringstream ioss_;
 };
@@ -356,9 +353,14 @@ struct Entry {
         }
     }
 
-    void flag(const EntryFlagsE _flag)
+    void flagSet(const EntryFlagsE _flag)
     {
         flags_ |= entry_flag(_flag);
+    }
+
+    void flagReset(const EntryFlagsE _flag)
+    {
+        flags_ &= (~entry_flag(_flag));
     }
 
     std::mutex& mutex() const
@@ -420,6 +422,10 @@ struct Entry {
     {
         //TODO: get rid of checking type
         return type_ == EntryTypeE::Unknown || entry_has_flag(flags_, EntryFlagsE::Invisible);
+    }
+    bool isVolatile() const
+    {
+        return entry_has_flag(flags_, EntryFlagsE::Volatile);
     }
 };
 
@@ -811,6 +817,11 @@ void Engine::close(Descriptor* _pdesc)
             pimpl_->file_cache_engine_.close(*get<FileDataPointerT>(_pdesc->entry_ptr_->data_var_));
             _pdesc->entry_ptr_->data_var_ = UniqueIdT();
 
+            if (_pdesc->entry_ptr_->isVolatile()) {
+                solid_log(logger, Info, "Erase volatile entry: " << _pdesc->entry_ptr_->name_);
+                pimpl_->eraseEntryFromParent(std::move(_pdesc->entry_ptr_), std::move(lock));
+            }
+
         } else {
             pimpl_->file_cache_engine_.flush(*get<FileDataPointerT>(_pdesc->entry_ptr_->data_var_));
         }
@@ -826,7 +837,7 @@ bool Engine::Implementation::findOrCreateEntry(
 {
     //for (const auto& e : _path) {
     auto it = _path.begin();
-	for (; it != _path.end(); ++it) {
+    for (; it != _path.end(); ++it) {
         const auto&   e     = *it;
         string        s     = e.generic_string();
         EntryPointerT e_ptr = _rentry_ptr->find(s);
@@ -877,23 +888,36 @@ bool Engine::Implementation::findOrCreateEntry(
         ++it;
         if (it == _path.end()) {
             return false;
-		}
-        string storage_id = ola::utility::hex_decode(it->generic_string());
+        }
+
+        string encoded_storage_id = it->generic_string();
+        ++it;
         while (it != _path.end()) {
             _remote_path += it->generic_string();
             ++it;
             if (it != _path.end()) {
                 _remote_path += '/';
-			}
-		}
-        auto entry_ptr     = createEntry(_rentry_ptr, _remote_path);
+            }
+        }
+
+        string name = encoded_storage_id + '/' + _remote_path;
+        auto   entry_ptr = _rentry_ptr->find(name);
+        if (entry_ptr) {
+            _rentry_ptr = std::move(entry_ptr);
+            return true;
+        }
+
+        string storage_id = ola::utility::hex_decode(encoded_storage_id);
+
+        entry_ptr     = createEntry(_rentry_ptr, name);
         entry_ptr->remote_ = std::move(storage_id);
         entry_ptr->status_ = EntryStatusE::FetchRequired;
+        entry_ptr->flagSet(EntryFlagsE::Volatile);
 
         _rentry_ptr->directoryData()->insertEntry(EntryPointerT(entry_ptr));
 
-		_rpstorage_id = &entry_ptr->remote_;
-		_rentry_ptr   = std::move(entry_ptr);
+        _rpstorage_id = &entry_ptr->remote_;
+        _rentry_ptr   = std::move(entry_ptr);
     }
     return true;
 }
@@ -1652,9 +1676,11 @@ void Engine::Implementation::createRootEntry()
     root_entry_ptr_->status_   = EntryStatusE::Fetched;
 
     media_entry_ptr_            = make_shared<Entry>(EntryTypeE::Media, root_entry_ptr_, root_mutex_, cv_dq_[0], media_name, 0);
-    media_entry_ptr_->data_var_ = make_unique<MediaData>();
+    media_entry_ptr_->data_var_ = make_unique<DirectoryData>();
     media_entry_ptr_->status_   = EntryStatusE::Fetched;
-    media_entry_ptr_->flag(EntryFlagsE::Invisible);
+    media_entry_ptr_->flagSet(EntryFlagsE::Invisible);
+
+    get<DirectoryDataPointerT>(root_entry_ptr_->data_var_)->insertEntry(EntryPointerT(media_entry_ptr_));
 }
 
 void Engine::Implementation::insertMountEntry(EntryPointerT& _rparent_ptr, const fs::path& _local, const string& _remote)
@@ -1708,7 +1734,7 @@ void Engine::Implementation::insertApplicationEntry(const string& _app_id, std::
     entry_ptr->data_var_ = make_unique<ApplicationData>(_app_id, _rrecv_msg_ptr->unique_);
 
     if (_rrecv_msg_ptr->configuration_.hasHiddenDirectoryFlag()) {
-        entry_ptr->flag(EntryFlagsE::Hidden);
+        entry_ptr->flagSet(EntryFlagsE::Hidden);
     }
 
     if (!_rrecv_msg_ptr->configuration_.mount_vec_.empty()) {

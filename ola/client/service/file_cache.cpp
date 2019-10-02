@@ -728,7 +728,7 @@ bool File::read(char* _pbuf, uint64_t _offset, size_t _length, size_t& _rbytes_t
 void File::write(const uint64_t _offset, std::istream& _ris)
 {
     constexpr size_t buffer_capacity = 4096;
-    if (stream_) {
+    if (stream_.is_open()) {
         char     buffer[buffer_capacity];
         uint64_t read_count = 0;
 
@@ -751,7 +751,7 @@ void File::write(const uint64_t _offset, std::istream& _ris)
 
 void File::write(const uint64_t _offset, const std::string& _str)
 {
-    if (stream_) {
+    if (stream_.is_open()) {
         stream_.seekp(sizeof(Header) + _offset);
         stream_.write(_str.data(), _str.size());
 
