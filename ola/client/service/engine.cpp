@@ -22,6 +22,7 @@
 #include "shortcut_creator.hpp"
 
 #include <boost/algorithm/string/predicate.hpp>
+#include <boost/any.hpp>
 #include <boost/filesystem.hpp>
 #include <boost/functional/hash.hpp>
 
@@ -126,9 +127,11 @@ using EntryMapT     = std::unordered_map<const std::reference_wrapper<const stri
 struct DirectoryData {
     EntryMapT entry_map_;
 
-    void erase(const EntryPointerT& _rentry_ptr);
+    virtual ~DirectoryData() {}
 
-    EntryPointerT find(const string& _path) const;
+    virtual EntryPointerT find(const string& _path) const;
+
+    virtual void erase(const EntryPointerT& _rentry_ptr);
 
     void insertEntry(EntryPointerT&& _uentry_ptr);
 
@@ -193,6 +196,12 @@ struct FileData : file_cache::FileData {
     {
     }
 
+    FileData(const FileData& _rfd)
+        : storage_id_(_rfd.storage_id_)
+        , remote_path_(_rfd.remote_path_)
+    {
+    }
+
     bool readFromCache(ReadData& _rdata)
     {
         size_t bytes_transfered = 0;
@@ -252,16 +261,32 @@ struct ApplicationData : DirectoryData {
 
 struct ShortcutData {
     stringstream ioss_;
+
+    ShortcutData() {}
+    ShortcutData(const ShortcutData&) {}
 };
 
-using DirectoryDataPointerT   = std::unique_ptr<DirectoryData>;
-using FileDataPointerT        = std::unique_ptr<FileData>;
-using ApplicationDataPointerT = std::unique_ptr<ApplicationData>;
-using ShortcutDataPointerT    = std::unique_ptr<ShortcutData>;
-using UniqueIdT               = solid::frame::UniqueId;
-using EntryDataVariantT       = std::variant<
-    UniqueIdT,
-    DirectoryDataPointerT, ApplicationDataPointerT, FileDataPointerT, ShortcutDataPointerT>; //the order should be consistent with EntryTypeE
+struct MediaData : DirectoryData {
+    mutable Entry* pfront_ = nullptr;
+    mutable Entry* pback_  = nullptr;
+
+    EntryPointerT find(const string& _path) const override;
+    void          erase(const EntryPointerT& _rentry_ptr) override;
+    void          insertEntry(const Configuration& _rcfg, EntryPointerT&& _uentry_ptr);
+
+    Entry* front() const
+    {
+        return pfront_;
+    }
+
+    void erase(Entry& _re) const;
+
+    void pushBack(Entry& _re) const;
+
+    void popFront() const;
+};
+
+using UniqueIdT = solid::frame::UniqueId;
 
 struct Entry {
     std::mutex&              rmutex_;
@@ -273,7 +298,9 @@ struct Entry {
     EntryFlagsT              flags_  = 0;
     std::weak_ptr<Entry>     parent_;
     uint64_t                 size_ = 0;
-    EntryDataVariantT        data_var_;
+    boost::any               data_any_;
+    Entry*                   pnext_ = nullptr;
+    Entry*                   pprev_ = nullptr;
 
     Entry(
         const EntryTypeE _type, EntryPointerT& _rparent_ptr, std::mutex& _rmutex, std::condition_variable& _rcv, const string& _name,
@@ -317,30 +344,101 @@ struct Entry {
         return type_ == EntryTypeE::Application;
     }
 
-    inline DirectoryData* directoryData() const
+    inline DirectoryData* directoryDataPtr()
     {
-        DirectoryData* pdd = nullptr;
-        if (auto pd = std::get_if<DirectoryDataPointerT>(&data_var_)) {
-            pdd = pd->get();
-        } else if (auto pd = std::get_if<ApplicationDataPointerT>(&data_var_)) {
-            pdd = pd->get();
+        DirectoryData* pdd = boost::any_cast<ApplicationData>(&data_any_);
+        if (pdd) {
+            return pdd;
         }
-        return pdd;
+        pdd = boost::any_cast<MediaData>(&data_any_);
+        if (pdd) {
+            return pdd;
+        }
+        return boost::any_cast<DirectoryData>(&data_any_);
     }
 
-    inline ApplicationData* applicationData() const
+    inline const DirectoryData* directoryDataPtr() const
     {
-        ApplicationData* pad = nullptr;
-        if (auto pa = std::get_if<ApplicationDataPointerT>(&data_var_)) {
-            pad = pa->get();
+        const DirectoryData* pdd = boost::any_cast<ApplicationData>(&data_any_);
+        if (pdd) {
+            return pdd;
         }
-        return pad;
+        pdd = boost::any_cast<MediaData>(&data_any_);
+        if (pdd) {
+            return pdd;
+        }
+        return boost::any_cast<DirectoryData>(&data_any_);
+    }
+
+    inline ApplicationData* applicationDataPtr()
+    {
+        return boost::any_cast<ApplicationData>(&data_any_);
+    }
+
+    inline const ApplicationData* applicationDataPtr() const
+    {
+        return boost::any_cast<ApplicationData>(&data_any_);
+    }
+
+    inline FileData* fileDataPtr()
+    {
+        return boost::any_cast<FileData>(&data_any_);
+    }
+
+    inline const FileData* fileDataPtr() const
+    {
+        return boost::any_cast<FileData>(&data_any_);
+    }
+
+    inline FileData& fileData()
+    {
+        return *fileDataPtr();
+    }
+
+    inline const FileData& fileData() const
+    {
+        return *fileDataPtr();
+    }
+
+    inline const ShortcutData& shortcutData() const
+    {
+        return *boost::any_cast<ShortcutData>(&data_any_);
+    }
+
+    inline ShortcutData& shortcutData()
+    {
+        return *boost::any_cast<ShortcutData>(&data_any_);
+    }
+
+    inline MediaData& mediaData()
+    {
+        return *boost::any_cast<MediaData>(&data_any_);
+    }
+
+    inline ApplicationData& applicationData()
+    {
+        return *applicationDataPtr();
+    }
+
+    inline const ApplicationData& applicationData() const
+    {
+        return *applicationDataPtr();
+    }
+
+    inline DirectoryData& directoryData()
+    {
+        return *directoryDataPtr();
+    }
+
+    inline const DirectoryData& directoryData() const
+    {
+        return *directoryDataPtr();
     }
 
     EntryPointerT find(const string& _path) const
     {
         EntryPointerT entry_ptr;
-        if (auto pd = directoryData(); pd != nullptr) {
+        if (auto pd = directoryDataPtr(); pd != nullptr) {
             entry_ptr = pd->find(_path);
         }
         return entry_ptr;
@@ -348,7 +446,7 @@ struct Entry {
 
     void erase(const EntryPointerT& _rentry_ptr)
     {
-        if (auto pd = directoryData(); pd != nullptr) {
+        if (auto pd = directoryDataPtr(); pd != nullptr) {
             pd->erase(_rentry_ptr);
         }
     }
@@ -406,10 +504,10 @@ struct Entry {
 
     bool empty() const
     {
-        if (auto pd = std::get_if<UniqueIdT>(&data_var_); pd != nullptr) {
+        if (data_any_.empty()) {
             return true;
-        } else if (auto pd = std::get_if<DirectoryDataPointerT>(&data_var_); pd != nullptr) {
-            return (*pd)->empty();
+        } else if (auto pd = directoryDataPtr(); pd != nullptr) {
+            return pd->empty();
         }
         return false;
     }
@@ -431,14 +529,6 @@ struct Entry {
 
 using AioSchedulerT = frame::Scheduler<frame::aio::Reactor>;
 
-void DirectoryData::erase(const EntryPointerT& _rentry_ptr)
-{
-    auto it = entry_map_.find(_rentry_ptr->name_);
-    if (it != entry_map_.end() && it->second == _rentry_ptr) {
-        entry_map_.erase(it);
-    }
-}
-
 EntryPointerT DirectoryData::find(const string& _path) const
 {
     auto it = entry_map_.find(_path);
@@ -448,9 +538,86 @@ EntryPointerT DirectoryData::find(const string& _path) const
     return EntryPointerT{};
 }
 
+void DirectoryData::erase(const EntryPointerT& _rentry_ptr)
+{
+    auto it = entry_map_.find(_rentry_ptr->name_);
+    if (it != entry_map_.end() && it->second == _rentry_ptr) {
+        entry_map_.erase(it);
+    }
+}
+
 void DirectoryData::insertEntry(EntryPointerT&& _uentry_ptr)
 {
     entry_map_.emplace(_uentry_ptr->name_, std::move(_uentry_ptr));
+}
+
+void MediaData::erase(Entry& _re) const
+{
+    if (_re.pprev_ != nullptr) {
+        _re.pprev_->pnext_ = _re.pnext_;
+    } else {
+        pfront_ = _re.pnext_;
+    }
+
+    if (_re.pnext_ != nullptr) {
+        _re.pnext_->pprev_ = _re.pprev_;
+    } else {
+        pback_ = _re.pprev_;
+    }
+}
+
+void MediaData::pushBack(Entry& _re) const
+{
+    _re.pprev_ = pback_;
+    _re.pnext_ = nullptr;
+
+    if (pback_ != nullptr) {
+        pback_->pnext_ = &_re;
+        pback_         = &_re;
+    } else {
+        pback_ = pfront_ = &_re;
+    }
+}
+
+void MediaData::popFront() const
+{
+    if (pfront_ != nullptr) {
+        erase(*pfront_);
+    }
+}
+
+EntryPointerT MediaData::find(const string& _path) const
+{
+    auto it = entry_map_.find(_path);
+    if (it != entry_map_.end()) {
+        erase(*it->second);
+        pushBack(*it->second);
+        return atomic_load(&it->second);
+    }
+    return EntryPointerT{};
+}
+
+void MediaData::erase(const EntryPointerT& _rentry_ptr)
+{
+    erase(*_rentry_ptr);
+    pushBack(*_rentry_ptr);
+}
+
+void MediaData::insertEntry(const Configuration& _rcfg, EntryPointerT&& _uentry_ptr)
+{
+    while (entry_map_.size() >= _rcfg.media_cache_size_) {
+        auto it = entry_map_.find(front()->name_);
+        solid_check(it != entry_map_.end() && it->second.get() == front());
+        if (it->second.use_count() == 1) {
+            popFront();
+            entry_map_.erase(it);
+        } else {
+            break;
+        }
+    }
+
+    pushBack(*_uentry_ptr);
+    DirectoryData::insertEntry(std::move(_uentry_ptr));
 }
 
 } //namespace
@@ -818,12 +985,12 @@ void Engine::close(Descriptor* _pdesc)
                 solid_log(logger, Info, "Erase volatile entry: " << _pdesc->entry_ptr_->name_);
                 pimpl_->eraseEntryFromParent(std::move(_pdesc->entry_ptr_), std::move(lock));
             } else {
-                pimpl_->file_cache_engine_.close(*get<FileDataPointerT>(_pdesc->entry_ptr_->data_var_));
-                _pdesc->entry_ptr_->data_var_ = UniqueIdT();
+                pimpl_->file_cache_engine_.close(_pdesc->entry_ptr_->fileData());
+                _pdesc->entry_ptr_->data_any_.clear();
             }
 
         } else {
-            pimpl_->file_cache_engine_.flush(*get<FileDataPointerT>(_pdesc->entry_ptr_->data_var_));
+            pimpl_->file_cache_engine_.flush(_pdesc->entry_ptr_->fileData());
         }
     } else {
         solid_log(logger, Verbose, "CLOSE: " << _pdesc << " entry: " << _pdesc->entry_ptr_.get() << " open_count = " << pimpl_->open_count_);
@@ -865,13 +1032,9 @@ bool Engine::Implementation::findOrCreateEntry(
                 _remote_path.clear();
                 _rpstorage_id = &_rentry_ptr->remote_;
 
-                auto pfd = get_if<ApplicationDataPointerT>(&_rentry_ptr->data_var_);
-                if (pfd && pfd->get()) {
-                    _rpapp_id       = &_rentry_ptr->name_; //&pfd->get()->app_id_;
-                    _rpbuild_unique = &pfd->get()->build_unique_;
-                } else {
-                    solid_assert(false);
-                }
+                auto& rad       = _rentry_ptr->applicationData();
+                _rpapp_id       = &_rentry_ptr->name_; //&pfd->get()->app_id_;
+                _rpbuild_unique = &rad.build_unique_;
             } else if (_rentry_ptr->isMedia()) {
                 break;
             } else if (!_rentry_ptr->remote_.empty()) {
@@ -914,7 +1077,7 @@ bool Engine::Implementation::findOrCreateEntry(
         entry_ptr->status_ = EntryStatusE::FetchRequired;
         entry_ptr->flagSet(EntryFlagsE::Volatile);
 
-        _rentry_ptr->directoryData()->insertEntry(EntryPointerT(entry_ptr));
+        _rentry_ptr->mediaData().insertEntry(config_, EntryPointerT(entry_ptr));
 
         _rpstorage_id = &entry_ptr->remote_;
         _rentry_ptr   = std::move(entry_ptr);
@@ -978,10 +1141,10 @@ bool Engine::Implementation::entry(const fs::path& _path, EntryPointerT& _rentry
         solid_check(_rentry_ptr->type_ > EntryTypeE::Unknown);
 
         if (_rentry_ptr->type_ == EntryTypeE::File) {
-            if (holds_alternative<UniqueIdT>(_rentry_ptr->data_var_)) {
-                _rentry_ptr->data_var_ = make_unique<FileData>(*pstorage_id, remote_path);
+            if (_rentry_ptr->data_any_.empty()) {
+                _rentry_ptr->data_any_ = FileData(*pstorage_id, remote_path);
                 if (papp_id != nullptr) {
-                    file_cache_engine_.open(*get<FileDataPointerT>(_rentry_ptr->data_var_), _rentry_ptr->size_, *papp_id, *pbuild_unique, remote_path);
+                    file_cache_engine_.open(_rentry_ptr->fileData(), _rentry_ptr->size_, *papp_id, *pbuild_unique, remote_path);
                 }
             }
         }
@@ -1023,7 +1186,7 @@ bool Engine::Implementation::list(
     auto&              m{_rentry_ptr->mutex()};
     unique_lock<mutex> lock(m);
     ContextT*          pctx = nullptr;
-    DirectoryData*     pdd  = _rentry_ptr->directoryData();
+    DirectoryData*     pdd  = _rentry_ptr->directoryDataPtr();
 
     if (_rpctx) {
         pctx = static_cast<ContextT*>(_rpctx);
@@ -1136,7 +1299,7 @@ bool Engine::Implementation::readFromFile(
     char*               _pbuf,
     uint64_t _offset, unsigned long _length, unsigned long& _rbytes_transfered)
 {
-    FileData& rfile_data = *get<FileDataPointerT>(_rentry_ptr->data_var_);
+    FileData& rfile_data = _rentry_ptr->fileData();
     ReadData  read_data{_pbuf, _offset, _length};
 
     if (rfile_data.readFromCache(read_data)) {
@@ -1174,7 +1337,7 @@ bool Engine::Implementation::readFromShortcut(
     char*          _pbuf,
     uint64_t _offset, unsigned long _length, unsigned long& _rbytes_transfered)
 {
-    ShortcutData& rshortcut_data = *get<ShortcutDataPointerT>(_rentry_ptr->data_var_);
+    ShortcutData& rshortcut_data = _rentry_ptr->shortcutData();
 
     rshortcut_data.ioss_.seekg(_offset);
     rshortcut_data.ioss_.read(_pbuf, _length);
@@ -1227,7 +1390,7 @@ size_t FileData::findAvailableFetchIndex() const
 
 void Engine::Implementation::tryFetch(EntryPointerT& _rentry_ptr, ReadData& _rread_data)
 {
-    FileData& rfile_data = *get<FileDataPointerT>(_rentry_ptr->data_var_);
+    FileData& rfile_data = _rentry_ptr->fileData();
 
     //try to avoid double prefetching
     if (auto fetch_index = rfile_data.isReadHandledByPendingFetch(_rread_data); fetch_index != InvalidIndex() && rfile_data.fetch_stubs_[fetch_index].size_ != 0) {
@@ -1305,13 +1468,13 @@ void FileData::updateContiguousRead(uint64_t _offset, uint64_t _size)
 
 bool Engine::Implementation::canPreFetch(const EntryPointerT& _rentry_ptr) const
 {
-    const FileData& rfile_data = *get<FileDataPointerT>(_rentry_ptr->data_var_);
+    const FileData& rfile_data = _rentry_ptr->fileData();
     return (rfile_data.contiguous_read_count_ >= config_.min_contiguous_read_count_) && rfile_data.prefetch_offset_ < _rentry_ptr->size_;
 }
 
 void Engine::Implementation::tryPreFetch(EntryPointerT& _rentry_ptr)
 {
-    FileData& rfile_data = *get<FileDataPointerT>(_rentry_ptr->data_var_);
+    FileData& rfile_data = _rentry_ptr->fileData();
     size_t    fetch_index;
     if (canPreFetch(_rentry_ptr) && ((fetch_index = rfile_data.findAvailableFetchIndex()) != InvalidIndex())) {
         solid_log(logger, Verbose, _rentry_ptr.get() << " " << fetch_index << " " << rfile_data.prefetch_offset_);
@@ -1322,7 +1485,7 @@ void Engine::Implementation::tryPreFetch(EntryPointerT& _rentry_ptr)
 void Engine::Implementation::asyncFetch(EntryPointerT& _rentry_ptr, const size_t _fetch_index, const uint64_t _offset, uint64_t _size)
 {
     solid_log(logger, Verbose, _rentry_ptr.get() << " " << _fetch_index << " " << _offset << " " << _size);
-    FileData& rfile_data  = *get<FileDataPointerT>(_rentry_ptr->data_var_);
+    FileData& rfile_data  = _rentry_ptr->fileData();
     auto&     rfetch_stub = rfile_data.fetch_stubs_[_fetch_index];
 
     rfetch_stub.status_ = FetchStub::PendingE;
@@ -1338,11 +1501,11 @@ void Engine::Implementation::asyncFetch(EntryPointerT& _rentry_ptr, const size_t
         solid_log(logger, Verbose, "recv data: " << _rsent_msg_ptr->offset_ << " " << _rrecv_msg_ptr->size_);
         auto&             m = entry_ptr->mutex();
         lock_guard<mutex> lock{m};
-        FileDataPointerT* pfd = get_if<FileDataPointerT>(&entry_ptr->data_var_);
+        FileData*         pfd = entry_ptr->fileDataPtr();
         if (pfd == nullptr) {
             return;
         }
-        FileData& rfile_data  = *(*pfd);
+        FileData& rfile_data  = (*pfd);
         auto&     rfetch_stub = rfile_data.fetch_stubs_[_fetch_index];
 
         rfetch_stub.status_       = FetchStub::FetchedE;
@@ -1637,7 +1800,7 @@ void Engine::Implementation::onAllApplicationsFetched()
             //lock.unlock(); //no overlapping locks
             //unique_lock<mutex> tlock{rmutex};
             //lock.swap(tlock);
-            auto pad = entry_ptr->applicationData();
+            auto pad = entry_ptr->applicationDataPtr();
             if (pad != nullptr) {
                 return pad->build_unique_ == _build_unique;
             }
@@ -1670,15 +1833,15 @@ void Engine::Implementation::createRootEntry()
     lock_guard<mutex> lock{root_mutex_};
 
     root_entry_ptr_            = make_shared<Entry>(EntryTypeE::Directory, root_mutex_, cv_dq_[0], "");
-    root_entry_ptr_->data_var_ = make_unique<DirectoryData>();
+    root_entry_ptr_->data_any_ = DirectoryData();
     root_entry_ptr_->status_   = EntryStatusE::Fetched;
 
     media_entry_ptr_            = make_shared<Entry>(EntryTypeE::Media, root_entry_ptr_, root_mutex_, cv_dq_[0], media_name, 0);
-    media_entry_ptr_->data_var_ = make_unique<DirectoryData>();
+    media_entry_ptr_->data_any_ = MediaData();
     media_entry_ptr_->status_   = EntryStatusE::Fetched;
     media_entry_ptr_->flagSet(EntryFlagsE::Invisible);
 
-    get<DirectoryDataPointerT>(root_entry_ptr_->data_var_)->insertEntry(EntryPointerT(media_entry_ptr_));
+    root_entry_ptr_->directoryData().insertEntry(EntryPointerT(media_entry_ptr_));
 }
 
 void Engine::Implementation::insertMountEntry(EntryPointerT& _rparent_ptr, const fs::path& _local, const string& _remote)
@@ -1729,7 +1892,7 @@ void Engine::Implementation::insertApplicationEntry(const string& _app_id, std::
         EntryTypeE::Application);
 
     entry_ptr->remote_   = _rrecv_msg_ptr->storage_id_;
-    entry_ptr->data_var_ = make_unique<ApplicationData>(_app_id, _rrecv_msg_ptr->unique_);
+    entry_ptr->data_any_ = ApplicationData(_app_id, _rrecv_msg_ptr->unique_);
 
     if (_rrecv_msg_ptr->configuration_.hasHiddenDirectoryFlag()) {
         entry_ptr->flagSet(EntryFlagsE::Hidden);
@@ -1756,7 +1919,7 @@ void Engine::Implementation::insertApplicationEntry(const string& _app_id, std::
         lock_guard<mutex> lock{rm};
         //TODO: also create coresponding shortcuts
 
-        get<DirectoryDataPointerT>(root_entry_ptr_->data_var_)->insertEntry(std::move(entry_ptr));
+        root_entry_ptr_->directoryData().insertEntry(std::move(entry_ptr));
     }
 
     const auto& app_folder_name = _rrecv_msg_ptr->configuration_.directory_;
@@ -1768,10 +1931,10 @@ void Engine::Implementation::insertApplicationEntry(const string& _app_id, std::
                 EntryTypeE::Shortcut);
 
             skt_entry_ptr->status_   = EntryStatusE::Fetched;
-            skt_entry_ptr->data_var_ = make_unique<ShortcutData>();
+            skt_entry_ptr->data_any_ = ShortcutData();
 
             skt_entry_ptr->size_ = shortcut_creator_.create(
-                get<ShortcutDataPointerT>(skt_entry_ptr->data_var_)->ioss_,
+                skt_entry_ptr->shortcutData().ioss_,
                 to_system_path(config_.mount_prefix_ + '/' + app_folder_name + '/' + sh.command_),
                 sh.arguments_,
                 to_system_path(config_.mount_prefix_ + '/' + app_folder_name + '/' + sh.run_folder_),
@@ -1779,7 +1942,7 @@ void Engine::Implementation::insertApplicationEntry(const string& _app_id, std::
                 _rrecv_msg_ptr->configuration_.property_vec_.front().second);
 
             lock_guard<mutex> lock{rm};
-            get<DirectoryDataPointerT>(root_entry_ptr_->data_var_)->insertEntry(std::move(skt_entry_ptr));
+            root_entry_ptr_->directoryData().insertEntry(std::move(skt_entry_ptr));
         }
     }
 }
@@ -1795,10 +1958,10 @@ void Engine::Implementation::insertDirectoryEntry(unique_lock<mutex>& _lock, Ent
 {
     solid_log(logger, Info, _rparent_ptr->name_ << " " << _name);
 
-    auto entry_ptr = _rparent_ptr->directoryData()->find(_name);
+    auto entry_ptr = _rparent_ptr->directoryData().find(_name);
 
     if (!entry_ptr) {
-        _rparent_ptr->directoryData()->insertEntry(createEntry(_rparent_ptr, _name, EntryTypeE::Directory));
+        _rparent_ptr->directoryData().insertEntry(createEntry(_rparent_ptr, _name, EntryTypeE::Directory));
     } else {
         _lock.unlock();
         //make sure the entry is directory
@@ -1806,8 +1969,8 @@ void Engine::Implementation::insertDirectoryEntry(unique_lock<mutex>& _lock, Ent
         lock_guard<mutex> lock{rm};
         entry_ptr->type_ = EntryTypeE::Directory;
 
-        if (entry_ptr->directoryData() == nullptr) {
-            entry_ptr->data_var_ = make_unique<DirectoryData>();
+        if (entry_ptr->directoryDataPtr() == nullptr) {
+            entry_ptr->data_any_ = DirectoryData();
         }
     }
 }
@@ -1816,10 +1979,10 @@ void Engine::Implementation::insertFileEntry(unique_lock<mutex>& _lock, EntryPoi
 {
     solid_log(logger, Info, _rparent_ptr->name_ << " " << _name << " " << _size);
 
-    auto entry_ptr = _rparent_ptr->directoryData()->find(_name);
+    auto entry_ptr = _rparent_ptr->directoryData().find(_name);
 
     if (!entry_ptr) {
-        _rparent_ptr->directoryData()->insertEntry(createEntry(_rparent_ptr, _name, EntryTypeE::File));
+        _rparent_ptr->directoryData().insertEntry(createEntry(_rparent_ptr, _name, EntryTypeE::File));
     } else {
         _lock.unlock();
         //make sure the entry is file
@@ -1827,9 +1990,9 @@ void Engine::Implementation::insertFileEntry(unique_lock<mutex>& _lock, EntryPoi
         lock_guard<mutex> lock{rm};
         entry_ptr->type_ = EntryTypeE::File;
         entry_ptr->size_ = _size;
-        if (entry_ptr->directoryData() == nullptr) {
-            entry_ptr->data_var_ = UniqueIdT{};
-        }
+        //if (entry_ptr->directoryDataPtr() == nullptr) {
+        //    entry_ptr->data_any_ = UniqueIdT{};
+        //}
     }
 }
 
@@ -1841,13 +2004,13 @@ EntryPointerT Engine::Implementation::tryInsertUnknownEntry(EntryPointerT& _rpar
         return EntryPointerT{};
     }
 
-    if (_rparent_ptr->directoryData() == nullptr) {
-        _rparent_ptr->data_var_ = make_unique<DirectoryData>();
+    if (_rparent_ptr->directoryDataPtr() == nullptr) {
+        _rparent_ptr->data_any_ = DirectoryData();
     }
 
     auto entry_ptr     = createEntry(_rparent_ptr, _name);
     entry_ptr->status_ = EntryStatusE::FetchRequired;
-    _rparent_ptr->directoryData()->insertEntry(EntryPointerT(entry_ptr));
+    _rparent_ptr->directoryData().insertEntry(EntryPointerT(entry_ptr));
     return entry_ptr;
 }
 
@@ -1884,12 +2047,12 @@ void Engine::Implementation::createEntryData(unique_lock<mutex>& _lock, EntryPoi
         _rentry_ptr->type_ = EntryTypeE::File;
         _rentry_ptr->size_ = _rnode_dq.front().size_;
 
-        _rentry_ptr->data_var_ = UniqueIdT{};
+        _rentry_ptr->data_any_.clear();
         return;
     }
 
-    if (_rentry_ptr->directoryData() == nullptr) {
-        _rentry_ptr->data_var_ = make_unique<DirectoryData>();
+    if (_rentry_ptr->directoryDataPtr() == nullptr) {
+        _rentry_ptr->data_any_ = DirectoryData();
     }
 
     for (const auto& n : _rnode_dq) {
