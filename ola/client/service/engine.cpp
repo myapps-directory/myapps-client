@@ -810,16 +810,16 @@ void Engine::close(Descriptor* _pdesc)
     if (_pdesc->entry_ptr_->type_ == EntryTypeE::File) {
         mutex&             rmutex = _pdesc->entry_ptr_->mutex();
         unique_lock<mutex> lock{rmutex};
-        size_t             use_cnt = _pdesc->entry_ptr_.use_count();
+        const auto         use_cnt = _pdesc->entry_ptr_.use_count();
 
         solid_log(logger, Verbose, "CLOSE: " << _pdesc << " entry: " << _pdesc->entry_ptr_.get() << " use count = " << use_cnt << " open_count = " << pimpl_->open_count_);
         if (use_cnt == 2) {
-            pimpl_->file_cache_engine_.close(*get<FileDataPointerT>(_pdesc->entry_ptr_->data_var_));
-            _pdesc->entry_ptr_->data_var_ = UniqueIdT();
-
             if (_pdesc->entry_ptr_->isVolatile()) {
                 solid_log(logger, Info, "Erase volatile entry: " << _pdesc->entry_ptr_->name_);
                 pimpl_->eraseEntryFromParent(std::move(_pdesc->entry_ptr_), std::move(lock));
+            } else {
+                pimpl_->file_cache_engine_.close(*get<FileDataPointerT>(_pdesc->entry_ptr_->data_var_));
+                _pdesc->entry_ptr_->data_var_ = UniqueIdT();
             }
 
         } else {
@@ -900,7 +900,7 @@ bool Engine::Implementation::findOrCreateEntry(
             }
         }
 
-        string name = encoded_storage_id + '/' + _remote_path;
+        string name      = encoded_storage_id + '/' + _remote_path;
         auto   entry_ptr = _rentry_ptr->find(name);
         if (entry_ptr) {
             _rentry_ptr = std::move(entry_ptr);
@@ -909,7 +909,7 @@ bool Engine::Implementation::findOrCreateEntry(
 
         string storage_id = ola::utility::hex_decode(encoded_storage_id);
 
-        entry_ptr     = createEntry(_rentry_ptr, name);
+        entry_ptr          = createEntry(_rentry_ptr, name);
         entry_ptr->remote_ = std::move(storage_id);
         entry_ptr->status_ = EntryStatusE::FetchRequired;
         entry_ptr->flagSet(EntryFlagsE::Volatile);
@@ -1450,8 +1450,6 @@ void Engine::Implementation::onFrontConnectionStart(frame::mprpc::ConnectionCont
         if (_rrecv_msg_ptr) {
             if (_rrecv_msg_ptr->error_ == 0) {
                 onFrontConnectionInit(_rctx);
-            } else {
-                cout << "ERROR initiating connection: version " << _rctx.peerVersionMajor() << '.' << _rctx.peerVersionMinor() << " error " << _rrecv_msg_ptr->error_ << ':' << _rrecv_msg_ptr->message_ << endl;
             }
         }
     };
@@ -1863,16 +1861,17 @@ void Engine::Implementation::eraseEntryFromParent(EntryPointerT&& _uentry_ptr, u
     {
         unique_lock<mutex> lock{std::move(_ulock)};
         parent_ptr = entry_ptr->parent_.lock();
-        entry_ptr->parent_.reset();
     }
 
     if (parent_ptr) {
         unique_lock<mutex> lock{parent_ptr->mutex()};
-        if (parent_ptr->status_ != EntryStatusE::Fetched) {
-            parent_ptr->erase(entry_ptr);
-
-            if (parent_ptr->isErasable()) {
-                eraseEntryFromParent(std::move(parent_ptr), std::move(lock));
+        if (entry_ptr.use_count() == 2) {
+            if (parent_ptr->status_ != EntryStatusE::Fetched || entry_ptr->isVolatile()) {
+                parent_ptr->erase(entry_ptr);
+                entry_ptr.reset();
+                if (parent_ptr->isErasable()) {
+                    eraseEntryFromParent(std::move(parent_ptr), std::move(lock));
+                }
             }
         }
     }
