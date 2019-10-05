@@ -486,18 +486,22 @@ void Engine::Implementation::doneUsingFile(FileData& _rfd)
 void Engine::close(FileData& _rfd)
 {
     solid_log(logger, Info, _rfd.cache_index_);
-    lock_guard<mutex> lock{pimpl_->mutex_};
+    if (_rfd.cache_index_ != solid::InvalidIndex()) {
+        lock_guard<mutex> lock{pimpl_->mutex_};
 
-    pimpl_->flush(_rfd);
-    pimpl_->doneUsingFile(_rfd);
-    _rfd.file_.close();
+        pimpl_->flush(_rfd);
+        pimpl_->doneUsingFile(_rfd);
+        _rfd.file_.close();
+    }
 }
 
 void Engine::flush(FileData& _rfd)
 {
-    lock_guard<mutex> lock{pimpl_->mutex_};
+    if (_rfd.cache_index_ != solid::InvalidIndex()) {
+        lock_guard<mutex> lock{pimpl_->mutex_};
 
-    pimpl_->flush(_rfd);
+        pimpl_->flush(_rfd);
+    }
 }
 
 void Engine::Implementation::flush(FileData& _rfd)
@@ -724,7 +728,7 @@ bool File::read(char* _pbuf, uint64_t _offset, size_t _length, size_t& _rbytes_t
 void File::write(const uint64_t _offset, std::istream& _ris)
 {
     constexpr size_t buffer_capacity = 4096;
-    if (stream_) {
+    if (stream_.is_open()) {
         char     buffer[buffer_capacity];
         uint64_t read_count = 0;
 
@@ -747,7 +751,7 @@ void File::write(const uint64_t _offset, std::istream& _ris)
 
 void File::write(const uint64_t _offset, const std::string& _str)
 {
-    if (stream_) {
+    if (stream_.is_open()) {
         stream_.seekp(sizeof(Header) + _offset);
         stream_.write(_str.data(), _str.size());
 
