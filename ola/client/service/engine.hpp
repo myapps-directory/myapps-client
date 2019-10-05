@@ -49,6 +49,7 @@ struct Configuration {
     uint64_t          max_stream_size_           = 100 * 1024;
     size_t            min_contiguous_read_count_ = 3;
     size_t            media_cache_size_          = 2;
+    size_t            update_poll_seconds_ = 60 * 3;
 };
 
 class Engine {

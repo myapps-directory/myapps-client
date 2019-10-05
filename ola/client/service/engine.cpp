@@ -60,6 +60,8 @@ enum struct EntryFlagsE : uint8_t {
     Hidden,
     Invisible,
     Volatile,
+    Delete,
+    Update,
 };
 
 using EntryFlagsT = std::underlying_type<EntryFlagsE>::type;
@@ -125,6 +127,7 @@ using EntryPointerT   = std::shared_ptr<Entry>;
 using EntryMapT       = std::unordered_map<const std::reference_wrapper<const string>, EntryPointerT, Hash, Equal>;
 using EntryPtrMapT    = std::unordered_map<const std::reference_wrapper<const string>, Entry*, Hash, Equal>;
 using EntryPtrVectorT = std::vector<Entry*>;
+using UpdatesMapT     = std::unordered_map<string, pair<string, string>>;
 
 struct DirectoryData {
     EntryMapT entry_map_;
@@ -187,20 +190,22 @@ struct FileData : file_cache::FileData {
     ReadData* pback_  = nullptr;
     StatusE   status_ = PendingE;
     FetchStub fetch_stubs_[2];
-    string    storage_id_;
-    string    remote_path_;
-    uint64_t  prefetch_offset_;
-    size_t    contiguous_read_count_;
+    //string    storage_id_;
+    string   remote_path_;
+    uint64_t prefetch_offset_;
+    size_t   contiguous_read_count_;
 
-    FileData(const string& _storage_id, const string& _remote_path)
-        : storage_id_(_storage_id)
-        , remote_path_(_remote_path)
+    FileData(/*const string& _storage_id, */ const string& _remote_path)
+        : /*storage_id_(_storage_id)
+        ,*/
+        remote_path_(_remote_path)
     {
     }
 
     FileData(const FileData& _rfd)
-        : storage_id_(_rfd.storage_id_)
-        , remote_path_(_rfd.remote_path_)
+        : /*storage_id_(_rfd.storage_id_)
+        ,*/
+        remote_path_(_rfd.remote_path_)
     {
     }
 
@@ -251,9 +256,11 @@ struct FileData : file_cache::FileData {
 };
 
 struct ApplicationData : DirectoryData {
+    std::string     app_id_; //used for updates
     std::string     app_unique_;
     std::string     build_unique_;
     EntryPtrVectorT shortcut_vec_;
+    atomic<size_t>  use_count_ = 0;
 
     ApplicationData(const std::string& _app_unique, const std::string& _build_unique)
         : app_unique_(_app_unique)
@@ -261,8 +268,20 @@ struct ApplicationData : DirectoryData {
     {
     }
 
-    void insertShortcut(Entry* _pentry) {
+    ApplicationData(const ApplicationData& _rad)
+        : app_unique_(_rad.app_unique_)
+        , build_unique_(_rad.build_unique_)
+    {
+    }
+
+    void insertShortcut(Entry* _pentry)
+    {
         shortcut_vec_.emplace_back(_pentry);
+    }
+
+    bool canBeDeleted() const
+    {
+        return use_count_.load() == 0;
     }
 };
 
@@ -296,8 +315,9 @@ struct MediaData : DirectoryData {
 struct RootData : DirectoryData {
     EntryPtrMapT app_entry_map_;
 
-    Entry* findApplication(const string& _path) const;
-    void   insertApplication(Entry* _pentry);
+    Entry*        findApplication(const string& _path) const;
+    void          insertApplication(Entry* _pentry);
+    EntryPointerT eraseApplication(Entry& _rentry);
 };
 
 using UniqueIdT = solid::frame::UniqueId;
@@ -311,7 +331,8 @@ struct Entry {
     EntryStatusE             status_ = EntryStatusE::FetchRequired;
     EntryFlagsT              flags_  = 0;
     std::weak_ptr<Entry>     parent_;
-    uint64_t                 size_ = 0;
+    Entry*                   pmaster_ = nullptr;
+    uint64_t                 size_    = 0;
     boost::any               data_any_;
     Entry*                   pnext_ = nullptr;
     Entry*                   pprev_ = nullptr;
@@ -324,6 +345,7 @@ struct Entry {
         , name_(_name)
         , type_(_type)
         , parent_(_rparent_ptr)
+        , pmaster_(_rparent_ptr->pmaster_)
         , size_(_size)
     {
     }
@@ -552,6 +574,11 @@ struct Entry {
     {
         return entry_has_flag(flags_, EntryFlagsE::Volatile);
     }
+
+    bool isDelete() const
+    {
+        return entry_has_flag(flags_, EntryFlagsE::Delete);
+    }
 };
 
 using AioSchedulerT = frame::Scheduler<frame::aio::Reactor>;
@@ -657,8 +684,18 @@ Entry* RootData::findApplication(const string& _path) const
     return nullptr;
 }
 
-void RootData::insertApplication(Entry* _pentry) {
+void RootData::insertApplication(Entry* _pentry)
+{
     app_entry_map_.emplace(_pentry->applicationData().app_unique_, _pentry);
+}
+
+EntryPointerT RootData::eraseApplication(Entry& _rentry)
+{
+    auto it = entry_map_.find(_rentry.name_);
+    if (it->second.use_count() != 1) {
+        return EntryPointerT{};
+    }
+    //TODO: also erase all related shortcuts
 }
 
 } //namespace
@@ -689,6 +726,8 @@ struct Engine::Implementation {
     frame::mprpc::ServiceT    gui_rpc_service_;
     mutex                     mutex_;
     mutex                     root_mutex_;
+    condition_variable        root_cv_;
+    bool                      running_ = true;
     string                    auth_user_;
     string                    auth_token_;
     RecipientVectorT          auth_recipient_v_;
@@ -703,6 +742,7 @@ struct Engine::Implementation {
     ShortcutCreator           shortcut_creator_;
     file_cache::Engine        file_cache_engine_;
     atomic<size_t>            open_count_ = 0;
+    thread                    update_thread;
 
 public:
     Implementation(
@@ -714,6 +754,18 @@ public:
         , gui_rpc_service_{manager_}
         , shortcut_creator_{config_.temp_folder_}
     {
+    }
+
+    ~Implementation()
+    {
+        if (update_thread.joinable()) {
+            {
+                lock_guard<mutex> lock(root_mutex_);
+                running_ = false;
+                root_cv_.notify_one();
+            }
+            update_thread.join();
+        }
     }
 
 public:
@@ -738,6 +790,10 @@ public:
         std::shared_ptr<front::ListAppsResponse>& _rrecv_msg_ptr);
 
     void onAllApplicationsFetched();
+    void cleanFileCache();
+
+    void update();
+    void updateApplications(const UpdatesMapT& _updates_map);
 
     EntryPointerT createEntry(EntryPointerT& _rparent_ptr, const string& _name, const EntryTypeE _type = EntryTypeE::Unknown, const uint64_t _size = 0);
 
@@ -756,7 +812,7 @@ public:
 
     bool findOrCreateEntry(
         const fs::path& _path, EntryPointerT& _rentry_ptr, unique_lock<mutex>& _rlock, std::string& _remote_path,
-        const string*& _rpstorage_id, const string*& _rpapp_unique, const string*& _rpbuild_unique);
+        /*const string*& _rpstorage_id,*/ const string*& _rpapp_unique, const string*& _rpbuild_unique);
 
     void asyncFetch(EntryPointerT& _rentry_ptr, const size_t _fetch_index, const uint64_t _offset, uint64_t _size);
 
@@ -814,7 +870,7 @@ private:
         uint64_t _offset, unsigned long _length, unsigned long& _rbytes_transfered);
 
     void remoteFetchApplication(
-        std::shared_ptr<front::ListAppsResponse>&               _apps_response,
+        std::vector<std::string>&                               _rapp_id_vec,
         std::shared_ptr<front::FetchBuildConfigurationRequest>& _rsent_msg_ptr,
         size_t                                                  _app_index);
 };
@@ -963,6 +1019,7 @@ void Engine::start(const Configuration& _rcfg)
 
         err = pimpl_->front_rpc_service_.sendRequest(_rcfg.front_endpoint_.c_str(), req_ptr, lambda);
         solid_check(!err);
+        pimpl_->running_ = true;
     }
 }
 
@@ -1041,7 +1098,7 @@ void Engine::close(Descriptor* _pdesc)
 
 bool Engine::Implementation::findOrCreateEntry(
     const fs::path& _path, EntryPointerT& _rentry_ptr, unique_lock<mutex>& _rlock, std::string& _remote_path,
-    const string*& _rpstorage_id, const string*& _rpapp_unique, const string*& _rpbuild_unique)
+    /*const string*& _rpstorage_id, */ const string*& _rpapp_unique, const string*& _rpbuild_unique)
 {
     //for (const auto& e : _path) {
     auto it = _path.begin();
@@ -1071,7 +1128,7 @@ bool Engine::Implementation::findOrCreateEntry(
 
             if (_rentry_ptr->isApplication()) {
                 _remote_path.clear();
-                _rpstorage_id = &_rentry_ptr->remote_;
+                //_rpstorage_id = &_rentry_ptr->remote_;
 
                 auto& rad       = _rentry_ptr->applicationData();
                 _rpapp_unique   = &rad.app_unique_;
@@ -1113,14 +1170,14 @@ bool Engine::Implementation::findOrCreateEntry(
 
         string storage_id = ola::utility::hex_decode(encoded_storage_id);
 
-        entry_ptr          = createEntry(_rentry_ptr, name);
-        entry_ptr->remote_ = std::move(storage_id);
-        entry_ptr->status_ = EntryStatusE::FetchRequired;
+        entry_ptr           = createEntry(_rentry_ptr, name);
+        entry_ptr->pmaster_ = entry_ptr.get();
+        entry_ptr->remote_  = std::move(storage_id);
+        entry_ptr->status_  = EntryStatusE::FetchRequired;
         entry_ptr->flagSet(EntryFlagsE::Volatile);
 
         _rentry_ptr->mediaData().insertEntry(config_, EntryPointerT(entry_ptr));
 
-        _rpstorage_id = &entry_ptr->remote_;
         _rentry_ptr   = std::move(entry_ptr);
     }
     return true;
@@ -1128,12 +1185,12 @@ bool Engine::Implementation::findOrCreateEntry(
 
 bool Engine::Implementation::entry(const fs::path& _path, EntryPointerT& _rentry_ptr, unique_lock<mutex>& _rlock)
 {
-    string        remote_path;
-    const string* pstorage_id   = nullptr;
+    string remote_path;
+    //const string* pstorage_id   = nullptr;
     const string* papp_unique   = nullptr;
     const string* pbuild_unique = nullptr;
 
-    if (!findOrCreateEntry(_path, _rentry_ptr, _rlock, remote_path, pstorage_id, papp_unique, pbuild_unique)) {
+    if (!findOrCreateEntry(_path, _rentry_ptr, _rlock, remote_path, /*pstorage_id,*/ papp_unique, pbuild_unique)) {
         return false;
     }
 
@@ -1162,7 +1219,7 @@ bool Engine::Implementation::entry(const fs::path& _path, EntryPointerT& _rentry
 
         auto req_ptr         = make_shared<ListStoreRequest>();
         req_ptr->path_       = remote_path;
-        req_ptr->storage_id_ = *pstorage_id;
+        req_ptr->storage_id_ = _rentry_ptr->pmaster_->remote_;
 
         front_rpc_service_.sendRequest(config_.front_endpoint_.c_str(), req_ptr, lambda);
     }
@@ -1183,7 +1240,7 @@ bool Engine::Implementation::entry(const fs::path& _path, EntryPointerT& _rentry
 
         if (_rentry_ptr->type_ == EntryTypeE::File) {
             if (_rentry_ptr->data_any_.empty()) {
-                _rentry_ptr->data_any_ = FileData(*pstorage_id, remote_path);
+                _rentry_ptr->data_any_ = FileData(/**pstorage_id,*/ remote_path);
                 if (papp_unique != nullptr) {
                     file_cache_engine_.open(_rentry_ptr->fileData(), _rentry_ptr->size_, *papp_unique, *pbuild_unique, remote_path);
                 }
@@ -1591,7 +1648,7 @@ void Engine::Implementation::asyncFetch(EntryPointerT& _rentry_ptr, const size_t
         rfetch_stub.request_ptr_ = make_shared<FetchStoreRequest>();
     }
     rfetch_stub.request_ptr_->path_       = rfile_data.remote_path_;
-    rfetch_stub.request_ptr_->storage_id_ = rfile_data.storage_id_;
+    rfetch_stub.request_ptr_->storage_id_ = _rentry_ptr->pmaster_->remote_;
     rfetch_stub.request_ptr_->offset_     = rfetch_stub.offset_;
     rfetch_stub.request_ptr_->size_       = rfetch_stub.size_;
 
@@ -1798,13 +1855,13 @@ void Engine::Implementation::storeAuthData(const string& _user, const string& _t
 }
 
 void Engine::Implementation::remoteFetchApplication(
-    std::shared_ptr<front::ListAppsResponse>&               _apps_response,
+    std::vector<std::string>&                               _rapp_id_vec,
     std::shared_ptr<front::FetchBuildConfigurationRequest>& _rsent_msg_ptr,
     size_t                                                  _app_index)
 {
-    _rsent_msg_ptr->app_id_ = _apps_response->app_id_vec_[_app_index];
+    _rsent_msg_ptr->app_id_ = _rapp_id_vec[_app_index];
 
-    auto lambda = [this, _app_index, apps_response = std::move(_apps_response)](
+    auto lambda = [this, _app_index, app_id_vec = std::move(_rapp_id_vec)](
                       frame::mprpc::ConnectionContext&                         _rctx,
                       std::shared_ptr<front::FetchBuildConfigurationRequest>&  _rsent_msg_ptr,
                       std::shared_ptr<front::FetchBuildConfigurationResponse>& _rrecv_msg_ptr,
@@ -1814,7 +1871,7 @@ void Engine::Implementation::remoteFetchApplication(
             ++_app_index;
 
             this->workpool_.push(
-                [this, recv_msg_ptr = std::move(_rrecv_msg_ptr), is_last = _app_index >= apps_response->app_id_vec_.size()]() mutable {
+                [this, recv_msg_ptr = std::move(_rrecv_msg_ptr), is_last = _app_index >= app_id_vec.size()]() mutable {
                     insertApplicationEntry(recv_msg_ptr);
                     if (is_last) {
                         //done with all applications
@@ -1822,8 +1879,8 @@ void Engine::Implementation::remoteFetchApplication(
                     }
                 });
 
-            if (_app_index < apps_response->app_id_vec_.size()) {
-                remoteFetchApplication(apps_response, _rsent_msg_ptr, _app_index);
+            if (_app_index < app_id_vec.size()) {
+                remoteFetchApplication(app_id_vec, _rsent_msg_ptr, _app_index);
             }
         }
     };
@@ -1831,7 +1888,7 @@ void Engine::Implementation::remoteFetchApplication(
     front_rpc_service_.sendRequest(config_.front_endpoint_.c_str(), _rsent_msg_ptr, lambda);
 }
 
-void Engine::Implementation::onAllApplicationsFetched()
+void Engine::Implementation::cleanFileCache()
 {
     auto check_application_exist_lambda = [this](const std::string& _app_unique, const std::string& _build_unique) {
         unique_lock<mutex> lock{root_mutex_};
@@ -1845,6 +1902,153 @@ void Engine::Implementation::onAllApplicationsFetched()
         return false;
     };
     file_cache_engine_.removeOldApplications(check_application_exist_lambda);
+}
+
+void Engine::Implementation::update()
+{
+
+    int         done = 0;
+    UpdatesMapT updates_map;
+    auto        list_lambda = [this, &done, &updates_map](
+                           frame::mprpc::ConnectionContext&          _rctx,
+                           std::shared_ptr<front::ListAppsRequest>&  _rsent_msg_ptr,
+                           std::shared_ptr<front::ListAppsResponse>& _rrecv_msg_ptr,
+                           ErrorConditionT const&                    _rerror) {
+        if (_rrecv_msg_ptr) {
+            auto req_ptr         = make_shared<FetchBuildUpdatesRequest>();
+            req_ptr->app_id_vec_ = std::move(_rrecv_msg_ptr->app_id_vec_);
+
+            auto lambda = [this, &done, &updates_map](
+                              frame::mprpc::ConnectionContext&                   _rctx,
+                              std::shared_ptr<front::FetchBuildUpdatesRequest>&  _rsent_msg_ptr,
+                              std::shared_ptr<front::FetchBuildUpdatesResponse>& _rrecv_msg_ptr,
+                              ErrorConditionT const&                             _rerror) {
+                if (_rrecv_msg_ptr) {
+                    updates_map.clear();
+                    for (size_t i = 0; i < _rrecv_msg_ptr->app_vec_.size(); ++i) {
+                        const auto& app_unique   = _rrecv_msg_ptr->app_vec_[i].first;
+                        const auto& build_unique = _rrecv_msg_ptr->app_vec_[i].second;
+                        const auto& app_id       = _rsent_msg_ptr->app_id_vec_[i];
+
+                        updates_map[app_unique] = make_pair(app_id, build_unique);
+                    }
+                    unique_lock<mutex> lock(root_mutex_);
+                    done = 1;
+                    root_cv_.notify_one();
+                } else {
+                    unique_lock<mutex> lock(root_mutex_);
+                    done = -1;
+                    root_cv_.notify_one();
+                }
+            };
+
+            const auto err = front_rpc_service_.sendRequest(config_.front_endpoint_.c_str(), req_ptr, lambda);
+            if (!err) {
+                return;
+            }
+        }
+
+        unique_lock<mutex> lock(root_mutex_);
+        done = -1;
+        root_cv_.notify_one();
+    };
+
+    while (true) {
+        {
+            unique_lock<mutex> lock(root_mutex_);
+
+            root_cv_.wait_for(lock, chrono::seconds(config_.update_poll_seconds_), [this]() { return !running_; });
+            if (!running_) {
+                return;
+            }
+        }
+
+        auto req_ptr     = make_shared<ListAppsRequest>();
+        req_ptr->choice_ = 'o'; //TODO change to 'a' -> aquired apps
+
+        const auto err = front_rpc_service_.sendRequest(config_.front_endpoint_.c_str(), req_ptr, list_lambda);
+        if (!err) {
+            unique_lock<mutex> lock(root_mutex_);
+
+            root_cv_.wait_for(lock, chrono::seconds(config_.update_poll_seconds_), [&done]() { return done != 0; });
+            if (done > 0) {
+                updateApplications(updates_map);
+            }
+        }
+    }
+}
+
+void Engine::Implementation::updateApplications(const UpdatesMapT& _updates_map)
+{
+    //under root lock
+    //get new applications
+    vector<string> new_app_id_vec;
+
+    auto& rrd = root_entry_ptr_->rootData();
+
+    for (const auto& u : _updates_map) {
+        if (rrd.findApplication(u.first) == nullptr) {
+            new_app_id_vec.push_back(u.second.first); //app_id
+        }
+    }
+
+    //find deleted and updated apps
+    for (const auto& u : rrd.app_entry_map_) {
+        Entry&           rapp_entry = *u.second;
+        ApplicationData& rad        = rapp_entry.applicationData();
+        const auto       it         = _updates_map.find(rad.app_unique_);
+        if (it == _updates_map.end()) {
+            //app needs to be delete
+
+            lock_guard app_lock(rapp_entry.mutex());
+
+            if (rad.canBeDeleted()) {
+                auto entry_ptr = rrd.eraseApplication(rapp_entry);
+                if (entry_ptr) {
+                    solid_check(entry_ptr.get() == &rapp_entry);
+                    file_cache_engine_.removeApplication(rad.app_unique_, rad.build_unique_);
+                }
+            } else {
+                rapp_entry.flagSet(EntryFlagsE::Delete);
+            }
+
+        } else if (it->second.second != rad.build_unique_) {
+            //app needs to be updated
+
+            lock_guard app_lock(rapp_entry.mutex());
+
+            if (rad.canBeDeleted()) {
+                auto entry_ptr = rrd.eraseApplication(rapp_entry);
+                if (entry_ptr) {
+                    solid_check(entry_ptr.get() == &rapp_entry);
+                    file_cache_engine_.removeApplication(rad.app_unique_, rad.build_unique_);
+                    new_app_id_vec.push_back(it->second.first);
+                } else {
+                    rapp_entry.flagSet(EntryFlagsE::Update);
+                    rad.app_id_ = it->second.first;
+                }
+
+            } else {
+                rapp_entry.flagSet(EntryFlagsE::Update);
+                rad.app_id_ = it->second.first;
+            }
+        }
+    }
+
+    auto req_ptr = make_shared<front::FetchBuildConfigurationRequest>();
+
+    //TODO:
+    req_ptr->lang_  = "US_en";
+    req_ptr->os_id_ = "Windows10x86_64";
+    req_ptr->property_vec_.emplace_back("description");
+
+    remoteFetchApplication(new_app_id_vec, req_ptr, 0);
+}
+
+void Engine::Implementation::onAllApplicationsFetched()
+{
+    cleanFileCache();
+    update_thread = thread(&Implementation::update, this);
 }
 
 void Engine::Implementation::onFrontListAppsResponse(
@@ -1862,7 +2066,7 @@ void Engine::Implementation::onFrontListAppsResponse(
     req_ptr->os_id_ = "Windows10x86_64";
     req_ptr->property_vec_.emplace_back("description");
 
-    remoteFetchApplication(_rrecv_msg_ptr, req_ptr, 0);
+    remoteFetchApplication(_rrecv_msg_ptr->app_id_vec_, req_ptr, 0);
 }
 
 void Engine::Implementation::createRootEntry()
