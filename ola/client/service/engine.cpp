@@ -121,8 +121,10 @@ struct Hash {
 };
 
 struct Entry;
-using EntryPointerT = std::shared_ptr<Entry>;
-using EntryMapT     = std::unordered_map<const std::reference_wrapper<const string>, EntryPointerT, Hash, Equal>;
+using EntryPointerT   = std::shared_ptr<Entry>;
+using EntryMapT       = std::unordered_map<const std::reference_wrapper<const string>, EntryPointerT, Hash, Equal>;
+using EntryPtrMapT    = std::unordered_map<const std::reference_wrapper<const string>, Entry*, Hash, Equal>;
+using EntryPtrVectorT = std::vector<Entry*>;
 
 struct DirectoryData {
     EntryMapT entry_map_;
@@ -249,13 +251,18 @@ struct FileData : file_cache::FileData {
 };
 
 struct ApplicationData : DirectoryData {
-    std::string app_id_;
-    std::string build_unique_;
+    std::string     app_unique_;
+    std::string     build_unique_;
+    EntryPtrVectorT shortcut_vec_;
 
-    ApplicationData(const std::string& _app_id, const std::string& _build_unique)
-        : app_id_(_app_id)
+    ApplicationData(const std::string& _app_unique, const std::string& _build_unique)
+        : app_unique_(_app_unique)
         , build_unique_(_build_unique)
     {
+    }
+
+    void insertShortcut(Entry* _pentry) {
+        shortcut_vec_.emplace_back(_pentry);
     }
 };
 
@@ -284,6 +291,13 @@ struct MediaData : DirectoryData {
     void pushBack(Entry& _re) const;
 
     void popFront() const;
+};
+
+struct RootData : DirectoryData {
+    EntryPtrMapT app_entry_map_;
+
+    Entry* findApplication(const string& _path) const;
+    void   insertApplication(Entry* _pentry);
 };
 
 using UniqueIdT = solid::frame::UniqueId;
@@ -354,6 +368,10 @@ struct Entry {
         if (pdd) {
             return pdd;
         }
+        pdd = boost::any_cast<RootData>(&data_any_);
+        if (pdd) {
+            return pdd;
+        }
         return boost::any_cast<DirectoryData>(&data_any_);
     }
 
@@ -364,6 +382,10 @@ struct Entry {
             return pdd;
         }
         pdd = boost::any_cast<MediaData>(&data_any_);
+        if (pdd) {
+            return pdd;
+        }
+        pdd = boost::any_cast<RootData>(&data_any_);
         if (pdd) {
             return pdd;
         }
@@ -408,6 +430,11 @@ struct Entry {
     inline ShortcutData& shortcutData()
     {
         return *boost::any_cast<ShortcutData>(&data_any_);
+    }
+
+    inline RootData& rootData()
+    {
+        return *boost::any_cast<RootData>(&data_any_);
     }
 
     inline MediaData& mediaData()
@@ -548,7 +575,8 @@ void DirectoryData::erase(const EntryPointerT& _rentry_ptr)
 
 void DirectoryData::insertEntry(EntryPointerT&& _uentry_ptr)
 {
-    entry_map_.emplace(_uentry_ptr->name_, std::move(_uentry_ptr));
+    const string& rname = _uentry_ptr->name_;
+    entry_map_.emplace(rname, std::move(_uentry_ptr));
 }
 
 void MediaData::erase(Entry& _re) const
@@ -620,8 +648,21 @@ void MediaData::insertEntry(const Configuration& _rcfg, EntryPointerT&& _uentry_
     DirectoryData::insertEntry(std::move(_uentry_ptr));
 }
 
-} //namespace
+Entry* RootData::findApplication(const string& _path) const
+{
+    auto it = app_entry_map_.find(_path);
+    if (it != app_entry_map_.end()) {
+        return it->second;
+    }
+    return nullptr;
+}
 
+void RootData::insertApplication(Entry* _pentry) {
+    app_entry_map_.emplace(_pentry->applicationData().app_unique_, _pentry);
+}
+
+} //namespace
+//-----------------------------------------------------------------------------
 struct Descriptor {
     void*         pdirectory_buffer_ = nullptr;
     EntryPointerT entry_ptr_;
@@ -715,7 +756,7 @@ public:
 
     bool findOrCreateEntry(
         const fs::path& _path, EntryPointerT& _rentry_ptr, unique_lock<mutex>& _rlock, std::string& _remote_path,
-        const string*& _rpstorage_id, const string*& _rpapp_id, const string*& _rpbuild_unique);
+        const string*& _rpstorage_id, const string*& _rpapp_unique, const string*& _rpbuild_unique);
 
     void asyncFetch(EntryPointerT& _rentry_ptr, const size_t _fetch_index, const uint64_t _offset, uint64_t _size);
 
@@ -757,7 +798,7 @@ private:
 
     void storeAuthData(const string& _user, const string& _token);
 
-    void insertApplicationEntry(const std::string& _app_id, std::shared_ptr<front::FetchBuildConfigurationResponse>& _rrecv_msg_ptr);
+    void insertApplicationEntry(std::shared_ptr<front::FetchBuildConfigurationResponse>& _rrecv_msg_ptr);
     void insertMountEntry(EntryPointerT& _rparent_ptr, const fs::path& _local, const string& _remote);
     bool canPreFetch(const EntryPointerT& _rentry_ptr) const;
 
@@ -918,7 +959,7 @@ void Engine::start(const Configuration& _rcfg)
         };
 
         auto req_ptr     = make_shared<ListAppsRequest>();
-        req_ptr->choice_ = 'o';
+        req_ptr->choice_ = 'o'; //TODO change to 'a' -> aquired apps
 
         err = pimpl_->front_rpc_service_.sendRequest(_rcfg.front_endpoint_.c_str(), req_ptr, lambda);
         solid_check(!err);
@@ -1000,7 +1041,7 @@ void Engine::close(Descriptor* _pdesc)
 
 bool Engine::Implementation::findOrCreateEntry(
     const fs::path& _path, EntryPointerT& _rentry_ptr, unique_lock<mutex>& _rlock, std::string& _remote_path,
-    const string*& _rpstorage_id, const string*& _rpapp_id, const string*& _rpbuild_unique)
+    const string*& _rpstorage_id, const string*& _rpapp_unique, const string*& _rpbuild_unique)
 {
     //for (const auto& e : _path) {
     auto it = _path.begin();
@@ -1033,7 +1074,7 @@ bool Engine::Implementation::findOrCreateEntry(
                 _rpstorage_id = &_rentry_ptr->remote_;
 
                 auto& rad       = _rentry_ptr->applicationData();
-                _rpapp_id       = &_rentry_ptr->name_; //&pfd->get()->app_id_;
+                _rpapp_unique   = &rad.app_unique_;
                 _rpbuild_unique = &rad.build_unique_;
             } else if (_rentry_ptr->isMedia()) {
                 break;
@@ -1089,10 +1130,10 @@ bool Engine::Implementation::entry(const fs::path& _path, EntryPointerT& _rentry
 {
     string        remote_path;
     const string* pstorage_id   = nullptr;
-    const string* papp_id       = nullptr;
+    const string* papp_unique   = nullptr;
     const string* pbuild_unique = nullptr;
 
-    if (!findOrCreateEntry(_path, _rentry_ptr, _rlock, remote_path, pstorage_id, papp_id, pbuild_unique)) {
+    if (!findOrCreateEntry(_path, _rentry_ptr, _rlock, remote_path, pstorage_id, papp_unique, pbuild_unique)) {
         return false;
     }
 
@@ -1143,8 +1184,8 @@ bool Engine::Implementation::entry(const fs::path& _path, EntryPointerT& _rentry
         if (_rentry_ptr->type_ == EntryTypeE::File) {
             if (_rentry_ptr->data_any_.empty()) {
                 _rentry_ptr->data_any_ = FileData(*pstorage_id, remote_path);
-                if (papp_id != nullptr) {
-                    file_cache_engine_.open(_rentry_ptr->fileData(), _rentry_ptr->size_, *papp_id, *pbuild_unique, remote_path);
+                if (papp_unique != nullptr) {
+                    file_cache_engine_.open(_rentry_ptr->fileData(), _rentry_ptr->size_, *papp_unique, *pbuild_unique, remote_path);
                 }
             }
         }
@@ -1773,8 +1814,8 @@ void Engine::Implementation::remoteFetchApplication(
             ++_app_index;
 
             this->workpool_.push(
-                [this, recv_msg_ptr = std::move(_rrecv_msg_ptr), app_id = _rsent_msg_ptr->app_id_, is_last = _app_index >= apps_response->app_id_vec_.size()]() mutable {
-                    insertApplicationEntry(app_id, recv_msg_ptr);
+                [this, recv_msg_ptr = std::move(_rrecv_msg_ptr), is_last = _app_index >= apps_response->app_id_vec_.size()]() mutable {
+                    insertApplicationEntry(recv_msg_ptr);
                     if (is_last) {
                         //done with all applications
                         onAllApplicationsFetched();
@@ -1792,18 +1833,14 @@ void Engine::Implementation::remoteFetchApplication(
 
 void Engine::Implementation::onAllApplicationsFetched()
 {
-    auto check_application_exist_lambda = [this](const std::string& _app_name, const std::string& _build_unique) {
+    auto check_application_exist_lambda = [this](const std::string& _app_unique, const std::string& _build_unique) {
         unique_lock<mutex> lock{root_mutex_};
-        auto               entry_ptr = root_entry_ptr_->find(_app_name);
-        if (entry_ptr) {
-            //mutex& rmutex = entry_ptr->mutex();
-            //lock.unlock(); //no overlapping locks
-            //unique_lock<mutex> tlock{rmutex};
-            //lock.swap(tlock);
-            auto pad = entry_ptr->applicationDataPtr();
-            if (pad != nullptr) {
-                return pad->build_unique_ == _build_unique;
-            }
+
+        RootData& rrd = root_entry_ptr_->rootData();
+
+        auto pentry = rrd.findApplication(_app_unique);
+        if (pentry) {
+            return pentry->applicationData().build_unique_ == _build_unique;
         }
         return false;
     };
@@ -1833,7 +1870,7 @@ void Engine::Implementation::createRootEntry()
     lock_guard<mutex> lock{root_mutex_};
 
     root_entry_ptr_            = make_shared<Entry>(EntryTypeE::Directory, root_mutex_, cv_dq_[0], "");
-    root_entry_ptr_->data_any_ = DirectoryData();
+    root_entry_ptr_->data_any_ = RootData();
     root_entry_ptr_->status_   = EntryStatusE::Fetched;
 
     media_entry_ptr_            = make_shared<Entry>(EntryTypeE::Media, root_entry_ptr_, root_mutex_, cv_dq_[0], media_name, 0);
@@ -1885,14 +1922,14 @@ string to_system_path(const string& _path)
     return to;
 }
 
-void Engine::Implementation::insertApplicationEntry(const string& _app_id, std::shared_ptr<front::FetchBuildConfigurationResponse>& _rrecv_msg_ptr)
+void Engine::Implementation::insertApplicationEntry(std::shared_ptr<front::FetchBuildConfigurationResponse>& _rrecv_msg_ptr)
 {
     auto entry_ptr = createEntry(
         root_entry_ptr_, _rrecv_msg_ptr->configuration_.directory_,
         EntryTypeE::Application);
 
     entry_ptr->remote_   = _rrecv_msg_ptr->storage_id_;
-    entry_ptr->data_any_ = ApplicationData(_app_id, _rrecv_msg_ptr->unique_);
+    entry_ptr->data_any_ = ApplicationData(_rrecv_msg_ptr->app_unique_, _rrecv_msg_ptr->build_unique_);
 
     if (_rrecv_msg_ptr->configuration_.hasHiddenDirectoryFlag()) {
         entry_ptr->flagSet(EntryFlagsE::Hidden);
@@ -1918,8 +1955,8 @@ void Engine::Implementation::insertApplicationEntry(const string& _app_id, std::
     {
         lock_guard<mutex> lock{rm};
         //TODO: also create coresponding shortcuts
-
-        root_entry_ptr_->directoryData().insertEntry(std::move(entry_ptr));
+        root_entry_ptr_->rootData().insertApplication(entry_ptr.get());
+        root_entry_ptr_->directoryData().insertEntry(EntryPointerT(entry_ptr)); //insert copy
     }
 
     const auto& app_folder_name = _rrecv_msg_ptr->configuration_.directory_;
@@ -1940,9 +1977,11 @@ void Engine::Implementation::insertApplicationEntry(const string& _app_id, std::
                 to_system_path(config_.mount_prefix_ + '/' + app_folder_name + '/' + sh.run_folder_),
                 to_system_path(config_.mount_prefix_ + '/' + app_folder_name + '/' + sh.icon_),
                 _rrecv_msg_ptr->configuration_.property_vec_.front().second);
-
-            lock_guard<mutex> lock{rm};
-            root_entry_ptr_->directoryData().insertEntry(std::move(skt_entry_ptr));
+            {
+                lock_guard<mutex> lock{rm};
+                entry_ptr->applicationData().insertShortcut(skt_entry_ptr.get());
+                root_entry_ptr_->directoryData().insertEntry(std::move(skt_entry_ptr));
+            }
         }
     }
 }

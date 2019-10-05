@@ -118,13 +118,9 @@ struct Engine::Implementation {
         return std::chrono::steady_clock::now().time_since_epoch().count();
     }
 
-    fs::path computeFilePath(const string& _app_id, const string& _build, const string& _file_name)
+    fs::path computeFilePath(const string& _app_unique, const string& _build_unique, const string& _file_name)
     {
-        string d = _app_id;
-
-        d += '\\';
-        d += _build;
-        d = namefy(d);
+        string d = _app_unique + '_' + _build_unique;
 
         fs::path p = config_.base_path_;
         p /= d;
@@ -132,8 +128,8 @@ struct Engine::Implementation {
         return p;
     }
 
-    bool             exists(FileData& _rfd, ApplicationStub*& _rpapp, const std::string& _app_id, const std::string& _build_unique, const std::string& _name) const;
-    ApplicationStub* application(const std::string& _app_id, const std::string& _build_unique);
+    bool             exists(FileData& _rfd, ApplicationStub*& _rpapp, const std::string& _app_unique, const std::string& _build_unique, const std::string& _name) const;
+    ApplicationStub* application(const std::string& _app_unique, const std::string& _build_unique);
     bool             ensureSpace(uint64_t _size);
     void             startUsingFile(FileData& _rfd, ApplicationStub& _rapp, const std::string& _name, const uint64_t _size);
     void             doneUsingFile(FileData& _rfd);
@@ -286,21 +282,17 @@ const Configuration& Engine::configuration() const
     return pimpl_->config_;
 }
 
-void Engine::open(FileData& _rfd, const uint64_t _size, const std::string& _app_id, const std::string& _build_unique, const std::string& _remote_path)
+void Engine::open(FileData& _rfd, const uint64_t _size, const std::string& _app_unique, const std::string& _build_unique, const std::string& _remote_path)
 {
-    string d = _app_id;
+    string d = _app_unique + '_' + _build_unique;
     string f = utility::hex_encode(utility::sha256(_remote_path));
-
-    d += '\\';
-    d += _build_unique;
-    d = namefy(d);
 
     _rfd.cache_index_     = -1;
     ApplicationStub* papp = nullptr;
 
     lock_guard<mutex> lock{pimpl_->mutex_};
 
-    if (pimpl_->exists(_rfd, papp, _app_id, _build_unique, f) || ((papp = pimpl_->application(_app_id, _build_unique)) != nullptr && pimpl_->ensureSpace(_size))) {
+    if (pimpl_->exists(_rfd, papp, _app_unique, _build_unique, f) || ((papp = pimpl_->application(_app_unique, _build_unique)) != nullptr && pimpl_->ensureSpace(_size))) {
 
         fs::path p = configuration().base_path_;
 
@@ -317,13 +309,13 @@ void Engine::open(FileData& _rfd, const uint64_t _size, const std::string& _app_
         _rfd.file_.open(p, _size);
     }
 
-    solid_log(logger, Info, _size << ' ' << _app_id << ' ' << _build_unique << ' ' << _remote_path << " -> " << _rfd.cache_index_);
+    solid_log(logger, Info, _size << ' ' << _app_unique << ' ' << _build_unique << ' ' << _remote_path << " -> " << _rfd.cache_index_);
 }
 
-ApplicationStub* Engine::Implementation::application(const std::string& _app_id, const std::string& _build_unique)
+ApplicationStub* Engine::Implementation::application(const std::string& _app_unique, const std::string& _build_unique)
 {
-    solid_log(logger, Info, _app_id << ' ' << _build_unique);
-    auto it = app_map_.find(_app_id);
+    solid_log(logger, Info, _app_unique << ' ' << _build_unique);
+    auto it = app_map_.find(_app_unique);
     if (it != app_map_.end()) {
         if (it->second->build_ == _build_unique) {
             return it->second;
@@ -339,7 +331,7 @@ ApplicationStub* Engine::Implementation::application(const std::string& _app_id,
         }
 
         papp->build_ = _build_unique;
-        papp->name_  = _app_id;
+        papp->name_  = _app_unique;
 
         app_map_[papp->name_] = papp;
 
@@ -348,21 +340,21 @@ ApplicationStub* Engine::Implementation::application(const std::string& _app_id,
     return nullptr;
 }
 
-bool Engine::Implementation::exists(FileData& _rfd, ApplicationStub*& _rpapp, const std::string& _app_id, const std::string& _build_unique, const std::string& _name) const
+bool Engine::Implementation::exists(FileData& _rfd, ApplicationStub*& _rpapp, const std::string& _app_unique, const std::string& _build_unique, const std::string& _name) const
 {
-    auto it = app_map_.find(_app_id);
+    auto it = app_map_.find(_app_unique);
     if (it != app_map_.end()) {
         if (it->second->build_ == _build_unique) {
             _rpapp   = it->second;
             auto fit = it->second->file_map_.find(_name);
             if (fit != it->second->file_map_.end()) {
                 _rfd.cache_index_ = fit->second;
-                solid_log(logger, Info, _app_id << ' ' << _build_unique << ' ' << _name << "-> true");
+                solid_log(logger, Info, _app_unique << ' ' << _build_unique << ' ' << _name << "-> true");
                 return true;
             }
         }
     }
-    solid_log(logger, Info, _app_id << ' ' << _build_unique << ' ' << _name << "-> false");
+    solid_log(logger, Info, _app_unique << ' ' << _build_unique << ' ' << _name << "-> false");
     return false;
 }
 
@@ -534,11 +526,11 @@ void Engine::Implementation::removeApplication(ApplicationStub& _rapp)
     _rapp.clear();
 }
 
-void Engine::removeApplication(const std::string& _app_id, const std::string& _build_unique)
+void Engine::removeApplication(const std::string& _app_unique, const std::string& _build_unique)
 {
-    solid_log(logger, Info, _app_id << ' ' << _build_unique);
+    solid_log(logger, Info, _app_unique << ' ' << _build_unique);
     lock_guard<mutex> lock{pimpl_->mutex_};
-    auto              it = pimpl_->app_map_.find(_app_id);
+    auto              it = pimpl_->app_map_.find(_app_unique);
     if (it != pimpl_->app_map_.end()) {
         if (it->second->build_ == _build_unique) {
             pimpl_->removeApplication(*it->second);
