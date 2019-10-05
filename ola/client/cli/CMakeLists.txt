@@ -1,6 +1,8 @@
 add_executable (ola_client_cli ola_client_cli.cpp ../../common/ola_front_protocol.hpp)
 
-set_source_files_properties(ola_client_cli.cpp PROPERTIES COMPILE_FLAGS -bigobj)
+if(WIN32)
+    set_source_files_properties(ola_client_cli.cpp PROPERTIES COMPILE_FLAGS -bigobj)
+endif()
 
 target_link_libraries (ola_client_cli
     ola_utility
