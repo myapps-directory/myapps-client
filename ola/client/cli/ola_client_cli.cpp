@@ -443,6 +443,7 @@ void handle_help(istream& _ris, Engine &_reng){
     cout<<"> generate media ~/path/to/media.cfg\n\n";
     cout<<"> create app\n\n";
     cout<<"> create build APP_ID BUILD_TAG ~/path/to/build.cfg ~/path/to/build_folder ~/path/to/build_icon.png\n";
+    cout<<"> fetch updates LANGUAGE_ID OS_ID APP_ID [APP_ID]\n";
     cout<<"\nExamples:\n:";
     cout<<"> create app bubbles.app\n";
     cout<<"> create build l/AQPpeZWqoR1Fcngt3t2w== first bubbles.bld ~/tmp/bubbles_client ~/tmp/bubbles.png\n";
@@ -760,7 +761,8 @@ void handle_fetch_config(istream& _ris, Engine &_reng){
         if(_rrecv_msg_ptr && _rrecv_msg_ptr->error_ == 0){
             cout<<"{\n";
             cout<<"Remote Root: "<<utility::base64_encode(_rrecv_msg_ptr->storage_id_)<<endl;
-            cout<<"Build unique: "<<_rrecv_msg_ptr->unique_<<endl;
+            cout<<"Application unique: "<<_rrecv_msg_ptr->app_unique_<<endl;
+            cout<<"Build unique: "<<_rrecv_msg_ptr->build_unique_<<endl;
             cout<<_rrecv_msg_ptr->configuration_;
             cout<<endl;
             cout<<"}"<<endl;
@@ -898,6 +900,53 @@ void handle_fetch_store(istream& _ris, Engine &_reng){
     }
 }
 
+void handle_fetch_updates(istream& _ris, Engine &_reng){
+    auto req_ptr = make_shared<FetchBuildUpdatesRequest>();
+    
+    _ris>>std::quoted(req_ptr->lang_);
+    _ris>>std::quoted(req_ptr->os_id_);
+    
+    while(!_ris.eof()){
+        req_ptr->app_id_vec_.emplace_back();
+        _ris>>std::quoted(req_ptr->app_id_vec_.back());
+        req_ptr->app_id_vec_.back() = utility::base64_decode(req_ptr->app_id_vec_.back());
+    }
+    
+    if(!req_ptr->app_id_vec_.empty() && req_ptr->app_id_vec_.back().empty()){
+        req_ptr->app_id_vec_.pop_back();
+    }
+    
+    if(req_ptr->app_id_vec_.empty()){
+        cout<<"Error at least one application id is required!"<<endl;
+        return;
+    }
+    
+    promise<void> prom;
+    auto lambda = [&prom](
+        frame::mprpc::ConnectionContext&        _rctx,
+        std::shared_ptr<FetchBuildUpdatesRequest>&  _rsent_msg_ptr,
+        std::shared_ptr<FetchBuildUpdatesResponse>& _rrecv_msg_ptr,
+        ErrorConditionT const&                  _rerror
+    ){
+        if(_rrecv_msg_ptr && _rrecv_msg_ptr->error_ == 0){
+            for(size_t i = 0; i < _rrecv_msg_ptr->app_vec_.size(); ++i){
+                const string app_id = utility::base64_encode(_rsent_msg_ptr->app_id_vec_[i]);
+                const string& app_unique = _rrecv_msg_ptr->app_vec_[i].first;
+                const string& build_unique = _rrecv_msg_ptr->app_vec_[i].second;
+                cout<<app_id<<" -> [app_unique: "<<app_unique<<" build_unique: "<<build_unique<<']'<<endl;
+            }
+        }else if(!_rrecv_msg_ptr){
+            cout<<"Error - no response: "<<_rerror.message()<<endl;
+        }else{
+            cout<<"Error received from server: "<<_rrecv_msg_ptr->error_ <<endl;
+        }
+        prom.set_value();
+    };
+    _reng.rpcService().sendRequest(_reng.serverEndpoint().c_str(), req_ptr, lambda);
+    
+    solid_check(prom.get_future().wait_for(chrono::seconds(100)) == future_status::ready, "Taking too long - waited 100 secs");
+}
+
 //-----------------------------------------------------------------------------
 
 void handle_fetch(istream& _ris, Engine& _reng){
@@ -914,6 +963,8 @@ void handle_fetch(istream& _ris, Engine& _reng){
         handle_fetch_store(_ris, _reng);
     }else if(what == "media"){
         handle_fetch_media(_ris, _reng);
+    }else if(what == "updates"){
+        handle_fetch_updates(_ris, _reng);
     }
 }
 

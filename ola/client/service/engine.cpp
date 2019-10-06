@@ -289,7 +289,8 @@ struct ApplicationData : DirectoryData {
         use_count_.fetch_add(1);
     }
 
-    void releaseApplication() {
+    void releaseApplication()
+    {
         use_count_.fetch_sub(1);
     }
 };
@@ -1341,7 +1342,7 @@ void Engine::Implementation::releaseApplication(Entry& _rapp_entry)
     lock_guard<mutex> lock(root_mutex_);
     auto&             rad = _rapp_entry.applicationData();
     vector<string>    new_app_id_vec;
-    auto& rrd = root_entry_ptr_->rootData();
+    auto&             rrd = root_entry_ptr_->rootData();
 
     rad.releaseApplication();
 
