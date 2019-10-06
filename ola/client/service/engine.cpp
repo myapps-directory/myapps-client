@@ -2015,6 +2015,8 @@ void Engine::Implementation::update()
         if (_rrecv_msg_ptr) {
             auto req_ptr         = make_shared<FetchBuildUpdatesRequest>();
             req_ptr->app_id_vec_ = std::move(_rrecv_msg_ptr->app_id_vec_);
+            req_ptr->lang_       = "US_en";
+            req_ptr->os_id_      = "Windows10x86_64";
 
             auto lambda = [this, &done, &updates_map](
                               frame::mprpc::ConnectionContext&                   _rctx,
