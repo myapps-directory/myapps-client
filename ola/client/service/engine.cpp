@@ -190,22 +190,17 @@ struct FileData : file_cache::FileData {
     ReadData* pback_  = nullptr;
     StatusE   status_ = PendingE;
     FetchStub fetch_stubs_[2];
-    //string    storage_id_;
     string   remote_path_;
     uint64_t prefetch_offset_;
     size_t   contiguous_read_count_;
 
-    FileData(/*const string& _storage_id, */ const string& _remote_path)
-        : /*storage_id_(_storage_id)
-        ,*/
-        remote_path_(_remote_path)
+    FileData(const string& _remote_path)
+        : remote_path_(_remote_path)
     {
     }
 
     FileData(const FileData& _rfd)
-        : /*storage_id_(_rfd.storage_id_)
-        ,*/
-        remote_path_(_rfd.remote_path_)
+        : remote_path_(_rfd.remote_path_)
     {
     }
 
@@ -286,12 +281,14 @@ struct ApplicationData : DirectoryData {
 
     void useApplication()
     {
-        use_count_.fetch_add(1);
+        auto v = use_count_.fetch_add(1);
+        solid_log(logger, Info, "" << v);
     }
 
     void releaseApplication()
     {
-        use_count_.fetch_sub(1);
+        auto v = use_count_.fetch_sub(1);
+        solid_log(logger, Info, "" << v);
     }
 };
 
@@ -715,7 +712,19 @@ EntryPointerT RootData::eraseApplication(Entry& _rentry)
     if (it->second.use_count() != 1) {
         return EntryPointerT{};
     }
-    //TODO: also erase all related shortcuts
+    
+    auto& rad = it->second->applicationData();
+
+    for (auto pse : rad.shortcut_vec_) {
+        entry_map_.erase(pse->name_);
+    }
+    rad.shortcut_vec_.clear();
+
+    EntryPointerT entry_ptr = std::move(it->second);
+
+    entry_map_.erase(it);
+
+    return entry_ptr;
 }
 
 } //namespace
@@ -832,7 +841,7 @@ public:
 
     bool findOrCreateEntry(
         const fs::path& _path, EntryPointerT& _rentry_ptr, unique_lock<mutex>& _rlock, std::string& _remote_path,
-        /*const string*& _rpstorage_id,*/ const string*& _rpapp_unique, const string*& _rpbuild_unique);
+        const string*& _rpapp_unique, const string*& _rpbuild_unique);
 
     void asyncFetch(EntryPointerT& _rentry_ptr, const size_t _fetch_index, const uint64_t _offset, uint64_t _size);
 
@@ -894,7 +903,8 @@ private:
     void remoteFetchApplication(
         std::vector<std::string>&                               _rapp_id_vec,
         std::shared_ptr<front::FetchBuildConfigurationRequest>& _rsent_msg_ptr,
-        size_t                                                  _app_index);
+        size_t                                                  _app_index,
+        const bool _first_run);
 };
 
 Engine::Engine() {}
@@ -1063,6 +1073,13 @@ bool Engine::info(const fs::path& _path, NodeFlagsT& _rnode_flags, uint64_t& _rs
 
     if (pimpl_->entry(_path, entry_ptr, lock)) {
         entry_ptr->info(_rnode_flags, _rsize);
+
+        Entry* papp_entry = nullptr;
+        if (entry_ptr && entry_ptr->pmaster_ && entry_ptr->pmaster_->isApplication()) {
+            papp_entry = entry_ptr->pmaster_;
+            pimpl_->releaseApplication(*papp_entry);
+        }
+
         solid_log(logger, Verbose, "INFO: " << _path.generic_path() << " " << static_cast<int>(_rnode_flags) << " " << _rsize);
         return true;
     }
@@ -1093,6 +1110,7 @@ void Engine::cleanup(Descriptor* _pdesc)
 void Engine::close(Descriptor* _pdesc)
 {
     --pimpl_->open_count_;
+    solid_log(logger, Info, "open_count = " << pimpl_->open_count_);
 
     if (_pdesc->entry_ptr_->type_ == EntryTypeE::File) {
         mutex&             rmutex = _pdesc->entry_ptr_->mutex();
@@ -1128,7 +1146,7 @@ void Engine::close(Descriptor* _pdesc)
 
 bool Engine::Implementation::findOrCreateEntry(
     const fs::path& _path, EntryPointerT& _rentry_ptr, unique_lock<mutex>& _rlock, std::string& _remote_path,
-    /*const string*& _rpstorage_id, */ const string*& _rpapp_unique, const string*& _rpbuild_unique)
+    const string*& _rpapp_unique, const string*& _rpbuild_unique)
 {
     Entry* papp_entry = nullptr;
     auto   it         = _path.begin();
@@ -1240,11 +1258,11 @@ bool Engine::Implementation::findOrCreateEntry(
 bool Engine::Implementation::entry(const fs::path& _path, EntryPointerT& _rentry_ptr, unique_lock<mutex>& _rlock)
 {
     string remote_path;
-    //const string* pstorage_id   = nullptr;
     const string* papp_unique   = nullptr;
     const string* pbuild_unique = nullptr;
 
-    if (!findOrCreateEntry(_path, _rentry_ptr, _rlock, remote_path, /*pstorage_id,*/ papp_unique, pbuild_unique)) {
+    if (!findOrCreateEntry(_path, _rentry_ptr, _rlock, remote_path, papp_unique, pbuild_unique)) {
+        solid_log(logger, Info, "failed findOrCreateEntry");
         return false;
     }
 
@@ -1303,7 +1321,7 @@ bool Engine::Implementation::entry(const fs::path& _path, EntryPointerT& _rentry
         //NOTE: the app_entry, if any, remains under use
         if (_rentry_ptr->type_ == EntryTypeE::File) {
             if (_rentry_ptr->data_any_.empty()) {
-                _rentry_ptr->data_any_ = FileData(/**pstorage_id,*/ remote_path);
+                _rentry_ptr->data_any_ = FileData(remote_path);
                 if (papp_unique != nullptr) {
                     file_cache_engine_.open(_rentry_ptr->fileData(), _rentry_ptr->size_, *papp_unique, *pbuild_unique, remote_path);
                 }
@@ -1354,8 +1372,13 @@ void Engine::Implementation::releaseApplication(Entry& _rapp_entry)
             if (entry_ptr) {
                 solid_check(entry_ptr.get() == &_rapp_entry);
                 file_cache_engine_.removeApplication(rad.app_unique_, rad.build_unique_);
+                solid_log(logger, Info, "app " << rad.app_unique_ << " deleted");
+
+                rrd.app_entry_map_.erase(entry_ptr->applicationData().app_unique_);
+
                 if (_rapp_entry.hasUpdate()) {
                     new_app_id_vec.push_back(std::move(rad.app_id_));
+                    solid_log(logger, Info, "app " << rad.app_unique_ << " to be updated");
                 }
             }
         }
@@ -1367,9 +1390,9 @@ void Engine::Implementation::releaseApplication(Entry& _rapp_entry)
         //TODO:
         req_ptr->lang_  = "US_en";
         req_ptr->os_id_ = "Windows10x86_64";
-        //req_ptr->property_vec_.emplace_back("description");
+        req_ptr->property_vec_.emplace_back("description");
 
-        remoteFetchApplication(new_app_id_vec, req_ptr, 0);
+        remoteFetchApplication(new_app_id_vec, req_ptr, 0, false);
     }
 }
 
@@ -1956,11 +1979,12 @@ void Engine::Implementation::storeAuthData(const string& _user, const string& _t
 void Engine::Implementation::remoteFetchApplication(
     std::vector<std::string>&                               _rapp_id_vec,
     std::shared_ptr<front::FetchBuildConfigurationRequest>& _rsent_msg_ptr,
-    size_t                                                  _app_index)
+    size_t                                                  _app_index,
+    const bool _first_run)
 {
     _rsent_msg_ptr->app_id_ = _rapp_id_vec[_app_index];
 
-    auto lambda = [this, _app_index, app_id_vec = std::move(_rapp_id_vec)](
+    auto lambda = [this, _app_index, app_id_vec = std::move(_rapp_id_vec), _first_run](
                       frame::mprpc::ConnectionContext&                         _rctx,
                       std::shared_ptr<front::FetchBuildConfigurationRequest>&  _rsent_msg_ptr,
                       std::shared_ptr<front::FetchBuildConfigurationResponse>& _rrecv_msg_ptr,
@@ -1970,16 +1994,16 @@ void Engine::Implementation::remoteFetchApplication(
             ++_app_index;
 
             this->workpool_.push(
-                [this, recv_msg_ptr = std::move(_rrecv_msg_ptr), is_last = _app_index >= app_id_vec.size()]() mutable {
+                [this, recv_msg_ptr = std::move(_rrecv_msg_ptr), is_last = _app_index >= app_id_vec.size(), _first_run]() mutable {
                     insertApplicationEntry(recv_msg_ptr);
-                    if (is_last) {
+                    if (is_last && _first_run) {
                         //done with all applications
                         onAllApplicationsFetched();
                     }
                 });
 
             if (_app_index < app_id_vec.size()) {
-                remoteFetchApplication(app_id_vec, _rsent_msg_ptr, _app_index);
+                remoteFetchApplication(app_id_vec, _rsent_msg_ptr, _app_index, _first_run);
             }
         }
     };
@@ -2032,6 +2056,7 @@ void Engine::Implementation::update()
                         const auto& app_id       = _rsent_msg_ptr->app_id_vec_[i];
 
                         updates_map[app_unique] = make_pair(app_id, build_unique);
+                        solid_log(logger, Info, "update: app_unique = " << app_unique << " build_unique = " << build_unique);
                     }
                     unique_lock<mutex> lock(root_mutex_);
                     done = 1;
@@ -2090,12 +2115,13 @@ void Engine::Implementation::updateApplications(const UpdatesMapT& _updates_map)
     for (const auto& u : _updates_map) {
         if (rrd.findApplication(u.first) == nullptr) {
             new_app_id_vec.push_back(u.second.first); //app_id
+            solid_log(logger, Info, "new application: " << u.first << " : " << u.second.second);
         }
     }
 
     //find deleted and updated apps
-    for (const auto& u : rrd.app_entry_map_) {
-        Entry&           rapp_entry = *u.second;
+    for (auto app_it = rrd.app_entry_map_.begin(); app_it != rrd.app_entry_map_.end();) {
+        Entry&           rapp_entry = *app_it->second;
         ApplicationData& rad        = rapp_entry.applicationData();
         const auto       it         = _updates_map.find(rad.app_unique_);
         if (it == _updates_map.end()) {
@@ -2104,13 +2130,18 @@ void Engine::Implementation::updateApplications(const UpdatesMapT& _updates_map)
             lock_guard app_lock(rapp_entry.mutex());
 
             if (rad.canBeDeleted()) {
+                solid_log(logger, Info, "app " << it->first << " can be deleted");
                 auto entry_ptr = rrd.eraseApplication(rapp_entry);
                 if (entry_ptr) {
                     solid_check(entry_ptr.get() == &rapp_entry);
+                    app_it = rrd.app_entry_map_.erase(app_it);
                     file_cache_engine_.removeApplication(rad.app_unique_, rad.build_unique_);
+                    solid_log(logger, Info, "app " << it->first << " is deleted");
+                    continue;
                 }
             } else {
                 rapp_entry.flagSet(EntryFlagsE::Delete);
+                solid_log(logger, Info, "app " << it->first << " cannot be deleted");
             }
 
         } else if (it->second.second != rad.build_unique_) {
@@ -2124,26 +2155,33 @@ void Engine::Implementation::updateApplications(const UpdatesMapT& _updates_map)
                     solid_check(entry_ptr.get() == &rapp_entry);
                     file_cache_engine_.removeApplication(rad.app_unique_, rad.build_unique_);
                     new_app_id_vec.push_back(it->second.first);
+                    app_it = rrd.app_entry_map_.erase(app_it);
+                    solid_log(logger, Info, "app " << it->first << " is to be updated");
+                    continue;
                 } else {
                     rapp_entry.flagSet(EntryFlagsE::Update);
                     rad.app_id_ = it->second.first;
+                    solid_log(logger, Info, "app " << it->first << " cannot be updated");
                 }
 
             } else {
                 rapp_entry.flagSet(EntryFlagsE::Update);
                 rad.app_id_ = it->second.first;
+                solid_log(logger, Info, "app " << it->first << " cannot be updated");
             }
         }
+        ++app_it;
     }
+
     if (!new_app_id_vec.empty()) {
         auto req_ptr = make_shared<front::FetchBuildConfigurationRequest>();
 
         //TODO:
         req_ptr->lang_  = "US_en";
         req_ptr->os_id_ = "Windows10x86_64";
-        //req_ptr->property_vec_.emplace_back("description");
+        req_ptr->property_vec_.emplace_back("description");
 
-        remoteFetchApplication(new_app_id_vec, req_ptr, 0);
+        remoteFetchApplication(new_app_id_vec, req_ptr, 0, false);
     }
 }
 
@@ -2166,9 +2204,9 @@ void Engine::Implementation::onFrontListAppsResponse(
     //TODO:
     req_ptr->lang_  = "US_en";
     req_ptr->os_id_ = "Windows10x86_64";
-    //req_ptr->property_vec_.emplace_back("description");
+    req_ptr->property_vec_.emplace_back("description");
 
-    remoteFetchApplication(_rrecv_msg_ptr->app_id_vec_, req_ptr, 0);
+    remoteFetchApplication(_rrecv_msg_ptr->app_id_vec_, req_ptr, 0, true);
 }
 
 void Engine::Implementation::createRootEntry()

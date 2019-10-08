@@ -39,6 +39,13 @@ struct Equal {
     }
 };
 
+struct Less {
+    bool operator()(const std::reference_wrapper<const string>& _rrw1, const std::reference_wrapper<const string>& _rrw2) const
+    {
+        return _rrw1.get() < _rrw2.get();
+    }
+};
+
 struct ApplicationStub {
     using FileMapT = std::unordered_map<reference_wrapper<const string>, size_t, Hash, Equal>;
     string   name_;
@@ -94,6 +101,7 @@ struct FileStubLess {
 
 using FileMapT          = std::map<FileStub*, size_t, FileStubLess>;
 using ApplicationMapT   = std::unordered_map<std::reference_wrapper<const string>, ApplicationStub*, Hash, Equal>;
+//using ApplicationMapT = std::map<std::reference_wrapper<const string>, ApplicationStub*, Less>;
 using ApplicationDqT    = std::deque<ApplicationStub>;
 using FileDqT           = std::deque<FileStub>;
 using ApplicationStackT = std::stack<ApplicationStub*>;
@@ -533,9 +541,10 @@ void Engine::removeApplication(const std::string& _app_unique, const std::string
     auto              it = pimpl_->app_map_.find(_app_unique);
     if (it != pimpl_->app_map_.end()) {
         if (it->second->build_ == _build_unique) {
-            pimpl_->removeApplication(*it->second);
-            pimpl_->app_map_.erase(it);
-            pimpl_->app_free_stack_.push(it->second);
+            auto papp = it->second;
+            it        = pimpl_->app_map_.erase(it);
+            pimpl_->removeApplication(*papp);
+            pimpl_->app_free_stack_.push(papp);
         }
     }
 }
