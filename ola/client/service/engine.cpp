@@ -190,9 +190,9 @@ struct FileData : file_cache::FileData {
     ReadData* pback_  = nullptr;
     StatusE   status_ = PendingE;
     FetchStub fetch_stubs_[2];
-    string   remote_path_;
-    uint64_t prefetch_offset_;
-    size_t   contiguous_read_count_;
+    string    remote_path_;
+    uint64_t  prefetch_offset_;
+    size_t    contiguous_read_count_;
 
     FileData(const string& _remote_path)
         : remote_path_(_remote_path)
@@ -712,7 +712,7 @@ EntryPointerT RootData::eraseApplication(Entry& _rentry)
     if (it->second.use_count() != 1) {
         return EntryPointerT{};
     }
-    
+
     auto& rad = it->second->applicationData();
 
     for (auto pse : rad.shortcut_vec_) {
@@ -904,7 +904,7 @@ private:
         std::vector<std::string>&                               _rapp_id_vec,
         std::shared_ptr<front::FetchBuildConfigurationRequest>& _rsent_msg_ptr,
         size_t                                                  _app_index,
-        const bool _first_run);
+        const bool                                              _first_run);
 };
 
 Engine::Engine() {}
@@ -1257,7 +1257,7 @@ bool Engine::Implementation::findOrCreateEntry(
 
 bool Engine::Implementation::entry(const fs::path& _path, EntryPointerT& _rentry_ptr, unique_lock<mutex>& _rlock)
 {
-    string remote_path;
+    string        remote_path;
     const string* papp_unique   = nullptr;
     const string* pbuild_unique = nullptr;
 
@@ -1980,7 +1980,7 @@ void Engine::Implementation::remoteFetchApplication(
     std::vector<std::string>&                               _rapp_id_vec,
     std::shared_ptr<front::FetchBuildConfigurationRequest>& _rsent_msg_ptr,
     size_t                                                  _app_index,
-    const bool _first_run)
+    const bool                                              _first_run)
 {
     _rsent_msg_ptr->app_id_ = _rapp_id_vec[_app_index];
 

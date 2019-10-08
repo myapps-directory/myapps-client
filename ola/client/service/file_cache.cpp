@@ -99,8 +99,8 @@ struct FileStubLess {
     }
 };
 
-using FileMapT          = std::map<FileStub*, size_t, FileStubLess>;
-using ApplicationMapT   = std::unordered_map<std::reference_wrapper<const string>, ApplicationStub*, Hash, Equal>;
+using FileMapT        = std::map<FileStub*, size_t, FileStubLess>;
+using ApplicationMapT = std::unordered_map<std::reference_wrapper<const string>, ApplicationStub*, Hash, Equal>;
 //using ApplicationMapT = std::map<std::reference_wrapper<const string>, ApplicationStub*, Less>;
 using ApplicationDqT    = std::deque<ApplicationStub>;
 using FileDqT           = std::deque<FileStub>;
