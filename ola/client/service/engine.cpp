@@ -772,6 +772,7 @@ struct Engine::Implementation {
     file_cache::Engine        file_cache_engine_;
     atomic<size_t>            open_count_ = 0;
     thread                    update_thread;
+    atomic<bool>              first_run_{true};
 
 public:
     Implementation(
@@ -903,8 +904,7 @@ private:
     void remoteFetchApplication(
         std::vector<std::string>&                               _rapp_id_vec,
         std::shared_ptr<front::FetchBuildConfigurationRequest>& _rsent_msg_ptr,
-        size_t                                                  _app_index,
-        const bool                                              _first_run);
+        size_t                                                  _app_index);
 };
 
 Engine::Engine() {}
@@ -1392,7 +1392,7 @@ void Engine::Implementation::releaseApplication(Entry& _rapp_entry)
         req_ptr->os_id_ = "Windows10x86_64";
         req_ptr->property_vec_.emplace_back("description");
 
-        remoteFetchApplication(new_app_id_vec, req_ptr, 0, false);
+        remoteFetchApplication(new_app_id_vec, req_ptr, 0);
     }
 }
 
@@ -1979,12 +1979,11 @@ void Engine::Implementation::storeAuthData(const string& _user, const string& _t
 void Engine::Implementation::remoteFetchApplication(
     std::vector<std::string>&                               _rapp_id_vec,
     std::shared_ptr<front::FetchBuildConfigurationRequest>& _rsent_msg_ptr,
-    size_t                                                  _app_index,
-    const bool                                              _first_run)
+    size_t                                                  _app_index)
 {
     _rsent_msg_ptr->app_id_ = _rapp_id_vec[_app_index];
 
-    auto lambda = [this, _app_index, app_id_vec = std::move(_rapp_id_vec), _first_run](
+    auto lambda = [this, _app_index, app_id_vec = std::move(_rapp_id_vec)](
                       frame::mprpc::ConnectionContext&                         _rctx,
                       std::shared_ptr<front::FetchBuildConfigurationRequest>&  _rsent_msg_ptr,
                       std::shared_ptr<front::FetchBuildConfigurationResponse>& _rrecv_msg_ptr,
@@ -1993,17 +1992,22 @@ void Engine::Implementation::remoteFetchApplication(
 
             ++_app_index;
 
-            this->workpool_.push(
-                [this, recv_msg_ptr = std::move(_rrecv_msg_ptr), is_last = _app_index >= app_id_vec.size(), _first_run]() mutable {
-                    insertApplicationEntry(recv_msg_ptr);
-                    if (is_last && _first_run) {
-                        //done with all applications
-                        onAllApplicationsFetched();
-                    }
-                });
+            if (_rrecv_msg_ptr->error_ == 0) {
+
+                this->workpool_.push(
+                    [this, recv_msg_ptr = std::move(_rrecv_msg_ptr), is_last = _app_index >= app_id_vec.size()]() mutable {
+                        insertApplicationEntry(recv_msg_ptr);
+                        if (is_last) {
+                            //done with all applications
+                            onAllApplicationsFetched();
+                        }
+                    });
+            } else {
+                solid_log(logger, Error, "Failed FetchBuildConfiguration: " << _rrecv_msg_ptr->error_ << " " << _rrecv_msg_ptr->message_);
+            }
 
             if (_app_index < app_id_vec.size()) {
-                remoteFetchApplication(app_id_vec, _rsent_msg_ptr, _app_index, _first_run);
+                remoteFetchApplication(app_id_vec, _rsent_msg_ptr, _app_index);
             }
         }
     };
@@ -2181,14 +2185,18 @@ void Engine::Implementation::updateApplications(const UpdatesMapT& _updates_map)
         req_ptr->os_id_ = "Windows10x86_64";
         req_ptr->property_vec_.emplace_back("description");
 
-        remoteFetchApplication(new_app_id_vec, req_ptr, 0, false);
+        remoteFetchApplication(new_app_id_vec, req_ptr, 0);
     }
 }
 
 void Engine::Implementation::onAllApplicationsFetched()
 {
-    cleanFileCache();
-    update_thread = thread(&Implementation::update, this);
+    bool expect = true;
+    
+    if (first_run_.compare_exchange_strong(expect, false)) {
+        cleanFileCache();
+        update_thread = thread(&Implementation::update, this);
+    }
 }
 
 void Engine::Implementation::onFrontListAppsResponse(
@@ -2196,6 +2204,11 @@ void Engine::Implementation::onFrontListAppsResponse(
     std::shared_ptr<front::ListAppsResponse>& _rrecv_msg_ptr)
 {
     if (_rrecv_msg_ptr->app_id_vec_.empty()) {
+
+        if (_rrecv_msg_ptr->error_ == 0) {
+            onAllApplicationsFetched();
+        }
+
         return;
     }
 
@@ -2206,7 +2219,7 @@ void Engine::Implementation::onFrontListAppsResponse(
     req_ptr->os_id_ = "Windows10x86_64";
     req_ptr->property_vec_.emplace_back("description");
 
-    remoteFetchApplication(_rrecv_msg_ptr->app_id_vec_, req_ptr, 0, true);
+    remoteFetchApplication(_rrecv_msg_ptr->app_id_vec_, req_ptr, 0);
 }
 
 void Engine::Implementation::createRootEntry()

@@ -136,6 +136,15 @@ struct Engine::Implementation {
         return p;
     }
 
+    fs::path computeApplicationPath(const string& _app_unique, const string& _build_unique)
+    {
+        string d = _app_unique + '_' + _build_unique;
+
+        fs::path p = config_.base_path_;
+        p /= d;
+        return p;
+    }
+
     bool             exists(FileData& _rfd, ApplicationStub*& _rpapp, const std::string& _app_unique, const std::string& _build_unique, const std::string& _name) const;
     ApplicationStub* application(const std::string& _app_unique, const std::string& _build_unique);
     bool             ensureSpace(uint64_t _size);
@@ -205,16 +214,14 @@ void Engine::start(Configuration&& _config)
 
 bool Engine::Implementation::extractApplicationName(const string& _path, string& _rname, string& _rbuild)
 {
-    auto path = denamefy(_path);
-
-    auto off = path.rfind('\\');
+    auto off = _path.rfind('_');
     if (off == string::npos) {
-        solid_log(logger, Info, _path << ": " << path << " invalid");
+        solid_log(logger, Info, _path << ": " << _path << " invalid");
         return false;
     }
 
-    _rname  = path.substr(0, off);
-    _rbuild = path.substr(off + 1);
+    _rname  = _path.substr(0, off);
+    _rbuild = _path.substr(off + 1);
 
     solid_log(logger, Info, _path << " -> " << _rname << ' ' << _rbuild);
     return true;
@@ -523,14 +530,16 @@ void Engine::Implementation::removeApplication(ApplicationStub& _rapp)
     solid_log(logger, Info, _rapp.name_ << ' ' << _rapp.build_);
     for (const auto& p : _rapp.file_map_) {
         FileStub& rfs  = file_dq_[p.second];
-        auto      path = computeFilePath(_rapp.name_, _rapp.build_, rfs.name_);
+        //auto      path = computeFilePath(_rapp.name_, _rapp.build_, rfs.name_);
 
-        boost::system::error_code err;
-        fs::remove(path, err);
+        //boost::system::error_code err;
+        //fs::remove(path, err);
         file_map_.erase(&rfs);
         rfs.clear();
         file_free_index_stack_.push(p.second);
     }
+    boost::system::error_code err;
+    fs::remove_all(computeApplicationPath(_rapp.name_, _rapp.build_));
     _rapp.clear();
 }
 
