@@ -39,6 +39,13 @@ struct Equal {
     }
 };
 
+struct Less {
+    bool operator()(const std::reference_wrapper<const string>& _rrw1, const std::reference_wrapper<const string>& _rrw2) const
+    {
+        return _rrw1.get() < _rrw2.get();
+    }
+};
+
 struct ApplicationStub {
     using FileMapT = std::unordered_map<reference_wrapper<const string>, size_t, Hash, Equal>;
     string   name_;
@@ -92,8 +99,9 @@ struct FileStubLess {
     }
 };
 
-using FileMapT          = std::map<FileStub*, size_t, FileStubLess>;
-using ApplicationMapT   = std::unordered_map<std::reference_wrapper<const string>, ApplicationStub*, Hash, Equal>;
+using FileMapT        = std::map<FileStub*, size_t, FileStubLess>;
+using ApplicationMapT = std::unordered_map<std::reference_wrapper<const string>, ApplicationStub*, Hash, Equal>;
+//using ApplicationMapT = std::map<std::reference_wrapper<const string>, ApplicationStub*, Less>;
 using ApplicationDqT    = std::deque<ApplicationStub>;
 using FileDqT           = std::deque<FileStub>;
 using ApplicationStackT = std::stack<ApplicationStub*>;
@@ -118,13 +126,9 @@ struct Engine::Implementation {
         return std::chrono::steady_clock::now().time_since_epoch().count();
     }
 
-    fs::path computeFilePath(const string& _app_id, const string& _build, const string& _file_name)
+    fs::path computeFilePath(const string& _app_unique, const string& _build_unique, const string& _file_name)
     {
-        string d = _app_id;
-
-        d += '\\';
-        d += _build;
-        d = namefy(d);
+        string d = _app_unique + '_' + _build_unique;
 
         fs::path p = config_.base_path_;
         p /= d;
@@ -132,8 +136,17 @@ struct Engine::Implementation {
         return p;
     }
 
-    bool             exists(FileData& _rfd, ApplicationStub*& _rpapp, const std::string& _app_id, const std::string& _build_unique, const std::string& _name) const;
-    ApplicationStub* application(const std::string& _app_id, const std::string& _build_unique);
+    fs::path computeApplicationPath(const string& _app_unique, const string& _build_unique)
+    {
+        string d = _app_unique + '_' + _build_unique;
+
+        fs::path p = config_.base_path_;
+        p /= d;
+        return p;
+    }
+
+    bool             exists(FileData& _rfd, ApplicationStub*& _rpapp, const std::string& _app_unique, const std::string& _build_unique, const std::string& _name) const;
+    ApplicationStub* application(const std::string& _app_unique, const std::string& _build_unique);
     bool             ensureSpace(uint64_t _size);
     void             startUsingFile(FileData& _rfd, ApplicationStub& _rapp, const std::string& _name, const uint64_t _size);
     void             doneUsingFile(FileData& _rfd);
@@ -201,16 +214,14 @@ void Engine::start(Configuration&& _config)
 
 bool Engine::Implementation::extractApplicationName(const string& _path, string& _rname, string& _rbuild)
 {
-    auto path = denamefy(_path);
-
-    auto off = path.rfind('\\');
+    auto off = _path.rfind('_');
     if (off == string::npos) {
-        solid_log(logger, Info, _path << ": " << path << " invalid");
+        solid_log(logger, Info, _path << ": " << _path << " invalid");
         return false;
     }
 
-    _rname  = path.substr(0, off);
-    _rbuild = path.substr(off + 1);
+    _rname  = _path.substr(0, off);
+    _rbuild = _path.substr(off + 1);
 
     solid_log(logger, Info, _path << " -> " << _rname << ' ' << _rbuild);
     return true;
@@ -286,21 +297,17 @@ const Configuration& Engine::configuration() const
     return pimpl_->config_;
 }
 
-void Engine::open(FileData& _rfd, const uint64_t _size, const std::string& _app_id, const std::string& _build_unique, const std::string& _remote_path)
+void Engine::open(FileData& _rfd, const uint64_t _size, const std::string& _app_unique, const std::string& _build_unique, const std::string& _remote_path)
 {
-    string d = _app_id;
+    string d = _app_unique + '_' + _build_unique;
     string f = utility::hex_encode(utility::sha256(_remote_path));
-
-    d += '\\';
-    d += _build_unique;
-    d = namefy(d);
 
     _rfd.cache_index_     = -1;
     ApplicationStub* papp = nullptr;
 
     lock_guard<mutex> lock{pimpl_->mutex_};
 
-    if (pimpl_->exists(_rfd, papp, _app_id, _build_unique, f) || ((papp = pimpl_->application(_app_id, _build_unique)) != nullptr && pimpl_->ensureSpace(_size))) {
+    if (pimpl_->exists(_rfd, papp, _app_unique, _build_unique, f) || ((papp = pimpl_->application(_app_unique, _build_unique)) != nullptr && pimpl_->ensureSpace(_size))) {
 
         fs::path p = configuration().base_path_;
 
@@ -317,13 +324,13 @@ void Engine::open(FileData& _rfd, const uint64_t _size, const std::string& _app_
         _rfd.file_.open(p, _size);
     }
 
-    solid_log(logger, Info, _size << ' ' << _app_id << ' ' << _build_unique << ' ' << _remote_path << " -> " << _rfd.cache_index_);
+    solid_log(logger, Info, _size << ' ' << _app_unique << ' ' << _build_unique << ' ' << _remote_path << " -> " << _rfd.cache_index_);
 }
 
-ApplicationStub* Engine::Implementation::application(const std::string& _app_id, const std::string& _build_unique)
+ApplicationStub* Engine::Implementation::application(const std::string& _app_unique, const std::string& _build_unique)
 {
-    solid_log(logger, Info, _app_id << ' ' << _build_unique);
-    auto it = app_map_.find(_app_id);
+    solid_log(logger, Info, _app_unique << ' ' << _build_unique);
+    auto it = app_map_.find(_app_unique);
     if (it != app_map_.end()) {
         if (it->second->build_ == _build_unique) {
             return it->second;
@@ -339,7 +346,7 @@ ApplicationStub* Engine::Implementation::application(const std::string& _app_id,
         }
 
         papp->build_ = _build_unique;
-        papp->name_  = _app_id;
+        papp->name_  = _app_unique;
 
         app_map_[papp->name_] = papp;
 
@@ -348,21 +355,21 @@ ApplicationStub* Engine::Implementation::application(const std::string& _app_id,
     return nullptr;
 }
 
-bool Engine::Implementation::exists(FileData& _rfd, ApplicationStub*& _rpapp, const std::string& _app_id, const std::string& _build_unique, const std::string& _name) const
+bool Engine::Implementation::exists(FileData& _rfd, ApplicationStub*& _rpapp, const std::string& _app_unique, const std::string& _build_unique, const std::string& _name) const
 {
-    auto it = app_map_.find(_app_id);
+    auto it = app_map_.find(_app_unique);
     if (it != app_map_.end()) {
         if (it->second->build_ == _build_unique) {
             _rpapp   = it->second;
             auto fit = it->second->file_map_.find(_name);
             if (fit != it->second->file_map_.end()) {
                 _rfd.cache_index_ = fit->second;
-                solid_log(logger, Info, _app_id << ' ' << _build_unique << ' ' << _name << "-> true");
+                solid_log(logger, Info, _app_unique << ' ' << _build_unique << ' ' << _name << "-> true");
                 return true;
             }
         }
     }
-    solid_log(logger, Info, _app_id << ' ' << _build_unique << ' ' << _name << "-> false");
+    solid_log(logger, Info, _app_unique << ' ' << _build_unique << ' ' << _name << "-> false");
     return false;
 }
 
@@ -522,28 +529,31 @@ void Engine::Implementation::removeApplication(ApplicationStub& _rapp)
 {
     solid_log(logger, Info, _rapp.name_ << ' ' << _rapp.build_);
     for (const auto& p : _rapp.file_map_) {
-        FileStub& rfs  = file_dq_[p.second];
-        auto      path = computeFilePath(_rapp.name_, _rapp.build_, rfs.name_);
+        FileStub& rfs = file_dq_[p.second];
+        //auto      path = computeFilePath(_rapp.name_, _rapp.build_, rfs.name_);
 
-        boost::system::error_code err;
-        fs::remove(path, err);
+        //boost::system::error_code err;
+        //fs::remove(path, err);
         file_map_.erase(&rfs);
         rfs.clear();
         file_free_index_stack_.push(p.second);
     }
+    boost::system::error_code err;
+    fs::remove_all(computeApplicationPath(_rapp.name_, _rapp.build_));
     _rapp.clear();
 }
 
-void Engine::removeApplication(const std::string& _app_id, const std::string& _build_unique)
+void Engine::removeApplication(const std::string& _app_unique, const std::string& _build_unique)
 {
-    solid_log(logger, Info, _app_id << ' ' << _build_unique);
+    solid_log(logger, Info, _app_unique << ' ' << _build_unique);
     lock_guard<mutex> lock{pimpl_->mutex_};
-    auto              it = pimpl_->app_map_.find(_app_id);
+    auto              it = pimpl_->app_map_.find(_app_unique);
     if (it != pimpl_->app_map_.end()) {
         if (it->second->build_ == _build_unique) {
-            pimpl_->removeApplication(*it->second);
-            pimpl_->app_map_.erase(it);
-            pimpl_->app_free_stack_.push(it->second);
+            auto papp = it->second;
+            it        = pimpl_->app_map_.erase(it);
+            pimpl_->removeApplication(*papp);
+            pimpl_->app_free_stack_.push(papp);
         }
     }
 }

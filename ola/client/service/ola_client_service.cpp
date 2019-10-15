@@ -54,7 +54,7 @@ struct Parameters {
     wstring        debug_log_file_;
     uint32_t       debug_flags_;
     wstring        mount_point_;
-    vector<string> debug_modules_ = {"ola::.*:VIEW"};
+    vector<string> debug_modules_ = {"ola::.*:IEW"};
     string         debug_addr_;
     string         debug_port_;
     bool           debug_console_;
