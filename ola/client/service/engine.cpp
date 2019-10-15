@@ -2192,7 +2192,7 @@ void Engine::Implementation::updateApplications(const UpdatesMapT& _updates_map)
 void Engine::Implementation::onAllApplicationsFetched()
 {
     bool expect = true;
-    
+
     if (first_run_.compare_exchange_strong(expect, false)) {
         cleanFileCache();
         update_thread = thread(&Implementation::update, this);
