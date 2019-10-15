@@ -444,7 +444,7 @@ void handle_help(istream& _ris, Engine &_reng){
     cout<<"> create app\n\n";
     cout<<"> create build APP_ID BUILD_TAG ~/path/to/build.cfg ~/path/to/build_folder ~/path/to/build_icon.png\n";
     cout<<"> fetch updates LANGUAGE_ID OS_ID APP_ID [APP_ID]\n";
-    cout<<"\nExamples:\n:";
+    cout<<"\nExamples:\n";
     cout<<"> create app bubbles.app\n";
     cout<<"> create build l/AQPpeZWqoR1Fcngt3t2w== first bubbles.bld ~/tmp/bubbles_client ~/tmp/bubbles.png\n";
     cout<<"> create media l/AQPpeZWqoR1Fcngt3t2w== first bubbles.media ~/tmp/bubbles_media\n";
