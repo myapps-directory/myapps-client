@@ -7,16 +7,16 @@
 
 namespace ola {
 namespace client {
-namespace gui {
+namespace auth {
 
-class AuthWidget : public QWidget {
+class Widget : public QWidget {
     Q_OBJECT
 
 public:
     using TryAuthenticateFunctionT = std::function<void(const std::string&, const std::string&)>;
 
-    AuthWidget(QWidget* parent = 0);
-    ~AuthWidget();
+    Widget(QWidget* parent = 0);
+    ~Widget();
 
     void setUser(const std::string& _user);
 
@@ -40,6 +40,6 @@ private:
     struct Data;
     solid::PimplT<Data> pimpl_;
 };
-} //namespace gui
+} //namespace auth
 } //namespace client
 } //namespace ola

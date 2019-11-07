@@ -38,8 +38,6 @@ else()
     set(CONFIGURATION_TYPE "release")
 endif()
 
-set (CMAKE_CXX_STANDARD 11)
-
 set(EXTRA_DEFINITIONS "${EXTRA_DEFINITIONS}" CACHE STRING "Extra compiler definitions")
 add_definitions(${EXTRA_DEFINITIONS})
 

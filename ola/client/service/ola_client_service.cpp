@@ -610,7 +610,7 @@ wstring a2w(const string &_a) {
 
 void FileSystemService::onGuiStart(int _port){
 	wostringstream oss;
-	oss<<L"ola_client_gui.exe --front "<<a2w(params_.front_endpoint_)<<L" --local "<<_port;
+	oss<<L"ola_client_auth.exe --front "<<a2w(params_.front_endpoint_)<<L" --local "<<_port;
     DWORD dwExitCode;
     if (!CreateInteractiveProcess(oss.str(), FALSE, 0, 
         &dwExitCode))

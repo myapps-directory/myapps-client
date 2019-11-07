@@ -14,7 +14,7 @@
 
 #include "ola/common/utility/encode.hpp"
 
-#include "ola/client/gui/gui_protocol.hpp"
+#include "ola/client/auth/auth_protocol.hpp"
 #include "ola/client/utility/locale.hpp"
 
 #include "file_cache.hpp"
@@ -808,11 +808,11 @@ public:
 
     void onGuiAuthRequest(
         frame::mprpc::ConnectionContext&   _rctx,
-        std::shared_ptr<gui::AuthRequest>& _rrecv_msg_ptr,
+        std::shared_ptr<auth::AuthRequest>& _rrecv_msg_ptr,
         ErrorConditionT const&             _rerror);
     void onGuiRegisterRequest(
         frame::mprpc::ConnectionContext& _rctx,
-        gui::RegisterRequest&            _rmsg);
+        auth::RegisterRequest&            _rmsg);
     void loadAuthData();
 
     void onFrontListAppsResponse(
@@ -939,16 +939,16 @@ struct GuiProtocolSetup {
     {
     }
 
-    void operator()(front::ProtocolT& _rprotocol, TypeToType<gui::RegisterRequest> _t2t, const front::ProtocolT::TypeIdT& _rtid)
+    void operator()(front::ProtocolT& _rprotocol, TypeToType<auth::RegisterRequest> _t2t, const front::ProtocolT::TypeIdT& _rtid)
     {
         auto lambda = [& impl_ = this->impl_](
                           frame::mprpc::ConnectionContext&       _rctx,
-                          std::shared_ptr<gui::RegisterRequest>& _rsent_msg_ptr,
-                          std::shared_ptr<gui::RegisterRequest>& _rrecv_msg_ptr,
+                          std::shared_ptr<auth::RegisterRequest>& _rsent_msg_ptr,
+                          std::shared_ptr<auth::RegisterRequest>& _rrecv_msg_ptr,
                           ErrorConditionT const&                 _rerror) {
             impl_.onGuiRegisterRequest(_rctx, *_rrecv_msg_ptr);
         };
-        _rprotocol.registerMessage<gui::RegisterRequest>(lambda, _rtid);
+        _rprotocol.registerMessage<auth::RegisterRequest>(lambda, _rtid);
     }
 
     template <class M>
@@ -1022,10 +1022,10 @@ void Engine::start(const Configuration& _rcfg)
     }
 
     {
-        auto                        proto = gui::ProtocolT::create();
+        auto                        proto = auth::ProtocolT::create();
         frame::mprpc::Configuration cfg(pimpl_->scheduler_, proto);
 
-        gui::protocol_setup(GuiProtocolSetup(*pimpl_), *proto);
+        auth::protocol_setup(GuiProtocolSetup(*pimpl_), *proto);
 
         cfg.server.listener_address_str = "127.0.0.1:0";
 
@@ -1868,11 +1868,11 @@ void Engine::Implementation::onFrontAuthResponse(
 
 void Engine::Implementation::onGuiAuthRequest(
     frame::mprpc::ConnectionContext&   _rctx,
-    std::shared_ptr<gui::AuthRequest>& _rrecv_msg_ptr,
+    std::shared_ptr<auth::AuthRequest>& _rrecv_msg_ptr,
     ErrorConditionT const&             _rerror)
 {
     if (_rrecv_msg_ptr) {
-        auto res_ptr = std::make_shared<gui::AuthResponse>(*_rrecv_msg_ptr);
+        auto res_ptr = std::make_shared<auth::AuthResponse>(*_rrecv_msg_ptr);
         _rctx.service().sendResponse(_rctx.recipientId(), res_ptr);
     }
     if (_rrecv_msg_ptr && !_rrecv_msg_ptr->token_.empty()) {
@@ -1920,9 +1920,9 @@ void Engine::Implementation::onGuiAuthRequest(
 
 void Engine::Implementation::onGuiRegisterRequest(
     frame::mprpc::ConnectionContext& _rctx,
-    gui::RegisterRequest&            _rmsg)
+    auth::RegisterRequest&           _rmsg)
 {
-    auto rsp_ptr = make_shared<gui::RegisterResponse>(_rmsg);
+    auto rsp_ptr = make_shared<auth::RegisterResponse>(_rmsg);
     {
         lock_guard<mutex> lock(mutex_);
         if (gui_recipient_id_.empty()) {
@@ -1937,8 +1937,8 @@ void Engine::Implementation::onGuiRegisterRequest(
 
         auto lambda = [this](
                           frame::mprpc::ConnectionContext&        _rctx,
-                          std::shared_ptr<gui::RegisterResponse>& _rsent_msg_ptr,
-                          std::shared_ptr<gui::AuthRequest>&      _rrecv_msg_ptr,
+                          std::shared_ptr<auth::RegisterResponse>& _rsent_msg_ptr,
+                          std::shared_ptr<auth::AuthRequest>&      _rrecv_msg_ptr,
                           ErrorConditionT const&                  _rerror) {
             onGuiAuthRequest(_rctx, _rrecv_msg_ptr, _rerror);
         };

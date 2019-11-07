@@ -1,22 +1,22 @@
-#include "gui_auth_widget.hpp"
-#include "ui_gui_auth_form.h"
+#include "auth_widget.hpp"
+#include "ui_auth_form.h"
 #include <QKeyEvent>
 
 #include "solid/system/log.hpp"
 
 namespace ola {
 namespace client {
-namespace gui {
+namespace auth {
 namespace {
-const solid::LoggerT logger("ola::client::gui::widget");
+const solid::LoggerT logger("ola::client::auth::widget");
 }
 
-struct AuthWidget::Data {
+struct Widget::Data {
     Ui::AuthForm             form_;
     TryAuthenticateFunctionT auth_fnc_;
 };
 
-AuthWidget::AuthWidget(QWidget* parent)
+Widget::Widget(QWidget* parent)
     : QWidget(parent)
     , pimpl_(solid::make_pimpl<Data>())
 {
@@ -32,21 +32,21 @@ AuthWidget::AuthWidget(QWidget* parent)
     connect(this, SIGNAL(closeSignal()), this, SLOT(close()), Qt::QueuedConnection);
 }
 
-AuthWidget::~AuthWidget() {}
+Widget::~Widget() {}
 
-void AuthWidget::setUser(const std::string& _user)
+void Widget::setUser(const std::string& _user)
 {
     solid_log(logger, Info, "" << _user);
     pimpl_->form_.userEdit->setText(_user.c_str());
 }
 
-void AuthWidget::start(TryAuthenticateFunctionT&& _auth_fnc)
+void Widget::start(TryAuthenticateFunctionT&& _auth_fnc)
 {
     pimpl_->auth_fnc_ = std::move(_auth_fnc);
     this->show();
 }
 
-void AuthWidget::onAuthClick()
+void Widget::onAuthClick()
 {
     solid_log(logger, Verbose, "");
     if (!pimpl_->form_.passwordEdit->text().isEmpty() && !pimpl_->form_.userEdit->text().isEmpty()) {
@@ -58,7 +58,7 @@ void AuthWidget::onAuthClick()
     }
 }
 
-void AuthWidget::onOffline(bool _b)
+void Widget::onOffline(bool _b)
 {
     solid_log(logger, Verbose, "" << _b);
     if (_b) {
@@ -68,7 +68,7 @@ void AuthWidget::onOffline(bool _b)
     }
 }
 
-void AuthWidget::onAuthFail()
+void Widget::onAuthFail()
 {
     solid_log(logger, Verbose, "");
 
@@ -76,17 +76,17 @@ void AuthWidget::onAuthFail()
     pimpl_->form_.passwordEdit->setText("");
     this->setEnabled(true);
 }
-void AuthWidget::onAuthSuccess()
+void Widget::onAuthSuccess()
 {
     solid_log(logger, Verbose, "");
     pimpl_->form_.label->setText("Succes");
 }
 
-void AuthWidget::closeEvent(QCloseEvent*)
+void Widget::closeEvent(QCloseEvent*)
 {
     QApplication::quit();
 }
-bool AuthWidget::eventFilter(QObject* obj, QEvent* event)
+bool Widget::eventFilter(QObject* obj, QEvent* event)
 {
     if (event->type() == QEvent::KeyPress) {
         QKeyEvent* key = static_cast<QKeyEvent*>(event);
@@ -102,6 +102,6 @@ bool AuthWidget::eventFilter(QObject* obj, QEvent* event)
     return false;
 }
 
-} //namespace gui
+} //namespace auth
 } //namespace client
 } //namespace ola

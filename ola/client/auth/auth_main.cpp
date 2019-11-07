@@ -13,7 +13,7 @@
 #endif
 #include <windows.h>
 
-#include "gui_auth_widget.hpp"
+#include "auth_widget.hpp"
 
 #include "solid/frame/manager.hpp"
 #include "solid/frame/scheduler.hpp"
@@ -32,7 +32,7 @@
 
 #include "ola/common/utility/encode.hpp"
 
-#include "gui_protocol.hpp"
+#include "auth_protocol.hpp"
 #include "ola/common/ola_front_protocol.hpp"
 
 #include "boost/program_options.hpp"
@@ -63,7 +63,7 @@ using SchedulerT    = frame::Scheduler<frame::Reactor>;
 //-----------------------------------------------------------------------------
 namespace {
 
-const solid::LoggerT logger("ola::client::gui");
+const solid::LoggerT logger("ola::client::auth");
 
 struct Parameters {
     vector<string> dbg_modules = {"ola::.*:VIEW"};
@@ -82,18 +82,18 @@ struct Parameters {
 };
 
 struct Engine {
-    client::gui::AuthWidget&             auth_widget_;
+    client::auth::Widget&                auth_widget_;
     frame::mprpc::ServiceT&              front_rpc_service_;
     frame::mprpc::ServiceT&              local_rpc_service_;
     Parameters&                          params_;
-    shared_ptr<client::gui::AuthRequest> local_auth_req_ptr_;
+    shared_ptr<client::auth::AuthRequest> local_auth_req_ptr_;
     frame::mprpc::RecipientId            local_recipient_id_;
     std::shared_ptr<front::AuthRequest>  front_auth_req_ptr_;
     frame::mprpc::RecipientId            front_recipient_id_;
     mutex                                mutex_;
 
     Engine(
-        client::gui::AuthWidget& _auth_widget,
+        client::auth::Widget& _auth_widget,
         frame::mprpc::ServiceT&  _front_rpc_service,
         frame::mprpc::ServiceT&  _local_rpc_service,
         Parameters&              _params)
@@ -116,7 +116,7 @@ struct Engine {
         std::shared_ptr<front::AuthResponse>& _rrecv_msg_ptr,
         ErrorConditionT const&                _rerror);
 
-    bool localRegister(client::gui::AuthWidget& _rwidget);
+    bool localRegister(client::auth::Widget& _rwidget);
 };
 
 void front_configure_service(Engine& _rengine, const Parameters& _params, frame::mprpc::ServiceT& _rsvc, AioSchedulerT& _rsch, frame::aio::Resolver& _rres);
@@ -172,7 +172,7 @@ int main(int argc, char* argv[])
         solid::log_start(std::cerr, params.dbg_modules);
     } else {
         solid::log_start(
-            (envLogPathPrefix() + "\\log\\gui").c_str(),
+            (envLogPathPrefix() + "\\log\\auth").c_str(),
             params.dbg_modules,
             params.dbg_buffered,
             3,
@@ -192,8 +192,8 @@ int main(int argc, char* argv[])
     CallPool<void()>     cwp{WorkPoolConfiguration(), 1};
     frame::aio::Resolver resolver(cwp);
 
-    client::gui::AuthWidget auth_widget;
-    Engine                  engine(auth_widget, front_rpc_service, local_rpc_service, params);
+    client::auth::Widget auth_widget;
+    Engine               engine(auth_widget, front_rpc_service, local_rpc_service, params);
 
     aioscheduler.start(1);
 
@@ -226,7 +226,7 @@ bool Parameters::parse(ULONG argc, PWSTR* argv)
 {
     using namespace boost::program_options;
     try {
-        options_description desc("Bubbles client");
+        options_description desc("ola_client_auth application");
         // clang-format off
 		desc.add_options()
 			("help,h", "List program options")
@@ -334,10 +334,10 @@ struct LocalSetup {
 
 void local_configure_service(const Parameters& _params, frame::mprpc::ServiceT& _rsvc, AioSchedulerT& _rsch, frame::aio::Resolver& _rres)
 {
-    auto                        proto = client::gui::ProtocolT::create();
+    auto                        proto = client::auth::ProtocolT::create();
     frame::mprpc::Configuration cfg(_rsch, proto);
 
-    client::gui::protocol_setup(LocalSetup(), *proto);
+    client::auth::protocol_setup(LocalSetup(), *proto);
 
     cfg.client.name_resolve_fnc = frame::mprpc::InternetResolverF(_rres, _params.local_port.c_str());
 
@@ -354,25 +354,25 @@ void local_configure_service(const Parameters& _params, frame::mprpc::ServiceT& 
     _rsvc.start(std::move(cfg));
 }
 
-bool Engine::localRegister(client::gui::AuthWidget& _rwidget)
+bool Engine::localRegister(client::auth::Widget& _rwidget)
 {
     if (params_.local_port.empty()) {
         return true;
     }
     promise<bool> prom;
 
-    auto msg_ptr = make_shared<client::gui::RegisterRequest>();
+    auto msg_ptr = make_shared<client::auth::RegisterRequest>();
     auto lambda  = [this, &prom, &_rwidget](
                       frame::mprpc::ConnectionContext&                _rctx,
-                      std::shared_ptr<client::gui::RegisterRequest>&  _rsent_msg_ptr,
-                      std::shared_ptr<client::gui::RegisterResponse>& _rrecv_msg_ptr,
+                      std::shared_ptr<client::auth::RegisterRequest>&  _rsent_msg_ptr,
+                      std::shared_ptr<client::auth::RegisterResponse>& _rrecv_msg_ptr,
                       ErrorConditionT const&                          _rerror) {
         if (_rrecv_msg_ptr) {
             if (_rrecv_msg_ptr->error_) {
                 prom.set_value(false);
             } else {
 
-                local_auth_req_ptr_ = std::make_shared<client::gui::AuthRequest>(*_rrecv_msg_ptr);
+                local_auth_req_ptr_ = std::make_shared<client::auth::AuthRequest>(*_rrecv_msg_ptr);
                 local_recipient_id_ = _rctx.recipientId();
                 _rwidget.setUser(_rrecv_msg_ptr->user_);
                 prom.set_value(true);
@@ -477,8 +477,8 @@ void Engine::onAuthResponse(
                 local_auth_req_ptr_->token_ = _rrecv_msg_ptr->message_;
                 auto lambda                 = [this](
                                   frame::mprpc::ConnectionContext&            _rctx,
-                                  std::shared_ptr<client::gui::AuthRequest>&  _rsent_msg_ptr,
-                                  std::shared_ptr<client::gui::AuthResponse>& _rrecv_msg_ptr,
+                                  std::shared_ptr<client::auth::AuthRequest>&  _rsent_msg_ptr,
+                                  std::shared_ptr<client::auth::AuthResponse>& _rrecv_msg_ptr,
                                   ErrorConditionT const&                      _rerror) {
                     auth_widget_.closeSignal();
                 };

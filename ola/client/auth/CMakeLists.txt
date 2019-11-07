@@ -16,40 +16,41 @@ find_package (Qt5Gui)
 find_package (Qt5Widgets)
 
 if(${Qt5Widgets_FOUND})
-    QT5_WRAP_UI(FORMS_HEADERS gui_auth_form.ui)
+    QT5_WRAP_UI(FORMS_HEADERS auth_form.ui)
     
-    set(basic_gui_SRCS
-        gui_auth_form.ui
-        gui_main.cpp
-        gui_auth_widget.cpp
-        gui_auth_widget.hpp
-		gui_protocol.hpp
+    set(SRCS
+        auth_form.ui
+        auth_main.cpp
+        auth_widget.cpp
+        auth_widget.hpp
+		auth_protocol.hpp
         ${FORMS_HEADERS}
     )
 
-    if(WIN32)  
+    if(WIN32)
+        set_source_files_properties(auth_main.cpp PROPERTIES COMPILE_FLAGS -bigobj)
         add_executable(
-            ola_client_gui
+            ola_client_auth
             WIN32
-            ${basic_gui_SRCS}
+            ${SRCS}
         )
     elseif(APPLE)
         add_executable(
-            ola_client_gui
+            ola_client_auth
             MACOSX_BUNDLE
-            ${basic_gui_SRCS}
+            ${SRCS}
         )
     else()
         add_executable(
-            ola_client_gui
-            ${basic_gui_SRCS}
+            ola_client_auth
+            ${SRCS}
         )
     endif()
 
-    add_dependencies(ola_client_gui build-snappy)
+    add_dependencies(ola_client_auth build-snappy build-cereal)
 
     target_link_libraries(
-        ola_client_gui
+        ola_client_auth
 		ola_utility
         solid_frame_mprpc
         solid_frame_aio_openssl

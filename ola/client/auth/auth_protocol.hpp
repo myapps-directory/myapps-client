@@ -4,7 +4,7 @@
 
 namespace ola {
 namespace client {
-namespace gui {
+namespace auth {
 
 struct RegisterRequest : solid::frame::mprpc::Message {
     SOLID_PROTOCOL_V2(_s, _rthis, _rctx, _name)
@@ -72,6 +72,6 @@ inline void protocol_setup(R _r, ProtocolT& _rproto)
     _r(_rproto, solid::TypeToType<AuthResponse>(), 4);
 }
 
-} //namespace gui
+} //namespace auth
 } //namespace client
 } //namespace ola
