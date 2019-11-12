@@ -146,6 +146,7 @@ enable_testing()
 include(CTest)
 ###############################################################################
 add_subdirectory(ola)
+add_subdirectory(example)
 
 ###############################################################################
 include(cmake/source-format.cmake)
