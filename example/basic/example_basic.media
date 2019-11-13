@@ -1,0 +1,17 @@
+configurations = ( 
+  {
+    oses = [ "Windows10x86_64" ];
+    entries = ( 
+      {
+        thumbnail = "red_thumb.jpg";
+        media = "red_image.jpg";
+      }, 
+      {
+        thumbnail = "green_thumb.jpg";
+        media = "green_image.jpg";
+      },
+      {
+        thumbnail = "blue_thumb.jpg";
+        media = "blue_image.jpg";
+      });
+  });

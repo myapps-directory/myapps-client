@@ -1,0 +1,43 @@
+name = "windows";
+tag = "r1.3";
+dictionary : 
+{
+  en-US : 
+  {
+    NAME = "Example Basic APPID";
+    DESCRIPTION = "ExampleBasicAPPID description";
+  };
+  ro-RO : 
+  {
+    NAME = "Exemplu Simplu APPID";
+    DESCRIPTION = "Descriere ExempluSimpluAPPID";
+  };
+};
+properties : 
+{
+  name = "${NAME}";
+  description = "${DESCRIPTION}";
+};
+configurations = ( 
+  {
+    name = "windows64bit";
+    directory = "${NAME}";
+    flags = [ "HiddenDirectory" ];
+    oses = [ "Windows10x86_64" ];
+    mounts = ( 
+    );
+    exes = [ "example_basic.exe" ];
+    properties : 
+    {
+      name = "${NAME}";
+      description = "${DESCRIPTION}";
+    };
+    shortcuts = ( 
+      {
+        name = "${NAME}";
+        command = "example_basic.exe";
+        arguments = "";
+        icon = "icon.ico";
+        run_folder = "";
+      } );
+  } );

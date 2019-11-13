@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+
+START=10
+PADDING=4
+COUNT=1
+LAST=$START+$COUNT
+
+createIcon()
+{
+    echo "create icon $1"
+    magick -size 256x256 xc:none -gravity Center -fill purple -font /c/windows/fonts/arial.ttf -pointsize 100 -annotate +0+0 "$1" tmp/main.png
+    magick tmp/main.png -define icon:auto-resize="256,128,96,64,48,32,16" tmp/build/icon.ico
+}
+
+createMedia()
+{
+    echo "create media $1"
+    magick example_basic_thumb.png  -fill red  -undercolor '#00000080'  -pointsize 100 -gravity Center -annotate +0+5 " ${1} "  tmp/media/red_thumb.jpg
+    magick example_basic.png  -fill red  -undercolor '#00000080' -pointsize 100 -gravity Center -annotate +0+5 " ${1} "  tmp/media/red_image.jpg
+
+    magick example_basic_thumb.png  -fill green  -undercolor '#00000080'  -pointsize 100 -gravity Center -annotate +0+5 " ${1} "  tmp/media/green_thumb.jpg
+    magick example_basic.png  -fill green  -undercolor '#00000080' -pointsize 100 -gravity Center -annotate +0+5 " ${1} "  tmp/media/green_image.jpg
+
+    magick example_basic_thumb.png  -fill blue  -undercolor '#00000080'  -pointsize 100 -gravity Center -annotate +0+5 " ${1} "  tmp/media/blue_thumb.jpg
+    magick example_basic.png  -fill blue  -undercolor '#00000080' -pointsize 100 -gravity Center -annotate +0+5 " ${1} "  tmp/media/blue_image.jpg
+}
+
+for (( num=${START}; num<${LAST}; num++ )); do
+    printf -v var "%0${PADDING}d" $num
+    echo "$var"
+    rm -rf tmp
+    mkdir tmp
+    mkdir tmp/build
+    mkdir tmp/media
+
+    createIcon "${var}"
+    createMedia "${var}"
+done
