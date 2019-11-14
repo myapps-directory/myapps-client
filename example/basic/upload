@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 
-START=10
+FRONT=$1
+START=$2
+COUNT=$3
 PADDING=4
-COUNT=1
 LAST=$START+$COUNT
 
 createIcon()
@@ -12,17 +13,34 @@ createIcon()
     magick tmp/main.png -define icon:auto-resize="256,128,96,64,48,32,16" tmp/build/icon.ico
 }
 
+createBuild()
+{
+    local INDEX=$1
+    local APPID=$2
+    createIcon $INDEX
+
+    cp example_basic.exe tmp/build
+    echo "$INDEX" > tmp/build/id.txt
+    sed "s/APPID/$INDEX/g" example_basic.build > tmp/example_basic.build
+    echo -ne "create build $APPID $INDEX tmp/example_basic.build tmp/build tmp/main.png\nq\n" | ./ola_client_cli --front $FRONT
+}
+
 createMedia()
 {
-    echo "create media $1"
-    magick example_basic_thumb.png  -fill red  -undercolor '#00000080'  -pointsize 100 -gravity Center -annotate +0+5 " ${1} "  tmp/media/red_thumb.jpg
-    magick example_basic.png  -fill red  -undercolor '#00000080' -pointsize 100 -gravity Center -annotate +0+5 " ${1} "  tmp/media/red_image.jpg
+    local INDEX=$1
+    local APPID=$2
+    echo "create media $INDEX"
+    magick example_basic_thumb.png  -fill red  -undercolor '#00000080'  -pointsize 100 -gravity Center -annotate +0+5 " ${INDEX} "  tmp/media/red_thumb.jpg
+    magick example_basic.png  -fill red  -undercolor '#00000080' -pointsize 100 -gravity Center -annotate +0+5 " ${INDEX} "  tmp/media/red_image.jpg
 
-    magick example_basic_thumb.png  -fill green  -undercolor '#00000080'  -pointsize 100 -gravity Center -annotate +0+5 " ${1} "  tmp/media/green_thumb.jpg
-    magick example_basic.png  -fill green  -undercolor '#00000080' -pointsize 100 -gravity Center -annotate +0+5 " ${1} "  tmp/media/green_image.jpg
+    magick example_basic_thumb.png  -fill green  -undercolor '#00000080'  -pointsize 100 -gravity Center -annotate +0+5 " ${INDEX} "  tmp/media/green_thumb.jpg
+    magick example_basic.png  -fill green  -undercolor '#00000080' -pointsize 100 -gravity Center -annotate +0+5 " ${INDEX} "  tmp/media/green_image.jpg
 
-    magick example_basic_thumb.png  -fill blue  -undercolor '#00000080'  -pointsize 100 -gravity Center -annotate +0+5 " ${1} "  tmp/media/blue_thumb.jpg
-    magick example_basic.png  -fill blue  -undercolor '#00000080' -pointsize 100 -gravity Center -annotate +0+5 " ${1} "  tmp/media/blue_image.jpg
+    magick example_basic_thumb.png  -fill blue  -undercolor '#00000080'  -pointsize 100 -gravity Center -annotate +0+5 " ${INDEX} "  tmp/media/blue_thumb.jpg
+    magick example_basic.png  -fill blue  -undercolor '#00000080' -pointsize 100 -gravity Center -annotate +0+5 " ${INDEX} "  tmp/media/blue_image.jpg
+
+    sed "s/APPID/$INDEX/g" example_basic.media > tmp/example_basic.media
+    echo -ne "create media $APPID $INDEX tmp/example_basic.media tmp/media\nq\n" | ./ola_client_cli --front $FRONT
 }
 
 for (( num=${START}; num<${LAST}; num++ )); do
@@ -32,7 +50,9 @@ for (( num=${START}; num<${LAST}; num++ )); do
     mkdir tmp
     mkdir tmp/build
     mkdir tmp/media
+    
+    APPID=$(ALFA=`echo -ne "create app test\nq\n" | ./ola_client_cli --front $FRONT  | grep message`; echo -ne "${ALFA##* }"); echo "APPID=$APPID"
 
-    createIcon "${var}"
-    createMedia "${var}"
+    createBuild "${var}" $APPID
+    createMedia "${var}" $APPID
 done

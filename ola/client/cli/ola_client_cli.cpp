@@ -141,7 +141,7 @@ struct Engine {
         if (!auth_token_.empty()) {
             Directory::create_all(path_prefix_.c_str());
             ofstream ofs(authTokenStorePath());
-            ofs << auth_token_;
+            ofs.write(auth_token_.data(), auth_token_.size());
             ofs.flush();
         }
     }
@@ -199,34 +199,47 @@ int main(int argc, char* argv[])
     Engine                 engine(rpc_service, params);
 
     scheduler.start(1);
+    solid_log(logger, Verbose, "");
 
     {
         boost::filesystem::path home = get_home_env();
+        solid_log(logger, Verbose, "");
         if (home.empty()) {
             home = ".";
         }
         home /= ".ola";
+        solid_log(logger, Verbose, "");
         engine.path_prefix_ = home.string();
     }
 
+    solid_log(logger, Verbose, "");
+
     engine.start();
+
+    solid_log(logger, Verbose, "");
 
     configure_service(engine, scheduler, resolver);
 
     Replxx rx;
     rx.install_window_change_handler();
 
+    solid_log(logger, Verbose, "");
+
     // the path to the history file
     const std::string history_file{engine.path_prefix_ + "/history.txt"};
 
     // load the history file if it exists
     rx.history_load(history_file);
+    
+    solid_log(logger, Verbose, "");
 
     // set the max history size
     rx.set_max_history_size(128);
 
     // set the max number of hint rows to show
     rx.set_max_hint_rows(3);
+
+    solid_log(logger, Verbose, "");
 
 #if 1
     const std::string prompt{"> "};
@@ -1758,6 +1771,7 @@ string get_home_env()
 			}
 		}
 	}
+    return pname;
 #else
     const char* pname = getenv("HOME");
 
@@ -1799,8 +1813,8 @@ bool read(string& _rs, istream& _ris, size_t _sz)
         }
 
         _ris.read(buf, toread);
-        _rs.append(buf, toread);
-        _sz -= toread;
+        _rs.append(buf, _ris.gcount());
+        _sz -= _ris.gcount();
     }
     return _sz == 0;
 }
