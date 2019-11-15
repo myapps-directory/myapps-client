@@ -238,7 +238,7 @@ int wmain(int argc, wchar_t** argv)
 
 namespace {
 //TODO: find a better name
-string envConfigPathPrefix()
+string env_config_path_prefix()
 {
     const char* v = getenv("APPDATA");
     if (v == nullptr) {
@@ -253,7 +253,7 @@ string envConfigPathPrefix()
     return r;
 }
 
-string envAppDataPath()
+string env_app_data_path()
 {
     const char* v = getenv("APPDATA");
     if (v == nullptr) {
@@ -266,7 +266,7 @@ string envAppDataPath()
 }
 
 //TODO: find a better name
-string envLogPathPrefix()
+string env_log_path_prefix()
 {
     const char* v = getenv("LOCALAPPDATA");
     if (v == nullptr) {
@@ -281,7 +281,7 @@ string envLogPathPrefix()
     return r;
 }
 
-string envTempPrefix()
+string env_temp_prefix()
 {
     const char* v = getenv("TEMP");
     if (v == nullptr) {
@@ -559,7 +559,7 @@ NTSTATUS FileSystemService::OnStart(ULONG argc, PWSTR *argv)
         solid::log_start(std::cerr, params_.debug_modules_);
     } else {
         solid::log_start(
-            (envLogPathPrefix() + "\\log\\service").c_str(),
+            (env_log_path_prefix() + "\\log\\service").c_str(),
             params_.debug_modules_,
             params_.debug_buffered_,
             3,
@@ -570,9 +570,9 @@ NTSTATUS FileSystemService::OnStart(ULONG argc, PWSTR *argv)
     cfg.secure_ = params_.secure_;
     cfg.compress_ = params_.compress_;
     cfg.front_endpoint_ = params_.front_endpoint_;
-	cfg.path_prefix_ = envConfigPathPrefix();
+	cfg.path_prefix_ = env_config_path_prefix();
 	cfg.mount_prefix_ = utility::narrow(params_.mount_point_);
-	cfg.temp_folder_ = envTempPrefix();
+	cfg.temp_folder_ = env_temp_prefix();
 	cfg.gui_fail_fnc_ = [this](){
 		onGuiFail();
 	};
@@ -693,7 +693,7 @@ FileSystem::~FileSystem()
 
 NTSTATUS FileSystem::InitSecurityDescriptor(){
 	DWORD sz= 0;
-	auto path = ola::client::utility::widen(envAppDataPath());
+	auto path = ola::client::utility::widen(env_app_data_path());
 	GetFileSecurity(
 		path.c_str(),
 		OWNER_SECURITY_INFORMATION | GROUP_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,

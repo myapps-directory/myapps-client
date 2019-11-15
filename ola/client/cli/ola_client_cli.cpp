@@ -27,6 +27,7 @@
 #include "replxx.hxx"
 #include "zip.h"
 
+
 #define LIBCONFIGXX_STATIC
 #define LIBCONFIG_STATIC
 #include "libconfig.h++"
@@ -45,12 +46,15 @@ using namespace ola::front;
 
 using Replxx = replxx::Replxx;
 
+namespace fs = boost::filesystem;
+
 namespace {
 
 const solid::LoggerT logger("cli");
 
 using AioSchedulerT = frame::Scheduler<frame::aio::Reactor>;
 
+string env_config_path_prefix();
 string get_home_env();
 string get_temp_env();
 string path(const std::string& _path);
@@ -84,10 +88,23 @@ struct Engine {
     const Parameters&       rparams_;
     atomic<bool>            running_;
     mutex                   mutex_;
+    string                  auth_user_;
     string                  auth_token_;
     thread                  auth_thread_;
     RecipientQueueT         auth_recipient_q_;
     string                  path_prefix_;
+
+    fs::path authDataDirectoryPath() const
+    {
+        fs::path p = path_prefix_;
+        p /= "config";
+        return p;
+    }
+
+    fs::path authDataFilePath() const
+    {
+        return authDataDirectoryPath() / "auth.data";
+    }
 
     Engine(
         frame::mprpc::ServiceT& _rrpc_service,
@@ -100,16 +117,19 @@ struct Engine {
 
     void start()
     {
-        ifstream ifs(authTokenStorePath(), std::ifstream::binary);
+        const auto path = authDataFilePath();
+        ifstream   ifs(path.generic_string());
 
         if (ifs) {
-            read(auth_token_, ifs, -1);
+            getline(ifs, auth_user_);
+            getline(ifs, auth_token_);
+            try {
+                auth_token_ = ola::utility::base64_decode(auth_token_);
+            } catch (std::exception& e) {
+                auth_user_.clear();
+                auth_token_.clear();
+            }
         }
-    }
-
-    string authTokenStorePath() const
-    {
-        return path_prefix_ + "/auth.data";
     }
 
     frame::mprpc::ServiceT& rpcService() const
@@ -139,10 +159,13 @@ struct Engine {
             auth_thread_.join();
         }
         if (!auth_token_.empty()) {
-            Directory::create_all(path_prefix_.c_str());
-            ofstream ofs(authTokenStorePath());
-            ofs.write(auth_token_.data(), auth_token_.size());
-            ofs.flush();
+            Directory::create_all(authDataDirectoryPath().generic_string().c_str());
+            ofstream ofs(authDataFilePath().generic_string(), std::ios::trunc);
+            if (ofs) {
+                ofs << auth_user_ << endl;
+                ofs << ola::utility::base64_encode(auth_token_) << endl;
+                ofs.flush();
+            }
         }
     }
 };
@@ -201,17 +224,8 @@ int main(int argc, char* argv[])
     scheduler.start(1);
     solid_log(logger, Verbose, "");
 
-    {
-        boost::filesystem::path home = get_home_env();
-        solid_log(logger, Verbose, "");
-        if (home.empty()) {
-            home = ".";
-        }
-        home /= ".ola";
-        solid_log(logger, Verbose, "");
-        engine.path_prefix_ = home.string();
-    }
-
+    engine.path_prefix_          = env_config_path_prefix();
+    
     solid_log(logger, Verbose, "");
 
     engine.start();
@@ -1594,6 +1608,7 @@ void Engine::authRun(){
                     {
                         std::lock_guard<mutex> lock(mutex_);
                         auth_token_ = _rrecv_msg_ptr->message_;
+                        auth_user_ = _rsent_msg_ptr->auth_;
                         
                         solid_check(!auth_recipient_q_.empty());
                         
@@ -1779,6 +1794,25 @@ string get_home_env()
 #endif
 }
 
+string env_config_path_prefix()
+{
+#ifdef SOLID_ON_WINDOWS
+    const char* v = getenv("APPDATA");
+    if (v == nullptr) {
+        v = getenv("LOCALAPPDATA");
+        if (v == nullptr) {
+            v = "c:";
+        }
+    }
+
+    string r = v;
+    r += "\\OLA";
+    return r;
+#else
+    return get_home_env() + "/.ola";
+#endif
+}
+
 string get_temp_env()
 {
 #ifdef SOLID_ON_WINDOWS
@@ -1798,6 +1832,21 @@ string get_temp_env()
     }
     return pname == nullptr ? "/tmp" : pname;
 #endif
+}
+
+string envConfigPathPrefix()
+{
+    const char* v = getenv("APPDATA");
+    if (v == nullptr) {
+        v = getenv("LOCALAPPDATA");
+        if (v == nullptr) {
+            v = "c:";
+        }
+    }
+
+    string r = v;
+    r += "\\OLA";
+    return r;
 }
 
 //-----------------------------------------------------------------------------

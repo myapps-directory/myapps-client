@@ -807,12 +807,12 @@ public:
         std::shared_ptr<front::AuthResponse>& _rrecv_msg_ptr);
 
     void onGuiAuthRequest(
-        frame::mprpc::ConnectionContext&   _rctx,
+        frame::mprpc::ConnectionContext&    _rctx,
         std::shared_ptr<auth::AuthRequest>& _rrecv_msg_ptr,
-        ErrorConditionT const&             _rerror);
+        ErrorConditionT const&              _rerror);
     void onGuiRegisterRequest(
         frame::mprpc::ConnectionContext& _rctx,
-        auth::RegisterRequest&            _rmsg);
+        auth::RegisterRequest&           _rmsg);
     void loadAuthData();
 
     void onFrontListAppsResponse(
@@ -880,7 +880,6 @@ private:
 
     fs::path authDataFilePath() const
     {
-
         return authDataDirectoryPath() / "auth.data";
     }
 
@@ -942,10 +941,10 @@ struct GuiProtocolSetup {
     void operator()(front::ProtocolT& _rprotocol, TypeToType<auth::RegisterRequest> _t2t, const front::ProtocolT::TypeIdT& _rtid)
     {
         auto lambda = [& impl_ = this->impl_](
-                          frame::mprpc::ConnectionContext&       _rctx,
+                          frame::mprpc::ConnectionContext&        _rctx,
                           std::shared_ptr<auth::RegisterRequest>& _rsent_msg_ptr,
                           std::shared_ptr<auth::RegisterRequest>& _rrecv_msg_ptr,
-                          ErrorConditionT const&                 _rerror) {
+                          ErrorConditionT const&                  _rerror) {
             impl_.onGuiRegisterRequest(_rctx, *_rrecv_msg_ptr);
         };
         _rprotocol.registerMessage<auth::RegisterRequest>(lambda, _rtid);
@@ -1867,9 +1866,9 @@ void Engine::Implementation::onFrontAuthResponse(
 }
 
 void Engine::Implementation::onGuiAuthRequest(
-    frame::mprpc::ConnectionContext&   _rctx,
+    frame::mprpc::ConnectionContext&    _rctx,
     std::shared_ptr<auth::AuthRequest>& _rrecv_msg_ptr,
-    ErrorConditionT const&             _rerror)
+    ErrorConditionT const&              _rerror)
 {
     if (_rrecv_msg_ptr) {
         auto res_ptr = std::make_shared<auth::AuthResponse>(*_rrecv_msg_ptr);
@@ -1936,10 +1935,10 @@ void Engine::Implementation::onGuiRegisterRequest(
     if (rsp_ptr->error_ == 0) {
 
         auto lambda = [this](
-                          frame::mprpc::ConnectionContext&        _rctx,
+                          frame::mprpc::ConnectionContext&         _rctx,
                           std::shared_ptr<auth::RegisterResponse>& _rsent_msg_ptr,
                           std::shared_ptr<auth::AuthRequest>&      _rrecv_msg_ptr,
-                          ErrorConditionT const&                  _rerror) {
+                          ErrorConditionT const&                   _rerror) {
             onGuiAuthRequest(_rctx, _rrecv_msg_ptr, _rerror);
         };
         gui_rpc_service_.sendMessage(_rctx.recipientId(), rsp_ptr, lambda, {frame::mprpc::MessageFlagsE::AwaitResponse, frame::mprpc::MessageFlagsE::Response});
@@ -1955,6 +1954,12 @@ void Engine::Implementation::loadAuthData()
     if (ifs) {
         getline(ifs, auth_user_);
         getline(ifs, auth_token_);
+        try {
+            auth_token_ = ola::utility::base64_decode(auth_token_);
+        } catch (std::exception& e) {
+            auth_user_.clear();
+            auth_token_.clear();
+        }
         solid_log(logger, Info, "Loaded auth data from: " << path.generic_string() << " for user: " << auth_user_);
     } else {
         solid_log(logger, Error, "Failed loading auth data to: " << path.generic_string());
@@ -1966,10 +1971,11 @@ void Engine::Implementation::storeAuthData(const string& _user, const string& _t
     fs::create_directories(authDataDirectoryPath());
     const auto path = authDataFilePath();
 
-    ofstream ofs(path.generic_string());
+    ofstream ofs(path.generic_string(), std::ios::trunc);
     if (ofs) {
         ofs << _user << endl;
-        ofs << _token << endl;
+        ofs << ola::utility::base64_encode(_token) << endl;
+        ofs.flush();
         solid_log(logger, Info, "Stored auth data to: " << path.generic_string());
     } else {
         solid_log(logger, Error, "Failed storing auth data to: " << path.generic_string());
@@ -2181,7 +2187,7 @@ void Engine::Implementation::updateApplications(const UpdatesMapT& _updates_map)
         auto req_ptr = make_shared<front::FetchBuildConfigurationRequest>();
 
         //TODO:
-        req_ptr->lang_  = "US_en";
+        req_ptr->lang_  = "en_US";
         req_ptr->os_id_ = "Windows10x86_64";
         req_ptr->property_vec_.emplace_back("description");
 
@@ -2215,7 +2221,7 @@ void Engine::Implementation::onFrontListAppsResponse(
     auto req_ptr = make_shared<front::FetchBuildConfigurationRequest>();
 
     //TODO:
-    req_ptr->lang_  = "US_en";
+    req_ptr->lang_  = "en_US";
     req_ptr->os_id_ = "Windows10x86_64";
     req_ptr->property_vec_.emplace_back("description");
 
