@@ -5,12 +5,28 @@ dictionary :
   en-US : 
   {
     NAME = "Example Basic APPID";
-    DESCRIPTION = "ExampleBasicAPPID description";
+    DESCRIPTION = "ExampleBasicAPPID description.
+    The quick brown fox jumps over the lazy dog.
+    Lorem ipsum dolor sit amet, mea ea tation vivendum, id idque dicat nominavi nec.
+    Has vero legendos et. Dolorem erroribus qui te.
+    Qui ea utinam consetetur, in pro elit regione liberavisse.
+    Mucius melius intellegat et nam, ad meliore partiendo pro.
+    Inani tollit ei vim, agam omnesque hendrerit ex ius.
+    Et mollis saperet pri.
+    ";
+    BRIEF = "ExampleBasicAPPID brief. The quick brown fox jumps over the lazy dog.";
   };
   ro-RO : 
   {
     NAME = "Exemplu Simplu APPID";
-    DESCRIPTION = "Descriere ExempluSimpluAPPID";
+    DESCRIPTION = "Descriere ExempluSimpluAPPID
+    Lorem ipsum dolor sit amet, mea ea tation vivendum, id idque dicat nominavi nec.
+    Has vero legendos et. Dolorem erroribus qui te.
+    Qui ea utinam consetetur, in pro elit regione liberavisse.
+    Mucius melius intellegat et nam, ad meliore partiendo pro.
+    Inani tollit ei vim, agam omnesque hendrerit ex ius.
+    Et mollis saperet pri.";
+    BRIEF = "Exemplu Simplu APPID brief. The quick brown fox jumps over the lazy dog.";
   };
 };
 properties : 
@@ -31,6 +47,7 @@ configurations = (
     {
       name = "${NAME}";
       description = "${DESCRIPTION}";
+      brief = "${BRIEF}";
     };
     shortcuts = ( 
       {

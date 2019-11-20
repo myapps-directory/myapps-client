@@ -1,7 +1,6 @@
 #pragma once
 
 #include "boost/filesystem.hpp"
-#include "ola/client/utility/arrvec.hpp"
 #include <functional>
 #include <memory>
 #include <string>
@@ -11,8 +10,6 @@ namespace client {
 namespace service {
 
 namespace fs = boost::filesystem;
-
-using EntryIdT = ola::client::utility::ArrVec<16, size_t>;
 
 enum struct NodeFlagsE : uint32_t {
     Directory = 0,
