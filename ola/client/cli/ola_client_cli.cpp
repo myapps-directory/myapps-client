@@ -774,7 +774,7 @@ void handle_fetch_config(istream& _ris, Engine &_reng){
         }
         req_ptr->property_vec_.emplace_back(std::move(prop));
     }
-    req_ptr->fetch_options_.all();
+    req_ptr->fetch_options_.set();
     req_ptr->app_id_ = utility::base64_decode(req_ptr->app_id_);    
     promise<void> prom;
     
