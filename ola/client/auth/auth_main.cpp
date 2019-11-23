@@ -82,21 +82,21 @@ struct Parameters {
 };
 
 struct Engine {
-    client::auth::Widget&                auth_widget_;
-    frame::mprpc::ServiceT&              front_rpc_service_;
-    frame::mprpc::ServiceT&              local_rpc_service_;
-    Parameters&                          params_;
+    client::auth::Widget&                 auth_widget_;
+    frame::mprpc::ServiceT&               front_rpc_service_;
+    frame::mprpc::ServiceT&               local_rpc_service_;
+    Parameters&                           params_;
     shared_ptr<client::auth::AuthRequest> local_auth_req_ptr_;
-    frame::mprpc::RecipientId            local_recipient_id_;
-    std::shared_ptr<front::AuthRequest>  front_auth_req_ptr_;
-    frame::mprpc::RecipientId            front_recipient_id_;
-    mutex                                mutex_;
+    frame::mprpc::RecipientId             local_recipient_id_;
+    std::shared_ptr<front::AuthRequest>   front_auth_req_ptr_;
+    frame::mprpc::RecipientId             front_recipient_id_;
+    mutex                                 mutex_;
 
     Engine(
-        client::auth::Widget& _auth_widget,
-        frame::mprpc::ServiceT&  _front_rpc_service,
-        frame::mprpc::ServiceT&  _local_rpc_service,
-        Parameters&              _params)
+        client::auth::Widget&   _auth_widget,
+        frame::mprpc::ServiceT& _front_rpc_service,
+        frame::mprpc::ServiceT& _local_rpc_service,
+        Parameters&             _params)
         : auth_widget_(_auth_widget)
         , front_rpc_service_(_front_rpc_service)
         , local_rpc_service_(_local_rpc_service)
@@ -363,10 +363,10 @@ bool Engine::localRegister(client::auth::Widget& _rwidget)
 
     auto msg_ptr = make_shared<client::auth::RegisterRequest>();
     auto lambda  = [this, &prom, &_rwidget](
-                      frame::mprpc::ConnectionContext&                _rctx,
+                      frame::mprpc::ConnectionContext&                 _rctx,
                       std::shared_ptr<client::auth::RegisterRequest>&  _rsent_msg_ptr,
                       std::shared_ptr<client::auth::RegisterResponse>& _rrecv_msg_ptr,
-                      ErrorConditionT const&                          _rerror) {
+                      ErrorConditionT const&                           _rerror) {
         if (_rrecv_msg_ptr) {
             if (_rrecv_msg_ptr->error_) {
                 prom.set_value(false);
@@ -476,10 +476,10 @@ void Engine::onAuthResponse(
                 local_auth_req_ptr_->user_  = _rsent_msg_ptr->auth_;
                 local_auth_req_ptr_->token_ = _rrecv_msg_ptr->message_;
                 auto lambda                 = [this](
-                                  frame::mprpc::ConnectionContext&            _rctx,
+                                  frame::mprpc::ConnectionContext&             _rctx,
                                   std::shared_ptr<client::auth::AuthRequest>&  _rsent_msg_ptr,
                                   std::shared_ptr<client::auth::AuthResponse>& _rrecv_msg_ptr,
-                                  ErrorConditionT const&                      _rerror) {
+                                  ErrorConditionT const&                       _rerror) {
                     auth_widget_.closeSignal();
                 };
 

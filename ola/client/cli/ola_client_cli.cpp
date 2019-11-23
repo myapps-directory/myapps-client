@@ -27,7 +27,6 @@
 #include "replxx.hxx"
 #include "zip.h"
 
-
 #define LIBCONFIGXX_STATIC
 #define LIBCONFIG_STATIC
 #include "libconfig.h++"
@@ -224,8 +223,8 @@ int main(int argc, char* argv[])
     scheduler.start(1);
     solid_log(logger, Verbose, "");
 
-    engine.path_prefix_          = env_config_path_prefix();
-    
+    engine.path_prefix_ = env_config_path_prefix();
+
     solid_log(logger, Verbose, "");
 
     engine.start();
@@ -244,7 +243,7 @@ int main(int argc, char* argv[])
 
     // load the history file if it exists
     rx.history_load(history_file);
-    
+
     solid_log(logger, Verbose, "");
 
     // set the max history size
@@ -744,7 +743,7 @@ void handle_fetch_build(istream& _ris, Engine &_reng){
         if(_rrecv_msg_ptr && _rrecv_msg_ptr->error_ == 0){
             cout<<"{\n";
             cout<<"Remote Root: "<<utility::base64_encode(_rrecv_msg_ptr->storage_id_)<<endl;
-            cout<<"Icon of size: "<<_rrecv_msg_ptr->icon_blob_.size()<<endl;
+            cout<<"Icon of size: "<<_rrecv_msg_ptr->image_blob_.size()<<endl;
             cout<<_rrecv_msg_ptr->build_;
             cout<<endl;
             cout<<"}"<<endl;
@@ -775,7 +774,7 @@ void handle_fetch_config(istream& _ris, Engine &_reng){
         }
         req_ptr->property_vec_.emplace_back(std::move(prop));
     }
-    
+    req_ptr->fetch_options_.all();
     req_ptr->app_id_ = utility::base64_decode(req_ptr->app_id_);    
     promise<void> prom;
     
@@ -1155,7 +1154,7 @@ void handle_create_build(istream& _ris, Engine &_reng){
         return;
     }
     
-    if(!load_icon(req_ptr->icon_blob_, path(icon_path))){
+    if(!load_icon(req_ptr->image_blob_, path(icon_path))){
         return;
     }
     
