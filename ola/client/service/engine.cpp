@@ -1389,7 +1389,12 @@ void Engine::Implementation::releaseApplication(Entry& _rapp_entry)
         //TODO:
         req_ptr->lang_  = "US_en";
         req_ptr->os_id_ = "Windows10x86_64";
-        req_ptr->property_vec_.emplace_back("description");
+        ola::utility::Build::set_option(req_ptr->fetch_options_, ola::utility::Build::FetchOptionsE::Directory);
+        //ola::utility::Build::set_option(req_ptr->fetch_options_, ola::utility::Build::FetchOptionsE::Name);
+        ola::utility::Build::set_option(req_ptr->fetch_options_, ola::utility::Build::FetchOptionsE::EXEs);
+        ola::utility::Build::set_option(req_ptr->fetch_options_, ola::utility::Build::FetchOptionsE::Flags);
+        ola::utility::Build::set_option(req_ptr->fetch_options_, ola::utility::Build::FetchOptionsE::Shortcuts);
+        req_ptr->property_vec_.emplace_back("brief");
 
         remoteFetchApplication(new_app_id_vec, req_ptr, 0);
     }
@@ -2189,7 +2194,12 @@ void Engine::Implementation::updateApplications(const UpdatesMapT& _updates_map)
         //TODO:
         req_ptr->lang_  = "en_US";
         req_ptr->os_id_ = "Windows10x86_64";
-        req_ptr->property_vec_.emplace_back("description");
+        ola::utility::Build::set_option(req_ptr->fetch_options_, ola::utility::Build::FetchOptionsE::Directory);
+        //ola::utility::Build::set_option(req_ptr->fetch_options_, ola::utility::Build::FetchOptionsE::Name);
+        ola::utility::Build::set_option(req_ptr->fetch_options_, ola::utility::Build::FetchOptionsE::EXEs);
+        ola::utility::Build::set_option(req_ptr->fetch_options_, ola::utility::Build::FetchOptionsE::Flags);
+        ola::utility::Build::set_option(req_ptr->fetch_options_, ola::utility::Build::FetchOptionsE::Shortcuts);
+        req_ptr->property_vec_.emplace_back("brief");
 
         remoteFetchApplication(new_app_id_vec, req_ptr, 0);
     }
@@ -2223,7 +2233,13 @@ void Engine::Implementation::onFrontListAppsResponse(
     //TODO:
     req_ptr->lang_  = "en_US";
     req_ptr->os_id_ = "Windows10x86_64";
-    req_ptr->property_vec_.emplace_back("description");
+    ola::utility::Build::set_option(req_ptr->fetch_options_, ola::utility::Build::FetchOptionsE::Directory);
+    //ola::utility::Build::set_option(req_ptr->fetch_options_, ola::utility::Build::FetchOptionsE::Name);
+    ola::utility::Build::set_option(req_ptr->fetch_options_, ola::utility::Build::FetchOptionsE::EXEs);
+    ola::utility::Build::set_option(req_ptr->fetch_options_, ola::utility::Build::FetchOptionsE::Flags);
+    ola::utility::Build::set_option(req_ptr->fetch_options_, ola::utility::Build::FetchOptionsE::Shortcuts);
+    req_ptr->property_vec_.emplace_back("brief");
+
 
     remoteFetchApplication(_rrecv_msg_ptr->app_id_vec_, req_ptr, 0);
 }
