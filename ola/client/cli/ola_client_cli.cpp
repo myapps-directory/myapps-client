@@ -1,4 +1,3 @@
-
 #include "solid/frame/manager.hpp"
 #include "solid/frame/scheduler.hpp"
 #include "solid/frame/service.hpp"
@@ -538,7 +537,7 @@ void handle_list_apps(istream& _ris, Engine &_reng){
         if(_rrecv_msg_ptr && _rrecv_msg_ptr->error_ == 0){
             cout<<"{\n";
             for(const auto& app_id: _rrecv_msg_ptr->app_id_vec_){
-                cout<<'\t'<<utility::base64_encode(app_id)<<endl;
+                cout<<'\t'<<utility::base64_encode(app_id.first)<<"\t"<<app_id.second<<endl;
             }
             cout<<"}"<<endl;
         }else if(!_rrecv_msg_ptr){
