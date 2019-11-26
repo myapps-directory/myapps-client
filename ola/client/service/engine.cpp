@@ -901,7 +901,7 @@ private:
         uint64_t _offset, unsigned long _length, unsigned long& _rbytes_transfered);
 
     void remoteFetchApplication(
-        std::vector<std::string>&                               _rapp_id_vec,
+        front::ListAppsResponse::AppIdVectorT&                  _rapp_id_vec,
         std::shared_ptr<front::FetchBuildConfigurationRequest>& _rsent_msg_ptr,
         size_t                                                  _app_index);
 };
@@ -1356,10 +1356,10 @@ bool Engine::read(Descriptor* _pdesc, void* _pbuf, uint64_t _offset, unsigned lo
 
 void Engine::Implementation::releaseApplication(Entry& _rapp_entry)
 {
-    lock_guard<mutex> lock(root_mutex_);
-    auto&             rad = _rapp_entry.applicationData();
-    vector<string>    new_app_id_vec;
-    auto&             rrd = root_entry_ptr_->rootData();
+    lock_guard<mutex>                     lock(root_mutex_);
+    auto&                                 rad = _rapp_entry.applicationData();
+    front::ListAppsResponse::AppIdVectorT new_app_id_vec;
+    auto&                                 rrd = root_entry_ptr_->rootData();
 
     rad.releaseApplication();
 
@@ -1376,7 +1376,7 @@ void Engine::Implementation::releaseApplication(Entry& _rapp_entry)
                 rrd.app_entry_map_.erase(entry_ptr->applicationData().app_unique_);
 
                 if (_rapp_entry.hasUpdate()) {
-                    new_app_id_vec.push_back(std::move(rad.app_id_));
+                    new_app_id_vec.emplace_back(std::move(rad.app_id_), std::move(rad.app_unique_));
                     solid_log(logger, Info, "app " << rad.app_unique_ << " to be updated");
                 }
             }
@@ -1988,11 +1988,11 @@ void Engine::Implementation::storeAuthData(const string& _user, const string& _t
 }
 
 void Engine::Implementation::remoteFetchApplication(
-    std::vector<std::string>&                               _rapp_id_vec,
+    front::ListAppsResponse::AppIdVectorT&                  _rapp_id_vec,
     std::shared_ptr<front::FetchBuildConfigurationRequest>& _rsent_msg_ptr,
     size_t                                                  _app_index)
 {
-    _rsent_msg_ptr->app_id_ = _rapp_id_vec[_app_index];
+    _rsent_msg_ptr->app_id_ = _rapp_id_vec[_app_index].first;
 
     auto lambda = [this, _app_index, app_id_vec = std::move(_rapp_id_vec)](
                       frame::mprpc::ConnectionContext&                         _rctx,
@@ -2053,10 +2053,13 @@ void Engine::Implementation::update()
                            std::shared_ptr<front::ListAppsResponse>& _rrecv_msg_ptr,
                            ErrorConditionT const&                    _rerror) {
         if (_rrecv_msg_ptr) {
-            auto req_ptr         = make_shared<FetchBuildUpdatesRequest>();
-            req_ptr->app_id_vec_ = std::move(_rrecv_msg_ptr->app_id_vec_);
-            req_ptr->lang_       = "US_en";
-            req_ptr->os_id_      = "Windows10x86_64";
+            auto req_ptr = make_shared<FetchBuildUpdatesRequest>();
+            req_ptr->app_id_vec_.reserve(_rrecv_msg_ptr->app_id_vec_.size());
+            for (auto&& a : _rrecv_msg_ptr->app_id_vec_) {
+                req_ptr->app_id_vec_.emplace_back(std::move(a.first));
+            }
+            req_ptr->lang_  = "US_en";
+            req_ptr->os_id_ = "Windows10x86_64";
 
             auto lambda = [this, &done, &updates_map](
                               frame::mprpc::ConnectionContext&                   _rctx,
@@ -2123,13 +2126,13 @@ void Engine::Implementation::updateApplications(const UpdatesMapT& _updates_map)
 {
     //under root lock
     //get new applications
-    vector<string> new_app_id_vec;
+    front::ListAppsResponse::AppIdVectorT new_app_id_vec;
 
     auto& rrd = root_entry_ptr_->rootData();
 
     for (const auto& u : _updates_map) {
         if (rrd.findApplication(u.first) == nullptr) {
-            new_app_id_vec.push_back(u.second.first); //app_id
+            new_app_id_vec.emplace_back(u.first, u.second.first); //app_id
             solid_log(logger, Info, "new application: " << u.first << " : " << u.second.second);
         }
     }
@@ -2169,7 +2172,7 @@ void Engine::Implementation::updateApplications(const UpdatesMapT& _updates_map)
                 if (entry_ptr) {
                     solid_check(entry_ptr.get() == &rapp_entry);
                     file_cache_engine_.removeApplication(rad.app_unique_, rad.build_unique_);
-                    new_app_id_vec.push_back(it->second.first);
+                    new_app_id_vec.emplace_back(rad.app_unique_, it->second.first);
                     app_it = rrd.app_entry_map_.erase(app_it);
                     solid_log(logger, Info, "app " << it->first << " is to be updated");
                     continue;
@@ -2239,7 +2242,6 @@ void Engine::Implementation::onFrontListAppsResponse(
     ola::utility::Build::set_option(req_ptr->fetch_options_, ola::utility::Build::FetchOptionsE::Flags);
     ola::utility::Build::set_option(req_ptr->fetch_options_, ola::utility::Build::FetchOptionsE::Shortcuts);
     req_ptr->property_vec_.emplace_back("brief");
-
 
     remoteFetchApplication(_rrecv_msg_ptr->app_id_vec_, req_ptr, 0);
 }
@@ -2333,26 +2335,50 @@ void Engine::Implementation::insertApplicationEntry(std::shared_ptr<front::Fetch
     }
 
     solid_log(logger, Info, entry_ptr->name_);
-
-    auto& rm = root_entry_ptr_->mutex();
+    size_t overlap_index = 0;
+    auto&  rm            = root_entry_ptr_->mutex();
     {
         lock_guard<mutex> lock{rm};
         //TODO: also create coresponding shortcuts
+        if (root_entry_ptr_->directoryData().find(entry_ptr->name_)) {
+            overlap_index = 1;
+
+            do {
+                std::ostringstream oss;
+                oss << entry_ptr->name_ << '_' << overlap_index;
+                if (!root_entry_ptr_->directoryData().find(oss.str())) {
+                    entry_ptr->name_ = oss.str();
+                    break;
+                }
+                ++overlap_index;
+            } while (true);
+        }
         root_entry_ptr_->rootData().insertApplication(entry_ptr.get());
         root_entry_ptr_->directoryData().insertEntry(EntryPointerT(entry_ptr)); //insert copy
     }
 
-    const auto& app_folder_name = _rrecv_msg_ptr->configuration_.directory_;
+    const auto& app_folder_name = entry_ptr->name_;
 
     if (!_rrecv_msg_ptr->configuration_.shortcut_vec_.empty()) {
         for (const auto& sh : _rrecv_msg_ptr->configuration_.shortcut_vec_) {
+            ostringstream oss;
+            oss << sh.name_;
+            if (overlap_index != 0) {
+                oss << '_' << overlap_index;
+            }
+            oss << ".lnk";
             auto skt_entry_ptr = createEntry(
-                root_entry_ptr_, sh.name_ + ".lnk",
+                root_entry_ptr_, oss.str(),
                 EntryTypeE::Shortcut);
 
             skt_entry_ptr->status_   = EntryStatusE::Fetched;
             skt_entry_ptr->data_any_ = ShortcutData();
             skt_entry_ptr->pmaster_  = entry_ptr.get();
+
+            {
+                auto papp_entry = skt_entry_ptr->pmaster_;
+                solid_log(logger, Info, papp_entry->applicationData().app_unique_);
+            }
 
             skt_entry_ptr->size_ = shortcut_creator_.create(
                 skt_entry_ptr->shortcutData().ioss_,
