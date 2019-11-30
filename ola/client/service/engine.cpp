@@ -2240,7 +2240,6 @@ void Engine::Implementation::onFrontListAppsResponse(
     ola::utility::Build::set_option(req_ptr->fetch_options_, ola::utility::Build::FetchOptionsE::Shortcuts);
     req_ptr->property_vec_.emplace_back("brief");
 
-
     remoteFetchApplication(_rrecv_msg_ptr->app_id_vec_, req_ptr, 0);
 }
 
