@@ -1046,7 +1046,7 @@ void Engine::start(const Configuration& _rcfg)
         };
 
         auto req_ptr     = make_shared<ListAppsRequest>();
-        req_ptr->choice_ = 'o'; //TODO change to 'a' -> aquired apps
+        req_ptr->choice_ = 'a'; //TODO change to 'a' -> aquired apps
 
         err = pimpl_->front_rpc_service_.sendRequest(_rcfg.front_endpoint_.c_str(), req_ptr, lambda);
         solid_check(!err);
@@ -2108,7 +2108,7 @@ void Engine::Implementation::update()
         }
 
         auto req_ptr     = make_shared<ListAppsRequest>();
-        req_ptr->choice_ = 'o'; //TODO change to 'a' -> aquired apps
+        req_ptr->choice_ = 'a'; //TODO change to 'a' -> acquired apps
 
         const auto err = front_rpc_service_.sendRequest(config_.front_endpoint_.c_str(), req_ptr, list_lambda);
         if (!err) {
@@ -2132,13 +2132,13 @@ void Engine::Implementation::updateApplications(const UpdatesMapT& _updates_map)
 
     for (const auto& u : _updates_map) {
         if (rrd.findApplication(u.first) == nullptr) {
-            new_app_id_vec.emplace_back(u.first, u.second.first); //app_id
+            new_app_id_vec.emplace_back(u.second.first, u.first); //app_id
             solid_log(logger, Info, "new application: " << u.first << " : " << u.second.second);
         }
     }
 
     //find deleted and updated apps
-    for (auto app_it = rrd.app_entry_map_.begin(); app_it != rrd.app_entry_map_.end();) {
+.    for (auto app_it = rrd.app_entry_map_.begin(); app_it != rrd.app_entry_map_.end();) {
         Entry&           rapp_entry = *app_it->second;
         ApplicationData& rad        = rapp_entry.applicationData();
         const auto       it         = _updates_map.find(rad.app_unique_);
@@ -2148,18 +2148,18 @@ void Engine::Implementation::updateApplications(const UpdatesMapT& _updates_map)
             lock_guard app_lock(rapp_entry.mutex());
 
             if (rad.canBeDeleted()) {
-                solid_log(logger, Info, "app " << it->first << " can be deleted");
-                auto entry_ptr = rrd.eraseApplication(rapp_entry);
+                solid_log(logger, Info, "app " << rad.app_unique_ << " can be deleted");
+                auto entry_ptr = rrd.eraseApplication(rapp_entry);//rad will be valid as long as entry_ptr 
                 if (entry_ptr) {
                     solid_check(entry_ptr.get() == &rapp_entry);
                     app_it = rrd.app_entry_map_.erase(app_it);
                     file_cache_engine_.removeApplication(rad.app_unique_, rad.build_unique_);
-                    solid_log(logger, Info, "app " << it->first << " is deleted");
+                    solid_log(logger, Info, "app " << rad.app_unique_ << " is deleted");
                     continue;
                 }
             } else {
                 rapp_entry.flagSet(EntryFlagsE::Delete);
-                solid_log(logger, Info, "app " << it->first << " cannot be deleted");
+                solid_log(logger, Info, "app " << rad.app_unique_ << " cannot be deleted");
             }
 
         } else if (it->second.second != rad.build_unique_) {
@@ -2172,7 +2172,7 @@ void Engine::Implementation::updateApplications(const UpdatesMapT& _updates_map)
                 if (entry_ptr) {
                     solid_check(entry_ptr.get() == &rapp_entry);
                     file_cache_engine_.removeApplication(rad.app_unique_, rad.build_unique_);
-                    new_app_id_vec.emplace_back(rad.app_unique_, it->second.first);
+                    new_app_id_vec.emplace_back(it->second.first, rad.app_unique_);
                     app_it = rrd.app_entry_map_.erase(app_it);
                     solid_log(logger, Info, "app " << it->first << " is to be updated");
                     continue;
