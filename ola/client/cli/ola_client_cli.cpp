@@ -75,6 +75,7 @@ struct Parameters {
     bool           secure;
     bool           compress;
     string         front_endpoint;
+    bool           no_auth_file;
 };
 
 //-----------------------------------------------------------------------------
@@ -115,18 +116,23 @@ struct Engine {
 
     void start()
     {
-        const auto path = authDataFilePath();
-        ifstream   ifs(path.generic_string());
+        if (!params().no_auth_file) {
+            const auto path = authDataFilePath();
+            ifstream   ifs(path.generic_string());
 
-        if (ifs) {
-            getline(ifs, auth_user_);
-            getline(ifs, auth_token_);
-            try {
-                auth_token_ = ola::utility::base64_decode(auth_token_);
-            } catch (std::exception& e) {
-                auth_user_.clear();
-                auth_token_.clear();
+            if (ifs) {
+                getline(ifs, auth_user_);
+                getline(ifs, auth_token_);
+                try {
+                    auth_token_ = ola::utility::base64_decode(auth_token_);
+                } catch (std::exception& e) {
+                    auth_user_.clear();
+                    auth_token_.clear();
+                }
             }
+        } else {
+            auth_user_.clear();
+            auth_token_.clear();
         }
     }
 
@@ -156,7 +162,7 @@ struct Engine {
         if (auth_thread_.joinable()) {
             auth_thread_.join();
         }
-        if (!auth_token_.empty()) {
+        if (!auth_token_.empty() && !params().no_auth_file) {
             Directory::create_all(authDataDirectoryPath().generic_string().c_str());
             ofstream ofs(authDataFilePath().generic_string(), std::ios::trunc);
             if (ofs) {
@@ -366,7 +372,9 @@ bool parse_arguments(Parameters& _par, int argc, char* argv[])
             ("debug-buffered,S", value<bool>(&_par.dbg_buffered)->implicit_value(true)->default_value(false), "Debug buffered")
             ("secure,s", value<bool>(&_par.secure)->implicit_value(true)->default_value(false), "Use SSL to secure communication")
             ("compress", value<bool>(&_par.compress)->implicit_value(true)->default_value(false), "Use Snappy to compress communication")
-            ("front", value<std::string>(&_par.front_endpoint)->default_value(string("localhost:") + ola::front::default_port()), "OLA Front Endpoint");
+            ("front", value<std::string>(&_par.front_endpoint)->default_value(string("localhost:") + ola::front::default_port()), "OLA Front Endpoint")
+            ("no-auth-file", value<bool>(&_par.no_auth_file)->implicit_value(true)->default_value(false), "Do not use auth file - prompt for authentication")
+        ;
         // clang-format off
         variables_map vm;
         store(parse_command_line(argc, argv, desc), vm);
