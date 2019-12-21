@@ -97,7 +97,10 @@ if(LINUX)
     endif()
 
     set(SYSTEM_DYNAMIC_LOAD_LIBRARY dl)
-endif(LINUX)
+elseif(WIN32)
+    set(SYSTEM_BASIC_LIBRARIES CRYPT32 Ws2_32)
+else()
+endif()
 
 ###############################################################################
 include_directories(
@@ -155,4 +158,48 @@ include(cmake/source-format.cmake)
 ###############################################################################
 # CPack
 ###############################################################################
+if(WIN32)
+    set(CPACK_GENERATOR "WIX")
+    set(PACKAGING_INSTALL_PREFIX "")
+else()
+endif()
 
+message(STATUS "Generating ${CPACK_GENERATOR}  package")
+    
+string(TIMESTAMP OLA_YMDHM "%y%m%d%H%M")
+string(TIMESTAMP OLA_YEAR "%Y")
+
+set(CPACK_PACKAGE_VENDOR                "AphorSoft SRL")
+set(CPACK_PACKAGE_VERSION               "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}")
+set(CPACK_PACKAGE_VERSION_MAJOR         "${PROJECT_VERSION_MAJOR}")
+set(CPACK_PACKAGE_VERSION_MINOR         "${PROJECT_VERSION_MINOR}")
+set(CPACK_PACKAGING_INSTALL_PREFIX      ${CMAKE_CURRENT_BINARY_DIR})
+set(CPACK_RELEASE_VER                   ${OLA_YMDHM})
+set(CPACK_PACKAGE_NAME                  "ola")
+set(CPACK_PACKAGE_EXECUTABLES           "ola_client_cli" "OLA CLI" "ola_client_auth" "OLA Client Authenticator GUI" "ola_client_service" "OLA Client Service")
+set(CPACK_PACKAGE_FILE_NAME             "${CPACK_PACKAGE_NAME}-${CMAKE_BUILD_TYPE}-${CPACK_PACKAGE_VERSION}-${CMAKE_SYSTEM_PROCESSOR}")
+set(CPACK_PACKAGE_CONTACT               "office@aphorsoft.com")
+set(CPACK_PACKAGING_INSTALL_PREFIX      ${PACKAGING_INSTALL_PREFIX})
+SET(CPACK_PACKAGE_INSTALL_DIRECTORY     "OLA")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY   "OLA - On Line Application Service")
+
+
+set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS       ON)
+set(CPACK_DEBIAN_PACKAGE_DESCRIPTION    "OLA - On Line Application Service")
+set(CPACK_DEBIAN_PACKAGE_CONTROL_EXTRA  "${CMAKE_CURRENT_SOURCE_DIR}/cpack/deb/postinst;${CMAKE_CURRENT_SOURCE_DIR}/cpack/deb/prerm;${CMAKE_CURRENT_SOURCE_DIR}/cpack/deb/postrm")
+
+#set(CPACK_WIX_TEMPLATE                  "${CMAKE_CURRENT_SOURCE_DIR}/cpack/wix/template.in")
+SET(CPACK_WIX_UPGRADE_GUID              "624AF6DA-4B24-4D57-A2E5-45371EE6DBB5")
+SET(CPACK_WIX_LICENSE_RTF               "${CMAKE_CURRENT_SOURCE_DIR}/cpack/wix/license.rtf")
+SET(CPACK_WIX_PRODUCT_ICON              "${CMAKE_CURRENT_SOURCE_DIR}/cpack/wix/app.ico")
+SET(CPACK_WIX_UI_BANNER                 "${CMAKE_CURRENT_SOURCE_DIR}/cpack/wix/banner_sml.bmp")
+SET(CPACK_WIX_UI_DIALOG                 "${CMAKE_CURRENT_SOURCE_DIR}/cpack/wix/banner_big.bmp")
+set(CPACK_WIX_PATCH_FILE                "${CMAKE_CURRENT_SOURCE_DIR}/cpack/wix/service.patch")
+set(CPACK_WIX_EXTENSIONS                "WixUtilExtension")
+
+set(CMAKE_INSTALL_SYSTEM_RUNTIME_DESTINATION "bin")
+set(CMAKE_INSTALL_UCRT_LIBRARIES TRUE)
+
+include(InstallRequiredSystemLibraries)
+
+include(CPack)

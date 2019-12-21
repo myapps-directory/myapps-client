@@ -63,4 +63,15 @@ if(${Qt5Widgets_FOUND})
         ${SYS_BASIC_LIBS}
         ${SYS_DYNAMIC_LOAD_LIB}
     )
+
+    add_custom_command(TARGET ola_client_auth POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:Qt5::Core> $<TARGET_FILE_DIR:ola_client_auth>
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:Qt5::Gui> $<TARGET_FILE_DIR:ola_client_auth>
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:Qt5::Widgets> $<TARGET_FILE_DIR:ola_client_auth>
+    )
+
+    install(TARGETS ola_client_auth DESTINATION bin)
+    install(FILES $<TARGET_FILE:Qt5::Core> DESTINATION bin)
+    install(FILES $<TARGET_FILE:Qt5::Gui> DESTINATION bin)
+    install(FILES $<TARGET_FILE:Qt5::Widgets> DESTINATION bin)
 endif()

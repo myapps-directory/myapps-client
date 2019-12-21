@@ -30,6 +30,8 @@ if(WIN32)
         ${Boost_FILESYSTEM_LIBRARY}
     )
 
+    install(TARGETS ola_client_service RUNTIME DESTINATION bin)
+
     add_executable(passthrough passthrough.cpp)
 
     if(CMAKE_SIZEOF_VOID_P EQUAL 8)

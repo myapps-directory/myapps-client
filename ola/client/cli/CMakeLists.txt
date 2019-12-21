@@ -23,4 +23,4 @@ target_link_libraries (ola_client_cli
 )
 
 add_dependencies(ola_client_cli build-snappy build-config build-libzip build-replxx build-cereal)
-
+install(TARGETS ola_client_cli RUNTIME DESTINATION bin)

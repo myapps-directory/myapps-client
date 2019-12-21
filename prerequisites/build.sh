@@ -27,7 +27,7 @@ printUsage()
 }
 
 BOOST_ADDR="https://dl.bintray.com/boostorg/release/1.70.0/source/boost_1_70_0.tar.bz2"
-OPENSSL_ADDR="https://www.openssl.org/source/openssl-1.1.1c.tar.gz"
+OPENSSL_ADDR="https://www.openssl.org/source/openssl-1.1.1d.tar.gz"
 
 SYSTEM=
 BIT64=
@@ -192,7 +192,7 @@ buildOpenssl()
         fi
         # on windows we need to compile the shared library too in order to avoid
         # explicit dependency of CRYPT32.LIB
-        /c/Strawberry/perl/bin/perl Configure $OPENSSL_TARGET --prefix="$EXT_DIR" --openssldir="ssl_"
+        /c/Strawberry/perl/bin/perl Configure $OPENSSL_TARGET --prefix="$EXT_DIR" --openssldir="ssl_" no-shared
     else
         if [ $DEBUG ] ; then
             ./config --prefix="$EXT_DIR" --openssldir="ssl_"

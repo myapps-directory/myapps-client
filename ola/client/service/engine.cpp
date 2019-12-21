@@ -2138,7 +2138,7 @@ void Engine::Implementation::updateApplications(const UpdatesMapT& _updates_map)
     }
 
     //find deleted and updated apps
-.    for (auto app_it = rrd.app_entry_map_.begin(); app_it != rrd.app_entry_map_.end();) {
+    for (auto app_it = rrd.app_entry_map_.begin(); app_it != rrd.app_entry_map_.end();) {
         Entry&           rapp_entry = *app_it->second;
         ApplicationData& rad        = rapp_entry.applicationData();
         const auto       it         = _updates_map.find(rad.app_unique_);
