@@ -1,18 +1,26 @@
 <CPackWiXPatch>
+
+
   <CPackWiXFragment Id="#PRODUCT">
-  
-    <Property Id="ALLUSERS">0</Property>
+       
+    <SetProperty Id="ProgramFiles64Folder" Value="[LocalAppDataFolder]" Before="CostFinalize"><![CDATA[NOT Privileged]]></SetProperty>
+
+    <Property Id="ALLUSERS" Secure="yes"/>
     <Property Id="MSIRESTARTMANAGERCONTROL">Disable</Property>
     <Property Id='NOTEPAD'>Notepad.exe</Property>
-
+    <!--
+    <Fragment>
     <Directory Id="TARGETDIR" Name="SourceDir">
-      <Directory Id="LocalAppDataFolder">
-        <!-- Create a folder inside program files with Company Name-->
-          <Directory Id="INSTALLFOLDER" Name="OLA">
-          </Directory>
-      </Directory>
-      <!--Create application folder in Program Menu-->
-    </Directory>
+            <Directory Id="LocalAppDataFolder">
+                <Directory Id="INSTALLFOLDER" Name="OLA" />
+            </Directory>
+        </Directory>
+    </Fragment>
+    -->
+
+    <Condition Message="All Users">
+      NOT ALLUSERS
+    </Condition>
 
     <UI>
         <Publish Dialog="ExitDialog" 
@@ -24,27 +32,20 @@
     <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="Show Readme.txt" />
     <CustomAction Id='LaunchReadMe' Property='NOTEPAD' ExeCommand='[ARPINSTALLLOCATION]readme.txt' Return='asyncNoWait' />
 
- 
     <InstallExecuteSequence>
-      <Custom Action='ServiceInstall' After='InstallFiles'>(NOT Installed) AND (NOT REMOVE)</Custom>
-      <Custom Action='ServiceUninstall' After='ProcessComponents'>Installed</Custom>
+      <Custom Action='ServiceStart' After='InstallFiles'>(NOT Installed) AND (NOT REMOVE)</Custom>
+      <Custom Action='ServiceStop' After='ProcessComponents'>Installed</Custom>
 
        <!-- <ScheduleReboot After='InstallFinalize' /> -->
     </InstallExecuteSequence>
 
-    <CustomAction Id="ServiceInstall" Directory='INSTALL_ROOT'
+    <CustomAction Id="ServiceStart" Directory='INSTALL_ROOT'
+              Execute="commit" Impersonate="no" Return="asyncWait"
+              ExeCommand='[CM_DP_bin]ola_client_service.exe'/>
+
+    <CustomAction Id="ServiceStop" Directory='INSTALL_ROOT'
               Execute="commit" Impersonate="no" Return="ignore"
-              ExeCommand='[CM_DP_bin]memgrow_service.exe --service-install'/>
+              ExeCommand='[CM_DP_bin]ola_client_service.exe'/>
 
-    <CustomAction Id="ServiceUninstall" Directory='INSTALL_ROOT'
-              Execute="deferred" Impersonate="no" Return="asyncWait"
-              ExeCommand='[CM_DP_bin]memgrow_service.exe --service-uninstall'/>
-
-    <!-- https://www.firegiant.com/wix/tutorial/events-and-actions/extra-actions/
-    <InstallExecuteSequence>
-      <Custom Action='LaunchReadMe' After='InstallFinalize'>NOT Installed</Custom>
-       <ScheduleReboot After='InstallFinalize' />
-    </InstallExecuteSequence>
-    -->
   </CPackWiXFragment>
 </CPackWiXPatch>

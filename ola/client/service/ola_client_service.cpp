@@ -350,7 +350,7 @@ bool Parameters::parse(ULONG argc, PWSTR* argv)
         ("mount-point,m", wvalue<wstring>(&mount_point_)->default_value(L"C:\\ola", "c:\\ola"), "Mount point")
         ("secure,s", value<bool>(&secure_)->implicit_value(true)->default_value(false), "Use SSL to secure communication")
         ("compress", value<bool>(&compress_)->implicit_value(true)->default_value(false), "Use Snappy to compress communication")
-        ("front", value<std::string>(&front_endpoint_)->default_value(string("192.168.32.130:") + ola::front::default_port()), "OLA Front Endpoint");
+        ("front", value<std::string>(&front_endpoint_)->default_value(string("viphost.go.ro:") + ola::front::default_port()), "OLA Front Endpoint");
     // clang-format off
     variables_map vm;
     store(parse_command_line(argc, argv, desc), vm);
@@ -534,7 +534,7 @@ void WriteErrorLogEntry(PWSTR pszFunction, DWORD dwError)
 
 NTSTATUS FileSystemService::OnStart(ULONG argc, PWSTR *argv)
 {
-
+    SetEnvironmentVariable(L"QT_QPA_PLATFORM_PLUGIN_PATH", L".\platforms");
     try {
         if(params_.parse(argc, argv)){
             return STATUS_UNSUCCESSFUL;

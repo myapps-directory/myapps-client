@@ -31,6 +31,9 @@ if(WIN32)
     )
 
     install(TARGETS ola_client_service RUNTIME DESTINATION bin)
+    set_property(INSTALL "bin/$<TARGET_FILE_NAME:ola_client_service>"
+        PROPERTY CPACK_STARTUP_SHORTCUTS "ola_client_service"
+    )
 
     add_executable(passthrough passthrough.cpp)
 
