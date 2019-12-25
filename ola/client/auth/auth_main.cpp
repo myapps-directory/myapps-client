@@ -75,10 +75,16 @@ struct Parameters {
     bool           compress;
     string         front_endpoint;
     string         local_port;
+    string         secure_prefix;
 
     Parameters() {}
 
     bool parse(ULONG argc, PWSTR* argv);
+
+    string securePath(const string& _name) const
+    {
+        return secure_prefix + '/' + _name;
+    }
 };
 
 struct Engine {
@@ -237,8 +243,10 @@ bool Parameters::parse(ULONG argc, PWSTR* argv)
 			("debug-buffered,S", value<bool>(&dbg_buffered)->implicit_value(true)->default_value(false), "Debug unbuffered")
             ("front,f", value<std::string>(&front_endpoint)->required(), "Front Server endpoint: address:port")
 			("local,l", value<std::string>(&local_port)->default_value(""), "Local Server Port")
-			("secure,s", value<bool>(&secure)->implicit_value(true)->default_value(false), "Use SSL to secure communication")
-			("compress", value<bool>(&compress)->implicit_value(true)->default_value(false), "Use Snappy to compress communication");
+			("unsecure", value<bool>(&secure)->implicit_value(false)->default_value(true), "Do not use SSL to secure communication")
+			("compress", value<bool>(&compress)->implicit_value(true)->default_value(false), "Use Snappy to compress communication")
+            ("secure-prefix", value<std::string>(&secure_prefix)->default_value("certs"), "Secure Path prefix")
+        ;
         // clang-format on
         variables_map vm;
         store(parse_command_line(argc, argv, desc), vm);
@@ -304,13 +312,13 @@ void front_configure_service(Engine& _rengine, const Parameters& _params, frame:
     if (_params.secure) {
         frame::mprpc::openssl::setup_client(
             cfg,
-            [](frame::aio::openssl::Context& _rctx) -> ErrorCodeT {
-                _rctx.loadVerifyFile("ola-ca-cert.pem");
-                _rctx.loadCertificateFile("ola-front-client-cert.pem");
-                _rctx.loadPrivateKeyFile("ola-front-client-key.pem");
+            [_params](frame::aio::openssl::Context& _rctx) -> ErrorCodeT {
+                _rctx.loadVerifyFile(_params.securePath("ola-ca-cert.pem").c_str());
+                _rctx.loadCertificateFile(_params.securePath("ola-client-front-cert.pem").c_str());
+                _rctx.loadPrivateKeyFile(_params.securePath("ola-client-front-key.pem").c_str());
                 return ErrorCodeT();
             },
-            frame::mprpc::openssl::NameCheckSecureStart{"ola-front-server"});
+            frame::mprpc::openssl::NameCheckSecureStart{"ola-server"});
     }
 
     if (_params.compress) {

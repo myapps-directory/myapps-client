@@ -62,6 +62,7 @@ struct Parameters {
     bool           secure_;
     bool           compress_;
     string         front_endpoint_;
+    string         secure_prefix_;
 
     bool parse(ULONG argc, PWSTR* argv);
 };
@@ -348,9 +349,11 @@ bool Parameters::parse(ULONG argc, PWSTR* argv)
         ("debug-console,C", value<bool>(&debug_console_)->implicit_value(true)->default_value(false), "Debug console")
         ("debug-buffered,S", value<bool>(&debug_buffered_)->implicit_value(true)->default_value(false), "Debug buffered")
         ("mount-point,m", wvalue<wstring>(&mount_point_)->default_value(L"C:\\ola", "c:\\ola"), "Mount point")
-        ("secure,s", value<bool>(&secure_)->implicit_value(true)->default_value(false), "Use SSL to secure communication")
+        ("unsecure", value<bool>(&secure_)->implicit_value(false)->default_value(true), "Don not use SSL to secure communication")
         ("compress", value<bool>(&compress_)->implicit_value(true)->default_value(false), "Use Snappy to compress communication")
-        ("front", value<std::string>(&front_endpoint_)->default_value(string("viphost.go.ro:") + ola::front::default_port()), "OLA Front Endpoint");
+        ("front", value<std::string>(&front_endpoint_)->default_value(string("viphost.go.ro:") + ola::front::default_port()), "OLA Front Endpoint")
+        ("secure-prefix", value<std::string>(&secure_prefix_)->default_value("certs"), "Secure Path prefix")
+    ;
     // clang-format off
     variables_map vm;
     store(parse_command_line(argc, argv, desc), vm);
@@ -570,6 +573,7 @@ NTSTATUS FileSystemService::OnStart(ULONG argc, PWSTR *argv)
     cfg.secure_ = params_.secure_;
     cfg.compress_ = params_.compress_;
     cfg.front_endpoint_ = params_.front_endpoint_;
+    cfg.secure_prefix_ = params_.secure_prefix_;
 	cfg.path_prefix_ = env_config_path_prefix();
 	cfg.mount_prefix_ = utility::narrow(params_.mount_point_);
 	cfg.temp_folder_ = env_temp_prefix();

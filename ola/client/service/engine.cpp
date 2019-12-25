@@ -1004,13 +1004,13 @@ void Engine::start(const Configuration& _rcfg)
         if (_rcfg.secure_) {
             frame::mprpc::openssl::setup_client(
                 cfg,
-                [](frame::aio::openssl::Context& _rctx) -> ErrorCodeT {
-                    _rctx.loadVerifyFile("ola-ca-cert.pem");
-                    _rctx.loadCertificateFile("ola-front-client-cert.pem");
-                    _rctx.loadPrivateKeyFile("ola-front-client-key.pem");
+                [_rcfg](frame::aio::openssl::Context& _rctx) -> ErrorCodeT {
+                    _rctx.loadVerifyFile(_rcfg.securePath("ola-ca-cert.pem").c_str());
+                    _rctx.loadCertificateFile(_rcfg.securePath("ola-client-front-cert.pem").c_str());
+                    _rctx.loadPrivateKeyFile(_rcfg.securePath("ola-client-front-key.pem").c_str());
                     return ErrorCodeT();
                 },
-                frame::mprpc::openssl::NameCheckSecureStart{"ola-front-server"});
+                frame::mprpc::openssl::NameCheckSecureStart{"ola-server"});
         }
 
         if (_rcfg.compress_) {

@@ -30,6 +30,14 @@ if(WIN32)
         ${Boost_FILESYSTEM_LIBRARY}
     )
 
+    set_target_properties(
+        ola_client_service PROPERTIES
+        VS_DEBUGGER_WORKING_DIRECTORY $<TARGET_FILE_DIR:ola_client_service>)
+
+    add_custom_command(TARGET ola_client_service POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/certs  $<TARGET_FILE_DIR:ola_client_service>/certs
+    )
+
     install(TARGETS ola_client_service RUNTIME DESTINATION bin)
     set_property(INSTALL "bin/$<TARGET_FILE_NAME:ola_client_service>"
         PROPERTY CPACK_STARTUP_SHORTCUTS "ola_client_service"

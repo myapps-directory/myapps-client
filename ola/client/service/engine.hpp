@@ -37,6 +37,7 @@ struct Configuration {
     std::string       path_prefix_;
     std::string       temp_folder_;
     std::string       mount_prefix_;
+    std::string       secure_prefix_;
     GuiStartFunctionT gui_start_fnc_;
     GuiFailFunctionT  gui_fail_fnc_;
     size_t            mutex_count_ = 1;
@@ -47,6 +48,11 @@ struct Configuration {
     size_t            min_contiguous_read_count_ = 3;
     size_t            media_cache_size_          = 2;
     size_t            update_poll_seconds_       = 20 * 3;
+
+    std::string securePath(const std::string& _name) const
+    {
+        return secure_prefix_ + '/' + _name;
+    }
 };
 
 class Engine {
