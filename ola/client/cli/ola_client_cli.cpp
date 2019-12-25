@@ -76,6 +76,11 @@ struct Parameters {
     bool           compress;
     string         front_endpoint;
     bool           no_auth_file;
+    string         secure_prefix;
+    
+    string securePath(const string &_name)const{
+        return secure_prefix + '/' + _name;
+    }
 };
 
 //-----------------------------------------------------------------------------
@@ -370,10 +375,11 @@ bool parse_arguments(Parameters& _par, int argc, char* argv[])
             ("debug-port,P", value<string>(&_par.dbg_port)->default_value("9999"), "Debug server port (e.g. on linux use: nc -l 9999)")
             ("debug-console,C", value<bool>(&_par.dbg_console)->implicit_value(true)->default_value(false), "Debug console")
             ("debug-buffered,S", value<bool>(&_par.dbg_buffered)->implicit_value(true)->default_value(false), "Debug buffered")
-            ("secure,s", value<bool>(&_par.secure)->implicit_value(true)->default_value(false), "Use SSL to secure communication")
+            ("unsecure", value<bool>(&_par.secure)->implicit_value(false)->default_value(true), "Use SSL to secure communication")
             ("compress", value<bool>(&_par.compress)->implicit_value(true)->default_value(false), "Use Snappy to compress communication")
             ("front", value<std::string>(&_par.front_endpoint)->default_value(string("localhost:") + ola::front::default_port()), "OLA Front Endpoint")
             ("no-auth-file", value<bool>(&_par.no_auth_file)->implicit_value(true)->default_value(false), "Do not use auth file - prompt for authentication")
+            ("secure-prefix", value<std::string>(&_par.secure_prefix)->default_value("certs"), "Secure Path prefix")
         ;
         // clang-format off
         variables_map vm;
@@ -444,13 +450,13 @@ void configure_service(Engine &_reng, AioSchedulerT &_rsch, frame::aio::Resolver
     if (_reng.params().secure) {
         frame::mprpc::openssl::setup_client(
             cfg,
-            [](frame::aio::openssl::Context& _rctx) -> ErrorCodeT {
-                _rctx.loadVerifyFile("ola-ca-cert.pem");
-                _rctx.loadCertificateFile("ola-front-client-cert.pem");
-                _rctx.loadPrivateKeyFile("ola-front-client-key.pem");
+            [&_reng](frame::aio::openssl::Context& _rctx) -> ErrorCodeT {
+                _rctx.loadVerifyFile(_reng.params().securePath("ola-ca-cert.pem").c_str());
+                _rctx.loadCertificateFile(_reng.params().securePath("ola-client-front-cert.pem").c_str());
+                _rctx.loadPrivateKeyFile(_reng.params().securePath("ola-client-front-key.pem").c_str());
                 return ErrorCodeT();
             },
-            frame::mprpc::openssl::NameCheckSecureStart{"ola-front-server"});
+            frame::mprpc::openssl::NameCheckSecureStart{"ola-server"});
     }
     
     if(_reng.params().compress){
