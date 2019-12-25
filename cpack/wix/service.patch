@@ -26,25 +26,19 @@
         <Publish Dialog="ExitDialog" 
             Control="Finish" 
             Event="DoAction" 
-            Value="LaunchReadMe">WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 and NOT Installed</Publish>
+            Value="LaunchReadMe">WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 and NOT Installed
+        </Publish>
+        <Publish Dialog="ExitDialog" 
+            Control="Finish" 
+            Event="DoAction" 
+            Value="LaunchService">NOT Installed
+        </Publish>
     </UI>
 
     <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="Show Readme.txt" />
     <CustomAction Id='LaunchReadMe' Property='NOTEPAD' ExeCommand='[ARPINSTALLLOCATION]readme.txt' Return='asyncNoWait' />
-
-    <InstallExecuteSequence>
-      <Custom Action='ServiceStart' After='InstallFiles'>(NOT Installed) AND (NOT REMOVE)</Custom>
-      <Custom Action='ServiceStop' After='ProcessComponents'>Installed</Custom>
-
-       <!-- <ScheduleReboot After='InstallFinalize' /> -->
-    </InstallExecuteSequence>
-
-    <CustomAction Id="ServiceStart" Directory='INSTALL_ROOT'
-              Execute="commit" Impersonate="no" Return="asyncWait"
-              ExeCommand='[CM_DP_bin]ola_client_service.exe'/>
-
-    <CustomAction Id="ServiceStop" Directory='INSTALL_ROOT'
-              Execute="commit" Impersonate="no" Return="ignore"
+    <CustomAction Id='LaunchService' Directory='INSTALL_ROOT'
+              Return="asyncNoWait"
               ExeCommand='[CM_DP_bin]ola_client_service.exe'/>
 
   </CPackWiXFragment>

@@ -164,6 +164,8 @@ if(WIN32)
 else()
 endif()
 
+install (FILES ${CMAKE_CURRENT_SOURCE_DIR}/cpack/readme.txt DESTINATION "/")
+
 message(STATUS "Generating ${CPACK_GENERATOR}  package")
     
 string(TIMESTAMP OLA_YMDHM "%y%m%d%H%M")
