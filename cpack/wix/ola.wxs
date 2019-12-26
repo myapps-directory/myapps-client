@@ -2,8 +2,7 @@
 
 <?include "cpack_variables.wxi"?>
 
-<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi"
-    RequiredVersion="3.6.3303.0">
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi" xmlns:bal="http://schemas.microsoft.com/wix/BalExtension" xmlns:util="http://schemas.microsoft.com/wix/UtilExtension">
 
     <Product Id="$(var.CPACK_WIX_PRODUCT_GUID)"
         Name="$(var.CPACK_PACKAGE_NAME)"
@@ -12,7 +11,7 @@
         Manufacturer="$(var.CPACK_PACKAGE_VENDOR)"
         UpgradeCode="$(var.CPACK_WIX_UPGRADE_GUID)">
 
-        <Package InstallerVersion="301" Compressed="yes" InstallScope="perUser"/>
+        <Package InstallerVersion="310" Compressed="yes" InstallScope="perUser"/>
 
         <Media Id="1" Cabinet="media1.cab" EmbedCab="yes"/>
 

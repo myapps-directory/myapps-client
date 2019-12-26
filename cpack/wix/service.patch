@@ -1,7 +1,7 @@
-<CPackWiXPatch>
+<CPackWiXPatch xmlns:bal="http://schemas.microsoft.com/wix/BalExtension">
 
 
-  <CPackWiXFragment Id="#PRODUCT">
+  <CPackWiXFragment Id="#PRODUCT" xmlns:bal="http://schemas.microsoft.com/wix/BalExtension">
        
     <SetProperty Id="ProgramFiles64Folder" Value="[LocalAppDataFolder]" Before="CostFinalize"><![CDATA[NOT Privileged]]></SetProperty>
 
@@ -17,6 +17,20 @@
         </Directory>
     </Fragment>
     -->
+
+    <Property Id="WINFSPDLL" Secure="yes">
+      <DirectorySearch Id="PFFSearch" Path="[ProgramFilesFolder]">
+        <DirectorySearch Id="WinFSPSearch" Path="WinFsp">
+          <DirectorySearch Id="WinFSPBinSearch" Depth="0" Path="bin">
+            <FileSearch Id="WinFPSSearch" Name="winfsp-x64.dll"/>
+          </DirectorySearch>
+        </DirectorySearch>
+      </DirectorySearch>
+    </Property>
+
+    <Condition Message="This product requires WinFSP. Please install it from https://github.com/billziss-gh/winfsp/releases then try to install this product again.">
+      WINFSPDLL
+    </Condition>
 
     <Condition Message="All Users">
       NOT ALLUSERS

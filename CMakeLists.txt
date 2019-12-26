@@ -193,7 +193,7 @@ SET(CPACK_WIX_PRODUCT_ICON              "${CMAKE_CURRENT_SOURCE_DIR}/cpack/wix/a
 SET(CPACK_WIX_UI_BANNER                 "${CMAKE_CURRENT_SOURCE_DIR}/cpack/wix/banner_sml.bmp")
 SET(CPACK_WIX_UI_DIALOG                 "${CMAKE_CURRENT_SOURCE_DIR}/cpack/wix/banner_big.bmp")
 set(CPACK_WIX_PATCH_FILE                "${CMAKE_CURRENT_SOURCE_DIR}/cpack/wix/service.patch")
-set(CPACK_WIX_EXTENSIONS                WixUIExtension WixUtilExtension)
+set(CPACK_WIX_EXTENSIONS                WixUIExtension WixUtilExtension WixBalExtension)
 set(CPACK_WIX_EXTRA_FLAGS sw)
 #set(CPACK_WIX_EXTRA_SOURCES             "${CMAKE_CURRENT_SOURCE_DIR}/cpack/wix/ola_dirs.wxs")
 #set(CPACK_WIX_SKIP_PROGRAM_FOLDER       TRUE)
