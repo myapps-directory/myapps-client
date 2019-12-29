@@ -20,6 +20,7 @@ createBuild()
     createIcon $INDEX
 
     cp example_basic.exe tmp/build
+    cp example_basic_dlls/* tmp/build
     echo "$INDEX" > tmp/build/id.txt
     sed "s/APPID/$INDEX/g" example_basic.build > tmp/example_basic.build
     echo -ne "create build $APPID $INDEX tmp/example_basic.build tmp/build tmp/main.png\nq\n" | ./ola_client_cli --front $FRONT

@@ -42,5 +42,6 @@
 
         <?include "properties.wxi"?>
         <?include "product_fragment.wxi"?>
+
     </Product>
 </Wix>

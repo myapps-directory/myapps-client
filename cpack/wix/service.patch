@@ -1,7 +1,7 @@
 <CPackWiXPatch xmlns:bal="http://schemas.microsoft.com/wix/BalExtension">
 
 
-  <CPackWiXFragment Id="#PRODUCT" xmlns:bal="http://schemas.microsoft.com/wix/BalExtension">
+  <CPackWiXFragment Id="#PRODUCT" xmlns:util="http://schemas.microsoft.com/wix/UtilExtension">
        
     <SetProperty Id="ProgramFiles64Folder" Value="[LocalAppDataFolder]" Before="CostFinalize"><![CDATA[NOT Privileged]]></SetProperty>
 
@@ -35,7 +35,7 @@
     <Condition Message="All Users">
       NOT ALLUSERS
     </Condition>
-
+    
     <UI>
         <Publish Dialog="ExitDialog" 
             Control="Finish" 
@@ -51,9 +51,17 @@
 
     <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="Show Readme.txt" />
     <CustomAction Id='LaunchReadMe' Property='NOTEPAD' ExeCommand='[ARPINSTALLLOCATION]readme.txt' Return='asyncNoWait' />
-    <CustomAction Id='LaunchService' Directory='INSTALL_ROOT'
+    <CustomAction Id='LaunchService' Directory='CM_DP_bin'
               Return="asyncNoWait"
               ExeCommand='[CM_DP_bin]ola_client_service.exe'/>
 
+    <InstallExecuteSequence>
+      <Custom Action='WixCloseApplications' After='InstallInitialize'>Installed</Custom>
+    </InstallExecuteSequence>
+    <util:CloseApplication Id="CloseApp" CloseMessage="yes" Target="ola_client_service.exe" RebootPrompt="yes" />
+  </CPackWiXFragment>
+
+  <CPackWiXFragment Id="CM_CP_bin.ola_client_cli.exe">
+    <Environment Id="PATH" Name="PATH" Value='[CM_DP_bin]' Permanent="yes" Part="last" Action="set" System="no" />
   </CPackWiXFragment>
 </CPackWiXPatch>

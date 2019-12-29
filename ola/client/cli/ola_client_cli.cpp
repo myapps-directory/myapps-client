@@ -202,8 +202,17 @@ int main(int argc, char* argv[])
 
     if (parse_arguments(params, argc, argv))
         return 0;
+
 #ifndef SOLID_ON_WINDOWS
     signal(SIGPIPE, SIG_IGN);
+#else
+    TCHAR szFileName[MAX_PATH];
+
+    GetModuleFileName(NULL, szFileName, MAX_PATH);
+
+    fs::path exe_path{szFileName};
+
+    params.secure_prefix = (exe_path.parent_path() / params.secure_prefix).generic_string();
 #endif
 
     if (params.dbg_addr.size() && params.dbg_port.size()) {
@@ -377,7 +386,7 @@ bool parse_arguments(Parameters& _par, int argc, char* argv[])
             ("debug-buffered,S", value<bool>(&_par.dbg_buffered)->implicit_value(true)->default_value(false), "Debug buffered")
             ("unsecure", value<bool>(&_par.secure)->implicit_value(false)->default_value(true), "Use SSL to secure communication")
             ("compress", value<bool>(&_par.compress)->implicit_value(true)->default_value(false), "Use Snappy to compress communication")
-            ("front", value<std::string>(&_par.front_endpoint)->default_value(string("localhost:") + ola::front::default_port()), "OLA Front Endpoint")
+            ("front", value<std::string>(&_par.front_endpoint)->default_value(string("viphost.go.ro:") + ola::front::default_port()), "OLA Front Endpoint")
             ("no-auth-file", value<bool>(&_par.no_auth_file)->implicit_value(true)->default_value(false), "Do not use auth file - prompt for authentication")
             ("secure-prefix", value<std::string>(&_par.secure_prefix)->default_value("certs"), "Secure Path prefix")
         ;
@@ -1304,7 +1313,7 @@ void handle_create_media(istream& _ris, Engine &_reng){
                 cout<<"Error: "<<_rrecv_msg_ptr->error_<<" message: "<<_rrecv_msg_ptr->message_<<endl;
                 prom.set_value();
             }else{
-                cout<<"Start uploading build file: "<<zip_path<<" for build tagged: "<<_rsent_msg_ptr->unique_<<endl;
+                cout<<"Start uploading media file: "<<zip_path<<" for build tagged: "<<_rsent_msg_ptr->unique_<<endl;
                 //now we must upload the file
                 auto req_ptr = make_shared<UploadRequest>();
                 req_ptr->ifs_.open(zip_path, std::ifstream::binary);
