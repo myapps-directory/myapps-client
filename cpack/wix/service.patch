@@ -56,9 +56,12 @@
               ExeCommand='[CM_DP_bin]ola_client_service.exe'/>
 
     <InstallExecuteSequence>
-      <Custom Action='WixCloseApplications' After='InstallInitialize'>Installed</Custom>
+      <Custom Action='WixCloseApplications' Before='InstallValidate'>Installed</Custom>
     </InstallExecuteSequence>
-    <util:CloseApplication Id="CloseApp" CloseMessage="yes" Target="ola_client_service.exe" RebootPrompt="yes" />
+
+    <util:CloseApplication Id="CloseApp" CloseMessage="yes" Target="ola_client_service.exe" RebootPrompt="no">
+        Installed
+    </util:CloseApplication>
   </CPackWiXFragment>
 
   <CPackWiXFragment Id="CM_CP_bin.ola_client_cli.exe">
