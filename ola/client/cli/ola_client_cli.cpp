@@ -2402,7 +2402,7 @@ string generate_temp_name(){
 //-----------------------------------------------------------------------------
 
 bool zip_add_file(zip_t *_pzip, const boost::filesystem::path &_path, size_t _base_path_len, uint64_t &_rsize){
-	string path = _path.string();
+	string path = _path.generic_string();
     zip_source_t *psrc = zip_source_file(_pzip, path.c_str(), 0, 0);
     if(psrc != nullptr){
         _rsize += file_size(_path);
@@ -2419,7 +2419,7 @@ bool zip_add_file(zip_t *_pzip, const boost::filesystem::path &_path, size_t _ba
 
 bool zip_add_dir(zip_t *_pzip, const boost::filesystem::path &_path, size_t _base_path_len, uint64_t &_rsize){
     using namespace boost::filesystem;
-    string path = _path.string();
+    string path = _path.generic_string();
     zip_int64_t err = zip_dir_add(_pzip, (path.c_str() + _base_path_len), ZIP_FL_ENC_UTF_8);
     
     cout<<"zip_add_dir: "<<(path.c_str() + _base_path_len)<<" rv = "<<err<<endl;
