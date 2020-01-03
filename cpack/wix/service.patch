@@ -54,14 +54,19 @@
     <CustomAction Id='LaunchService' Directory='CM_DP_bin'
               Return="asyncNoWait"
               ExeCommand='[CM_DP_bin]ola_client_service.exe'/>
+    <CustomAction Id="KillService" Directory='CM_DP_bin' Execute="deferred" ExeCommand="taskkill.exe /F /IM ola_client_service.exe" Return="asyncNoWait"/>
 
     <InstallExecuteSequence>
       <Custom Action='WixCloseApplications' Before='InstallValidate'>Installed</Custom>
+      <Custom Action='KillService' Before='InstallFinalize'>Installed</Custom>
     </InstallExecuteSequence>
 
+    <!-- This works on notepad.exe - client_service should handle VM_CLOSE message: -->
     <util:CloseApplication Id="CloseApp" CloseMessage="yes" Target="ola_client_service.exe" RebootPrompt="no">
         Installed
     </util:CloseApplication>
+
+    
   </CPackWiXFragment>
 
   <CPackWiXFragment Id="CM_CP_bin.ola_client_cli.exe">
