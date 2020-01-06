@@ -28,7 +28,7 @@ struct GuiProtocolSetup;
 struct Descriptor;
 
 struct Configuration {
-    using GuiStartFunctionT = std::function<void(int)>;
+    using GuiStartFunctionT = std::function<void(const std::string&, int)>;
     using GuiFailFunctionT  = std::function<void()>;
 
     bool              compress_ = true;

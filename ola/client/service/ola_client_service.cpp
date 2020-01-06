@@ -216,7 +216,7 @@ protected:
     NTSTATUS OnStop() override;
 
 private:
-    void onGuiStart(int _port);
+    void onGuiStart(const string &_endpoint, int _port);
     void onGuiFail();
 };
 } //namespace
@@ -580,8 +580,8 @@ NTSTATUS FileSystemService::OnStart(ULONG argc, PWSTR *argv)
 	cfg.gui_fail_fnc_ = [this](){
 		onGuiFail();
 	};
-	cfg.gui_start_fnc_ = [this](int _port){
-		onGuiStart(_port);
+	cfg.gui_start_fnc_ = [this](const string &_endpoint, int _port){
+		onGuiStart(_endpoint, _port);
 	};
     engine_.start(cfg);
 	NTSTATUS  Result = STATUS_SUCCESS;
@@ -612,9 +612,9 @@ wstring a2w(const string &_a) {
 	return wstring(_a.begin(), _a.end());
 }
 
-void FileSystemService::onGuiStart(int _port){
+void FileSystemService::onGuiStart(const string &_endpoint, int _port){
 	wostringstream oss;
-	oss<<L"ola_client_auth.exe --front "<<a2w(params_.front_endpoint_)<<L" --local "<<_port;
+	oss<<L"ola_client_auth.exe --front "<<a2w(_endpoint)<<L" --local "<<_port;
     DWORD dwExitCode;
     if (!CreateInteractiveProcess(oss.str(), FALSE, 0, 
         &dwExitCode))

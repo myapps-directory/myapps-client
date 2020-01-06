@@ -757,6 +757,7 @@ struct Engine::Implementation {
     mutex                     root_mutex_;
     condition_variable        root_cv_;
     bool                      running_ = true;
+    string                    auth_endpoint_;
     string                    auth_user_;
     string                    auth_token_;
     RecipientVectorT          auth_recipient_v_;
@@ -1031,7 +1032,11 @@ void Engine::start(const Configuration& _rcfg)
         pimpl_->gui_rpc_service_.start(std::move(cfg));
     }
 
-    auto err = pimpl_->front_rpc_service_.createConnectionPool(_rcfg.front_endpoint_.c_str(), 1);
+    {
+        
+    }
+
+    auto err = pimpl_->front_rpc_service_.createConnectionPool(pimpl_->auth_endpoint_.c_str(), 1);
     solid_check(!err, "creating connection pool: " << err.message());
 
     if (!err) {
@@ -1048,7 +1053,7 @@ void Engine::start(const Configuration& _rcfg)
         auto req_ptr     = make_shared<ListAppsRequest>();
         req_ptr->choice_ = 'a'; //TODO change to 'a' -> aquired apps
 
-        err = pimpl_->front_rpc_service_.sendRequest(_rcfg.front_endpoint_.c_str(), req_ptr, lambda);
+        err = pimpl_->front_rpc_service_.sendRequest(pimpl_->auth_endpoint_.c_str(), req_ptr, lambda);
         solid_check(!err);
         pimpl_->running_ = true;
     }
@@ -1292,7 +1297,7 @@ bool Engine::Implementation::entry(const fs::path& _path, EntryPointerT& _rentry
         req_ptr->path_       = remote_path;
         req_ptr->storage_id_ = _rentry_ptr->pmaster_->remote_;
 
-        front_rpc_service_.sendRequest(config_.front_endpoint_.c_str(), req_ptr, lambda);
+        front_rpc_service_.sendRequest(auth_endpoint_.c_str(), req_ptr, lambda);
     }
 
     if (_rentry_ptr->status_ == EntryStatusE::FetchPending) {
@@ -1778,7 +1783,7 @@ void Engine::Implementation::asyncFetch(EntryPointerT& _rentry_ptr, const size_t
     rfetch_stub.request_ptr_->offset_     = rfetch_stub.offset_;
     rfetch_stub.request_ptr_->size_       = rfetch_stub.size_;
 
-    front_rpc_service_.sendRequest(config_.front_endpoint_.c_str(), rfetch_stub.request_ptr_, lambda);
+    front_rpc_service_.sendRequest(auth_endpoint_.c_str(), rfetch_stub.request_ptr_, lambda);
 }
 
 //-----------------------------------------------------------------------------
@@ -1801,7 +1806,7 @@ void Engine::Implementation::getAuthToken(const frame::mprpc::RecipientId& _reci
     }
     if (start_gui) {
         solid_log(logger, Info, "No stored credentials - start gui");
-        config_.gui_start_fnc_(gui_rpc_service_.configuration().server.listenerPort());
+        config_.gui_start_fnc_(auth_endpoint_, gui_rpc_service_.configuration().server.listenerPort());
     }
 }
 
@@ -1957,13 +1962,16 @@ void Engine::Implementation::loadAuthData()
     const auto path = authDataFilePath();
     ifstream   ifs(path.generic_string());
     if (ifs) {
+        getline(ifs, auth_endpoint_);
         getline(ifs, auth_user_);
         getline(ifs, auth_token_);
         try {
             auth_token_ = ola::utility::base64_decode(auth_token_);
+            solid_check(!auth_token_.empty());
         } catch (std::exception& e) {
             auth_user_.clear();
             auth_token_.clear();
+            auth_endpoint_ = config_.front_endpoint_;
         }
         solid_log(logger, Info, "Loaded auth data from: " << path.generic_string() << " for user: " << auth_user_);
     } else {
@@ -1978,6 +1986,7 @@ void Engine::Implementation::storeAuthData(const string& _user, const string& _t
 
     ofstream ofs(path.generic_string(), std::ios::trunc);
     if (ofs) {
+        ofs << auth_endpoint_ << endl;
         ofs << _user << endl;
         ofs << ola::utility::base64_encode(_token) << endl;
         ofs.flush();
@@ -2023,7 +2032,7 @@ void Engine::Implementation::remoteFetchApplication(
         }
     };
 
-    front_rpc_service_.sendRequest(config_.front_endpoint_.c_str(), _rsent_msg_ptr, lambda);
+    front_rpc_service_.sendRequest(auth_endpoint_.c_str(), _rsent_msg_ptr, lambda);
 }
 
 void Engine::Implementation::cleanFileCache()
@@ -2086,7 +2095,7 @@ void Engine::Implementation::update()
                 }
             };
 
-            const auto err = front_rpc_service_.sendRequest(config_.front_endpoint_.c_str(), req_ptr, lambda);
+            const auto err = front_rpc_service_.sendRequest(auth_endpoint_.c_str(), req_ptr, lambda);
             if (!err) {
                 return;
             }
@@ -2110,7 +2119,7 @@ void Engine::Implementation::update()
         auto req_ptr     = make_shared<ListAppsRequest>();
         req_ptr->choice_ = 'a'; //TODO change to 'a' -> acquired apps
 
-        const auto err = front_rpc_service_.sendRequest(config_.front_endpoint_.c_str(), req_ptr, list_lambda);
+        const auto err = front_rpc_service_.sendRequest(auth_endpoint_.c_str(), req_ptr, list_lambda);
         if (!err) {
             unique_lock<mutex> lock(root_mutex_);
 
@@ -2149,7 +2158,7 @@ void Engine::Implementation::updateApplications(const UpdatesMapT& _updates_map)
 
             if (rad.canBeDeleted()) {
                 solid_log(logger, Info, "app " << rad.app_unique_ << " can be deleted");
-                auto entry_ptr = rrd.eraseApplication(rapp_entry);//rad will be valid as long as entry_ptr 
+                auto entry_ptr = rrd.eraseApplication(rapp_entry); //rad will be valid as long as entry_ptr
                 if (entry_ptr) {
                     solid_check(entry_ptr.get() == &rapp_entry);
                     app_it = rrd.app_entry_map_.erase(app_it);

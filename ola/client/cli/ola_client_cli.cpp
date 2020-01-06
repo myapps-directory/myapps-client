@@ -77,8 +77,9 @@ struct Parameters {
     string         front_endpoint;
     bool           no_auth_file;
     string         secure_prefix;
-    
-    string securePath(const string &_name)const{
+
+    string securePath(const string& _name) const
+    {
         return secure_prefix + '/' + _name;
     }
 };
@@ -92,6 +93,7 @@ struct Engine {
     const Parameters&       rparams_;
     atomic<bool>            running_;
     mutex                   mutex_;
+    string                  auth_endpoint_;
     string                  auth_user_;
     string                  auth_token_;
     thread                  auth_thread_;
@@ -126,18 +128,22 @@ struct Engine {
             ifstream   ifs(path.generic_string());
 
             if (ifs) {
+                getline(ifs, auth_endpoint_);
                 getline(ifs, auth_user_);
                 getline(ifs, auth_token_);
                 try {
                     auth_token_ = ola::utility::base64_decode(auth_token_);
+                    solid_check(!auth_token_.empty());
                 } catch (std::exception& e) {
                     auth_user_.clear();
                     auth_token_.clear();
+                    auth_endpoint_ = rparams_.front_endpoint;
                 }
             }
         } else {
             auth_user_.clear();
             auth_token_.clear();
+            auth_endpoint_ = rparams_.front_endpoint;
         }
     }
 
@@ -153,7 +159,7 @@ struct Engine {
 
     const string& serverEndpoint() const
     {
-        return params().front_endpoint;
+        return auth_endpoint_;
     }
 
     void onConnectionStart(frame::mprpc::ConnectionContext& _ctx);
@@ -171,6 +177,7 @@ struct Engine {
             Directory::create_all(authDataDirectoryPath().generic_string().c_str());
             ofstream ofs(authDataFilePath().generic_string(), std::ios::trunc);
             if (ofs) {
+                ofs << auth_endpoint_ << endl;
                 ofs << auth_user_ << endl;
                 ofs << ola::utility::base64_encode(auth_token_) << endl;
                 ofs.flush();
