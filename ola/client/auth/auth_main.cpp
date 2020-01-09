@@ -35,6 +35,7 @@
 #include "auth_protocol.hpp"
 #include "ola/common/ola_front_protocol.hpp"
 
+#include "boost/filesystem.hpp"
 #include "boost/program_options.hpp"
 
 #include <QApplication>
@@ -149,6 +150,22 @@ string envLogPathPrefix()
 //      main
 //-----------------------------------------------------------------------------
 #ifdef SOLID_ON_WINDOWS
+
+string get_current_process_path()
+{
+    constexpr const size_t path_capacity = 2048;
+    char                   path[path_capacity];
+    solid_check(GetModuleFileNameA(nullptr, path, path_capacity) != 0, "Failed GetModuleFileName: " << last_system_error().message());
+    return string(path);
+}
+
+QString get_qt_plugin_path() {
+    boost::filesystem::path path = get_current_process_path();
+    const string            p    = (path.parent_path() / "plugins").string();
+    solid_log(logger, Info, "qt plugin path: "<<p);
+    return QString::fromStdString(p);
+}
+
 int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR pCmdLine, int nCmdShow)
 {
     int     wargc;
@@ -184,6 +201,8 @@ int main(int argc, char* argv[])
             3,
             1024 * 1024 * 64);
     }
+
+    QCoreApplication::addLibraryPath(get_qt_plugin_path());
 
     QApplication app(argc, argv);
 

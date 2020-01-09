@@ -68,6 +68,8 @@ if(${Qt5Widgets_FOUND})
         COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:Qt5::Core> $<TARGET_FILE_DIR:ola_client_auth>
         COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:Qt5::Gui> $<TARGET_FILE_DIR:ola_client_auth>
         COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:Qt5::Widgets> $<TARGET_FILE_DIR:ola_client_auth>
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${OPENSSL_SSL_DLL} $<TARGET_FILE_DIR:ola_client_auth>
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${OPENSSL_CRYPTO_DLL} $<TARGET_FILE_DIR:ola_client_auth>
         COMMAND ${CMAKE_COMMAND} -E copy_directory $<TARGET_FILE_DIR:Qt5::Widgets>/../plugins/platforms $<TARGET_FILE_DIR:ola_client_auth>/plugins/platforms
         COMMAND ${CMAKE_COMMAND} -E copy_directory $<TARGET_FILE_DIR:Qt5::Widgets>/../plugins/imageformats $<TARGET_FILE_DIR:ola_client_auth>/plugins/imageformats
     )
@@ -76,5 +78,7 @@ if(${Qt5Widgets_FOUND})
     install(FILES $<TARGET_FILE:Qt5::Core> DESTINATION bin)
     install(FILES $<TARGET_FILE:Qt5::Gui> DESTINATION bin)
     install(FILES $<TARGET_FILE:Qt5::Widgets> DESTINATION bin)
+    install(FILES ${OPENSSL_SSL_DLL} DESTINATION bin)
+    install(FILES ${OPENSSL_CRYPTO_DLL} DESTINATION bin)
     install(DIRECTORY $<TARGET_FILE_DIR:ola_client_auth>/plugins DESTINATION bin)
 endif()

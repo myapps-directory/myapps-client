@@ -351,7 +351,7 @@ bool Parameters::parse(ULONG argc, PWSTR* argv)
         ("mount-point,m", wvalue<wstring>(&mount_point_)->default_value(L"C:\\ola", "c:\\ola"), "Mount point")
         ("unsecure", value<bool>(&secure_)->implicit_value(false)->default_value(true), "Don not use SSL to secure communication")
         ("compress", value<bool>(&compress_)->implicit_value(true)->default_value(false), "Use Snappy to compress communication")
-        ("front", value<std::string>(&front_endpoint_)->default_value(string("viphost.go.ro:") + ola::front::default_port()), "OLA Front Endpoint")
+        ("front", value<std::string>(&front_endpoint_)->default_value(string(OLA_FRONT_URL)), "OLA Front Endpoint")
         ("secure-prefix", value<std::string>(&secure_prefix_)->default_value("certs"), "Secure Path prefix")
     ;
     // clang-format off

@@ -1,7 +1,9 @@
 add_executable (ola_client_cli ola_client_cli.cpp ../../common/ola_front_protocol.hpp)
 
 if(WIN32)
-    set_source_files_properties(ola_client_cli.cpp PROPERTIES COMPILE_FLAGS -bigobj)
+    set_source_files_properties(ola_client_cli.cpp PROPERTIES COMPILE_FLAGS "-bigobj -DOLA_FRONT_URL=\\\"${OLA_FRONT_URL}\\\"")
+else()
+    set_source_files_properties(ola_client_cli.cpp PROPERTIES COMPILE_FLAGS "-DOLA_FRONT_URL=\\\"${OLA_FRONT_URL}\\\"")
 endif()
 
 target_link_libraries (ola_client_cli
@@ -32,4 +34,6 @@ install(DIRECTORY $<TARGET_FILE_DIR:ola_client_cli>/certs DESTINATION "bin")
 
 add_custom_command(TARGET ola_client_cli POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/certs  $<TARGET_FILE_DIR:ola_client_cli>/certs
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${OPENSSL_SSL_DLL} $<TARGET_FILE_DIR:ola_client_auth>
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${OPENSSL_CRYPTO_DLL} $<TARGET_FILE_DIR:ola_client_auth>
 )

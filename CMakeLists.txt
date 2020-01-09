@@ -39,6 +39,7 @@ else()
 endif()
 
 set(EXTRA_DEFINITIONS "${EXTRA_DEFINITIONS}" CACHE STRING "Extra compiler definitions")
+set(OLA_FRONT_URL "viphost.go.ro" CACHE STRING "OLA Front Default URL")
 add_definitions(${EXTRA_DEFINITIONS})
 
 ###############################################################################

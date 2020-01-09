@@ -1032,10 +1032,6 @@ void Engine::start(const Configuration& _rcfg)
         pimpl_->gui_rpc_service_.start(std::move(cfg));
     }
 
-    {
-        
-    }
-
     auto err = pimpl_->front_rpc_service_.createConnectionPool(pimpl_->auth_endpoint_.c_str(), 1);
     solid_check(!err, "creating connection pool: " << err.message());
 
@@ -1975,7 +1971,8 @@ void Engine::Implementation::loadAuthData()
         }
         solid_log(logger, Info, "Loaded auth data from: " << path.generic_string() << " for user: " << auth_user_);
     } else {
-        solid_log(logger, Error, "Failed loading auth data to: " << path.generic_string());
+        solid_log(logger, Error, "Failed loading auth data from: " << path.generic_string());
+        auth_endpoint_ = config_.front_endpoint_;
     }
 }
 

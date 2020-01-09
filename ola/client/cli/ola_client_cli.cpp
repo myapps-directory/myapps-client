@@ -393,7 +393,7 @@ bool parse_arguments(Parameters& _par, int argc, char* argv[])
             ("debug-buffered,S", value<bool>(&_par.dbg_buffered)->implicit_value(true)->default_value(false), "Debug buffered")
             ("unsecure", value<bool>(&_par.secure)->implicit_value(false)->default_value(true), "Use SSL to secure communication")
             ("compress", value<bool>(&_par.compress)->implicit_value(true)->default_value(false), "Use Snappy to compress communication")
-            ("front", value<std::string>(&_par.front_endpoint)->default_value(string("viphost.go.ro:") + ola::front::default_port()), "OLA Front Endpoint")
+            ("front", value<std::string>(&_par.front_endpoint)->default_value(string(OLA_FRONT_URL)), "OLA Front Endpoint")
             ("no-auth-file", value<bool>(&_par.no_auth_file)->implicit_value(true)->default_value(false), "Do not use auth file - prompt for authentication")
             ("secure-prefix", value<std::string>(&_par.secure_prefix)->default_value("certs"), "Secure Path prefix")
         ;

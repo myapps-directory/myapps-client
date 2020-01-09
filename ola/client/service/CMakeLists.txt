@@ -10,6 +10,7 @@ if(WIN32)
     )
 
     set_source_files_properties(engine.cpp PROPERTIES COMPILE_FLAGS -bigobj)
+    set_source_files_properties(ola_client_service.cpp PROPERTIES COMPILE_FLAGS "-DOLA_FRONT_URL=\\\"${OLA_FRONT_URL}\\\"")
 
     if(CMAKE_SIZEOF_VOID_P EQUAL 8)
         target_link_options(ola_client_service PRIVATE /DELAYLOAD:winfsp-x64.dll)
@@ -36,6 +37,8 @@ if(WIN32)
 
     add_custom_command(TARGET ola_client_service POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/certs  $<TARGET_FILE_DIR:ola_client_service>/certs
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${OPENSSL_SSL_DLL} $<TARGET_FILE_DIR:ola_client_auth>
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${OPENSSL_CRYPTO_DLL} $<TARGET_FILE_DIR:ola_client_auth>
     )
 
     install(TARGETS ola_client_service RUNTIME DESTINATION bin)
