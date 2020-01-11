@@ -139,6 +139,10 @@ struct Engine {
                     auth_token_.clear();
                     auth_endpoint_ = rparams_.front_endpoint;
                 }
+            } else {
+                auth_user_.clear();
+                auth_token_.clear();
+                auth_endpoint_ = rparams_.front_endpoint;
             }
         } else {
             auth_user_.clear();
