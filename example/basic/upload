@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 
-FRONT=$1
-START=$2
-COUNT=$3
+#FRONT=$1
+START=$1
+COUNT=$2
 PADDING=4
 LAST=$START+$COUNT
 
@@ -23,7 +23,7 @@ createBuild()
     cp example_basic_dlls/* tmp/build
     echo "$INDEX" > tmp/build/id.txt
     sed "s/APPID/$INDEX/g" example_basic.build > tmp/example_basic.build
-    echo -ne "create build $APPID $INDEX tmp/example_basic.build tmp/build tmp/main.png\nq\n" | ./ola_client_cli --front $FRONT
+    echo -ne "create build $APPID $INDEX tmp/example_basic.build tmp/build tmp/main.png\nq\n" | ./ola_client_cli
 }
 
 createMedia()
@@ -41,7 +41,7 @@ createMedia()
     magick example_basic.png  -fill blue  -undercolor '#00000080' -pointsize 100 -gravity Center -annotate +0+5 " ${INDEX} "  tmp/media/blue_image.jpg
 
     sed "s/APPID/$INDEX/g" example_basic.media > tmp/example_basic.media
-    echo -ne "create media $APPID $INDEX tmp/example_basic.media tmp/media\nq\n" | ./ola_client_cli --front $FRONT
+    echo -ne "create media $APPID $INDEX tmp/example_basic.media tmp/media\nq\n" | ./ola_client_cli
 }
 
 for (( num=${START}; num<${LAST}; num++ )); do
@@ -52,7 +52,7 @@ for (( num=${START}; num<${LAST}; num++ )); do
     mkdir tmp/build
     mkdir tmp/media
     
-    APPID=$(ALFA=`echo -ne "create app test\nq\n" | ./ola_client_cli --front $FRONT  | grep message`; echo -ne "${ALFA##* }"); echo "APPID=$APPID"
+    APPID=$(ALFA=`echo -ne "create app test\nq\n" | ./ola_client_cli | grep message`; echo -ne "${ALFA##* }"); echo "APPID=$APPID"
 
     createBuild "${var}" $APPID
     createMedia "${var}" $APPID

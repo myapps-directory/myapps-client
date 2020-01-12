@@ -1963,7 +1963,7 @@ void Engine::Implementation::loadAuthData()
         getline(ifs, auth_token_);
         try {
             auth_token_ = ola::utility::base64_decode(auth_token_);
-            solid_check(!auth_token_.empty());
+            solid_check(!auth_token_.empty() && auth_endpoint_ == config_.front_endpoint_);
         } catch (std::exception& e) {
             auth_user_.clear();
             auth_token_.clear();
