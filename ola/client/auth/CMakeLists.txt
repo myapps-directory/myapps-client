@@ -33,6 +33,7 @@ if(${Qt5Widgets_FOUND})
             ola_client_auth
             WIN32
             ${SRCS}
+            auth_main.rc
         )
     elseif(APPLE)
         add_executable(

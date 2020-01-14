@@ -231,7 +231,9 @@ int main(int argc, char* argv[])
         solid_log(logger, Info, "register failed");
         return 0;
     }
-
+    
+    auth_widget.setWindowIcon(QIcon(":/auth.ico"));
+ 
     auth_widget.start(
         [&engine](const std::string& _user, const std::string& _pass) {
             engine.onAuthStart(_user, ola::utility::sha256hex(_pass));

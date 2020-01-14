@@ -21,7 +21,7 @@ Widget::Widget(QWidget* parent)
     , pimpl_(solid::make_pimpl<Data>())
 {
     pimpl_->form_.setupUi(this);
-    setWindowFlags(Qt::Drawer);
+    //setWindowFlags(Qt::Drawer);
 
     installEventFilter(this);
 
