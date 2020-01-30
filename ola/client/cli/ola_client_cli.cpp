@@ -23,6 +23,7 @@
 
 #include <iomanip>
 
+#define REPLXX_STATIC
 #include "replxx.hxx"
 #include "zip.h"
 

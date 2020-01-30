@@ -5,15 +5,32 @@ set(CMAKE_AUTOMOC ON)
 # Create code from a list of Qt designer ui files
 set(CMAKE_AUTOUIC ON)
 
-set(Qt5Widgets_DIR ${QT5PREFIX_DIR}/Qt5Widgets)
-set(Qt5Core_DIR ${QT5PREFIX_DIR}/Qt5Core)
-set(Qt5Gui_DIR ${QT5PREFIX_DIR}/Qt5Gui)
+set(Qt5_DIR ${QT5PREFIX_DIR}/Qt5)
 
-message("Finding Qt5 from ${Qt5Widgets_DIR}")
+message("Finding Qt5 from ${Qt5_DIR}")
+find_package(Qt5 COMPONENTS Core Widgets Gui)
 
-find_package (Qt5Core)
-find_package (Qt5Gui)
-find_package (Qt5Widgets)
+if(Qt5_FOUND AND WIN32 AND NOT TARGET Qt5::windeployqt)
+    message("Finding Qt5 windeployqt")
+    get_target_property(_qt5_qmake_location Qt5::qmake IMPORTED_LOCATION)
+
+    execute_process(
+        COMMAND "${_qt5_qmake_location}" -query QT_INSTALL_PREFIX
+        RESULT_VARIABLE return_code
+        OUTPUT_VARIABLE qt5_install_prefix
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+
+    set(imported_location "${qt5_install_prefix}/bin/windeployqt.exe")
+
+    if(EXISTS ${imported_location})
+        add_executable(Qt5::windeployqt IMPORTED)
+
+        set_target_properties(Qt5::windeployqt PROPERTIES
+            IMPORTED_LOCATION ${imported_location}
+        )
+    endif()
+endif()
 
 if(${Qt5Widgets_FOUND})
     QT5_WRAP_UI(FORMS_HEADERS auth_form.ui)
@@ -65,21 +82,30 @@ if(${Qt5Widgets_FOUND})
         ${SYS_DYNAMIC_LOAD_LIB}
     )
 
+    if(TARGET Qt5::windeployqt)
+        if(CMAKE_BUILD_TYPE MATCHES "debug")
+            set(BUILD_TYPE "--debug")
+        else()
+            set(BUILD_TYPE "--release")
+        endif()
+        # execute windeployqt in a tmp directory after build
+        add_custom_command(TARGET ola_client_auth
+            POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E remove_directory $<TARGET_FILE_DIR:ola_client_auth>/windeployqt
+            COMMAND set PATH=%PATH%$<SEMICOLON>${qt5_install_prefix}/bin
+            COMMAND Qt5::windeployqt ${BUILD_TYPE} --dir $<TARGET_FILE_DIR:ola_client_auth>//windeployqt "$<TARGET_FILE_DIR:ola_client_auth>/$<TARGET_FILE_NAME:ola_client_auth>"
+        )
+
+        # copy deployment directory during installation
+        install(DIRECTORY $<TARGET_FILE_DIR:ola_client_auth>/windeployqt/ DESTINATION bin PATTERN "windeployqt/*")
+    endif()
+
     add_custom_command(TARGET ola_client_auth POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:Qt5::Core> $<TARGET_FILE_DIR:ola_client_auth>
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:Qt5::Gui> $<TARGET_FILE_DIR:ola_client_auth>
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:Qt5::Widgets> $<TARGET_FILE_DIR:ola_client_auth>
         COMMAND ${CMAKE_COMMAND} -E copy_if_different ${OPENSSL_SSL_DLL} $<TARGET_FILE_DIR:ola_client_auth>
         COMMAND ${CMAKE_COMMAND} -E copy_if_different ${OPENSSL_CRYPTO_DLL} $<TARGET_FILE_DIR:ola_client_auth>
-        COMMAND ${CMAKE_COMMAND} -E copy_directory $<TARGET_FILE_DIR:Qt5::Widgets>/../plugins/platforms $<TARGET_FILE_DIR:ola_client_auth>/plugins/platforms
-        COMMAND ${CMAKE_COMMAND} -E copy_directory $<TARGET_FILE_DIR:Qt5::Widgets>/../plugins/imageformats $<TARGET_FILE_DIR:ola_client_auth>/plugins/imageformats
     )
 
     install(TARGETS ola_client_auth DESTINATION bin)
-    install(FILES $<TARGET_FILE:Qt5::Core> DESTINATION bin)
-    install(FILES $<TARGET_FILE:Qt5::Gui> DESTINATION bin)
-    install(FILES $<TARGET_FILE:Qt5::Widgets> DESTINATION bin)
     install(FILES ${OPENSSL_SSL_DLL} DESTINATION bin)
     install(FILES ${OPENSSL_CRYPTO_DLL} DESTINATION bin)
-    install(DIRECTORY $<TARGET_FILE_DIR:ola_client_auth>/plugins DESTINATION bin)
 endif()
