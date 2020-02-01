@@ -902,7 +902,7 @@ private:
         uint64_t _offset, unsigned long _length, unsigned long& _rbytes_transfered);
 
     void remoteFetchApplication(
-        front::ListAppsResponse::AppIdVectorT&                  _rapp_id_vec,
+        front::ListAppsResponse::AppVectorT&                  _rapp_id_vec,
         std::shared_ptr<front::FetchBuildConfigurationRequest>& _rsent_msg_ptr,
         size_t                                                  _app_index);
 };
@@ -1359,7 +1359,7 @@ void Engine::Implementation::releaseApplication(Entry& _rapp_entry)
 {
     lock_guard<mutex>                     lock(root_mutex_);
     auto&                                 rad = _rapp_entry.applicationData();
-    front::ListAppsResponse::AppIdVectorT new_app_id_vec;
+    front::ListAppsResponse::AppVectorT   new_app_id_vec;
     auto&                                 rrd = root_entry_ptr_->rootData();
 
     rad.releaseApplication();
@@ -1994,11 +1994,11 @@ void Engine::Implementation::storeAuthData(const string& _user, const string& _t
 }
 
 void Engine::Implementation::remoteFetchApplication(
-    front::ListAppsResponse::AppIdVectorT&                  _rapp_id_vec,
+    front::ListAppsResponse::AppVectorT&                  _rapp_id_vec,
     std::shared_ptr<front::FetchBuildConfigurationRequest>& _rsent_msg_ptr,
     size_t                                                  _app_index)
 {
-    _rsent_msg_ptr->app_id_ = _rapp_id_vec[_app_index].first;
+    _rsent_msg_ptr->app_id_ = _rapp_id_vec[_app_index].id_;
 
     auto lambda = [this, _app_index, app_id_vec = std::move(_rapp_id_vec)](
                       frame::mprpc::ConnectionContext&                         _rctx,
@@ -2060,9 +2060,9 @@ void Engine::Implementation::update()
                            ErrorConditionT const&                    _rerror) {
         if (_rrecv_msg_ptr) {
             auto req_ptr = make_shared<FetchBuildUpdatesRequest>();
-            req_ptr->app_id_vec_.reserve(_rrecv_msg_ptr->app_id_vec_.size());
-            for (auto&& a : _rrecv_msg_ptr->app_id_vec_) {
-                req_ptr->app_id_vec_.emplace_back(std::move(a.first));
+            req_ptr->app_id_vec_.reserve(_rrecv_msg_ptr->app_vec_.size());
+            for (auto&& a : _rrecv_msg_ptr->app_vec_) {
+                req_ptr->app_id_vec_.emplace_back(std::move(a.id_));
             }
             req_ptr->lang_  = "US_en";
             req_ptr->os_id_ = "Windows10x86_64";
@@ -2132,7 +2132,7 @@ void Engine::Implementation::updateApplications(const UpdatesMapT& _updates_map)
 {
     //under root lock
     //get new applications
-    front::ListAppsResponse::AppIdVectorT new_app_id_vec;
+    front::ListAppsResponse::AppVectorT new_app_id_vec;
 
     auto& rrd = root_entry_ptr_->rootData();
 
@@ -2228,7 +2228,7 @@ void Engine::Implementation::onFrontListAppsResponse(
     frame::mprpc::ConnectionContext&          _ctx,
     std::shared_ptr<front::ListAppsResponse>& _rrecv_msg_ptr)
 {
-    if (_rrecv_msg_ptr->app_id_vec_.empty()) {
+    if (_rrecv_msg_ptr->app_vec_.empty()) {
 
         if (_rrecv_msg_ptr->error_ == 0) {
             onAllApplicationsFetched();
@@ -2249,7 +2249,7 @@ void Engine::Implementation::onFrontListAppsResponse(
     ola::utility::Build::set_option(req_ptr->fetch_options_, ola::utility::Build::FetchOptionsE::Shortcuts);
     req_ptr->property_vec_.emplace_back("brief");
 
-    remoteFetchApplication(_rrecv_msg_ptr->app_id_vec_, req_ptr, 0);
+    remoteFetchApplication(_rrecv_msg_ptr->app_vec_, req_ptr, 0);
 }
 
 void Engine::Implementation::createRootEntry()
