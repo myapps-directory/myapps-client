@@ -571,8 +571,8 @@ void handle_list_apps(istream& _ris, Engine &_reng){
     ){
         if(_rrecv_msg_ptr && _rrecv_msg_ptr->error_ == 0){
             cout<<"{\n";
-            for(const auto& app_id: _rrecv_msg_ptr->app_id_vec_){
-                cout<<'\t'<<utility::base64_encode(app_id.first)<<"\t"<<app_id.second<<endl;
+            for(const auto& app_id: _rrecv_msg_ptr->app_vec_){
+                cout<<'\t'<<utility::base64_encode(app_id.id_)<<"\t"<<app_id.unique_<<'\t'<<app_id.name_<<endl;
             }
             cout<<"}"<<endl;
         }else if(!_rrecv_msg_ptr){
@@ -1049,7 +1049,7 @@ void handle_create_app ( istream& _ris, Engine &_reng){
     }
 #endif
 
-    //_ris>>req_ptr->application_.name_;
+    _ris>>req_ptr->application_.name_;
     
     promise<void> prom;
     
