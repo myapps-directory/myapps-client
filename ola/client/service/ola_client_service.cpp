@@ -24,6 +24,8 @@
 
 #include "solid/system/log.hpp"
 
+#include <Shlobj.h>
+
 #include <aclapi.h>
 #include <wtsapi32.h>
 #pragma comment(lib, "wtsapi32.lib")
@@ -216,7 +218,7 @@ protected:
     NTSTATUS OnStop() override;
 
 private:
-    void onGuiStart(const string &_endpoint, int _port);
+    void onGuiStart(const string& _endpoint, int _port);
     void onGuiFail();
 };
 } //namespace
@@ -348,7 +350,7 @@ bool Parameters::parse(ULONG argc, PWSTR* argv)
         ("debug-port,P", value<string>(&debug_port_)->default_value("9999"), "Debug server port (e.g. on linux use: nc -l 9999)")
         ("debug-console,C", value<bool>(&debug_console_)->implicit_value(true)->default_value(false), "Debug console")
         ("debug-buffered,S", value<bool>(&debug_buffered_)->implicit_value(true)->default_value(false), "Debug buffered")
-        ("mount-point,m", wvalue<wstring>(&mount_point_)->default_value(L"C:\\ola", "c:\\ola"), "Mount point")
+        ("mount-point,m", wvalue<wstring>(&mount_point_)->default_value(L"C:\\MyApps.space", "C:\\MyApps.space"), "Mount point")
         ("unsecure", value<bool>(&secure_)->implicit_value(false)->default_value(true), "Don not use SSL to secure communication")
         ("compress", value<bool>(&compress_)->implicit_value(true)->default_value(false), "Use Snappy to compress communication")
         ("front", value<std::string>(&front_endpoint_)->default_value(string(OLA_FRONT_URL)), "OLA Front Endpoint")
@@ -583,6 +585,9 @@ NTSTATUS FileSystemService::OnStart(ULONG argc, PWSTR *argv)
 	cfg.gui_start_fnc_ = [this](const string &_endpoint, int _port){
 		onGuiStart(_endpoint, _port);
 	};
+    cfg.folder_update_fnc_ = [this](const std::string &_folder){
+        SHChangeNotify(SHCNE_UPDATEDIR, SHCNF_PATH | SHCNF_FLUSHNOWAIT, params_.mount_point_.c_str(), NULL);
+    };
     engine_.start(cfg);
 	NTSTATUS  Result = STATUS_SUCCESS;
 	ULONG     DebugFlags     = 0;

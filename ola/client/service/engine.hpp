@@ -30,6 +30,7 @@ struct Descriptor;
 struct Configuration {
     using GuiStartFunctionT = std::function<void(const std::string&, int)>;
     using GuiFailFunctionT  = std::function<void()>;
+    using FolderUpdateFunctionT = std::function<void(const std::string&)>;
 
     bool              compress_ = true;
     bool              secure_   = true;
@@ -40,6 +41,7 @@ struct Configuration {
     std::string       secure_prefix_;
     GuiStartFunctionT gui_start_fnc_;
     GuiFailFunctionT  gui_fail_fnc_;
+    FolderUpdateFunctionT folder_update_fnc_;
     size_t            mutex_count_ = 1;
     size_t            cv_count_    = 1;
     std::string       os_;
@@ -47,7 +49,7 @@ struct Configuration {
     uint64_t          max_stream_size_           = 100 * 1024;
     size_t            min_contiguous_read_count_ = 3;
     size_t            media_cache_size_          = 2;
-    size_t            update_poll_seconds_       = 20 * 3;
+    size_t            update_poll_seconds_       = 5;
 
     std::string securePath(const std::string& _name) const
     {
