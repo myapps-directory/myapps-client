@@ -14,6 +14,7 @@
 
 #include "ola/common/ola_front_protocol.hpp"
 
+#include "boost/filesystem.hpp"
 #include "boost/program_options.hpp"
 
 #include "ola/client/service/engine.hpp"
@@ -569,6 +570,23 @@ NTSTATUS FileSystemService::OnStart(ULONG argc, PWSTR *argv)
             params_.debug_buffered_,
             3,
             1024 * 1024 * 64);
+    }
+
+    {
+        namespace fs = boost::filesystem;
+        if(fs::exists(params_.mount_point_)){
+            if(fs::is_directory(params_.mount_point_)){
+                if(fs::is_empty(params_.mount_point_)){
+                    fs::remove(params_.mount_point_);
+                }else{
+                    log_fail(L"cannot mount file system - directory exists instead %s", params_.mount_point_.c_str());
+                    return STATUS_UNSUCCESSFUL;
+                }
+            }else{
+                log_fail(L"cannot mount file system - file exists instead %s", params_.mount_point_.c_str());
+                return STATUS_UNSUCCESSFUL;
+            }
+        }
     }
 
     ola::client::service::Configuration cfg;
