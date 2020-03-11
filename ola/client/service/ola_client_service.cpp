@@ -229,6 +229,13 @@ int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR pCmdLin
 {
     int     argc;
     LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+
+    {
+        const auto m_singleInstanceMutex = CreateMutex(NULL, TRUE, L"OLA_SERVICE_SHARED_MUTEX");
+        if (m_singleInstanceMutex == NULL || GetLastError() == ERROR_ALREADY_EXISTS) {
+            return -1; // Exit the app. For MFC, return false from InitInstance.
+        }
+    }
 #else
 int wmain(int argc, wchar_t** argv)
 {

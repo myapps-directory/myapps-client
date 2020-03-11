@@ -172,6 +172,18 @@ int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR pCmdLin
     LPWSTR* wargv   = CommandLineToArgvW(GetCommandLineW(), &wargc);
     int     argc    = 1;
     char*   argv[1] = {GetCommandLineA()};
+
+
+    {
+        const auto m_singleInstanceMutex = CreateMutex(NULL, TRUE, L"OLA_AUTH_SHARED_MUTEX");
+        if (m_singleInstanceMutex == NULL || GetLastError() == ERROR_ALREADY_EXISTS) {
+            HWND existingApp = FindWindow(0, L"MyApps.space Auth");
+            if (existingApp) {
+                SetForegroundWindow(existingApp);
+            }
+            return -1; // Exit the app. For MFC, return false from InitInstance.
+        }
+    }
 #else
 int main(int argc, char* argv[])
 {
@@ -238,6 +250,8 @@ int main(int argc, char* argv[])
         [&engine](const std::string& _user, const std::string& _pass) {
             engine.onAuthStart(_user, ola::utility::sha256hex(_pass));
         });
+
+    SetWindowText(GetActiveWindow(), L"MyApps.space Auth");
 
     front_configure_service(engine, params, front_rpc_service, aioscheduler, resolver);
 
