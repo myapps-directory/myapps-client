@@ -67,7 +67,7 @@ namespace {
 const solid::LoggerT logger("ola::client::auth");
 
 struct Parameters {
-    vector<string> dbg_modules = {"ola::.*:VIEW"};
+    vector<string> dbg_modules;
     string         dbg_addr;
     string         dbg_port;
     bool           dbg_console  = false;
@@ -172,6 +172,18 @@ int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR pCmdLin
     LPWSTR* wargv   = CommandLineToArgvW(GetCommandLineW(), &wargc);
     int     argc    = 1;
     char*   argv[1] = {GetCommandLineA()};
+
+
+    {
+        const auto m_singleInstanceMutex = CreateMutex(NULL, TRUE, L"OLA_AUTH_SHARED_MUTEX");
+        if (m_singleInstanceMutex == NULL || GetLastError() == ERROR_ALREADY_EXISTS) {
+            HWND existingApp = FindWindow(0, L"MyApps.space");
+            if (existingApp) {
+                SetForegroundWindow(existingApp);
+            }
+            return -1; // Exit the app. For MFC, return false from InitInstance.
+        }
+    }
 #else
 int main(int argc, char* argv[])
 {
@@ -239,6 +251,8 @@ int main(int argc, char* argv[])
             engine.onAuthStart(_user, ola::utility::sha256hex(_pass));
         });
 
+    SetWindowText(GetActiveWindow(), L"MyApps.space");
+
     front_configure_service(engine, params, front_rpc_service, aioscheduler, resolver);
 
     const int rv = app.exec();
@@ -257,7 +271,7 @@ bool Parameters::parse(ULONG argc, PWSTR* argv)
         // clang-format off
 		desc.add_options()
 			("help,h", "List program options")
-			("debug-modules,M", value<vector<string>>(&dbg_modules), "Debug logging modules (e.g. \".*:EW\", \"\\*:VIEW\")")
+			("debug-modules,M", value<vector<string>>(&dbg_modules)->default_value(std::vector<std::string>{"ola::.*:VI=",".*:EWX"}, ""), "Debug logging modules (e.g. \".*:EW\", \"\\*:VIEWX\")")
 			("debug-address,A", value<string>(&dbg_addr), "Debug server address (e.g. on linux use: nc -l 9999)")
 			("debug-port,P", value<string>(&dbg_port)->default_value("9999"), "Debug server port (e.g. on linux use: nc -l 9999)")
 			("debug-console,C", value<bool>(&dbg_console)->implicit_value(true)->default_value(false), "Debug console")

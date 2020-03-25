@@ -1,7 +1,7 @@
 #pragma once
 
 #include "solid/system/pimpl.hpp"
-#include <QWidget>
+#include <QMainWindow>
 #include <functional>
 #include <string>
 
@@ -9,7 +9,7 @@ namespace ola {
 namespace client {
 namespace auth {
 
-class Widget : public QWidget {
+class Widget : public QMainWindow {
     Q_OBJECT
 
 public:
