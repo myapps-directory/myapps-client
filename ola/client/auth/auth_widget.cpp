@@ -22,18 +22,20 @@ struct Widget::Data {
     Ui::MainWindow           main_form_;
     Ui::AuthForm             auth_form_;
     TryAuthenticateFunctionT auth_fnc_;
-    //QToolBar                 tool_bar_;
+    QToolBar                 tool_bar_;
     QAction                  back_action_;
     QAction                  home_action_;
+    QAction                  create_action_;
 
     Data(QMainWindow* _pw)
-        : back_action_(QIcon(":/images/back.png"), tr("&Back"), _pw)
-        , home_action_(QIcon(":/images/home.png"), tr("&Home"), _pw)
-        //, tool_bar_(_pw) 
+        : tool_bar_(_pw)
+        , back_action_(QIcon(":/images/back.png"), tr("&Back"), _pw)
+        , home_action_(QIcon(":/images/home.png"), tr("&Home"), _pw) 
+        , create_action_(QIcon(":/images/create.png"), tr("&Create"), _pw) 
     {
     }
 
-    void showWidget(QWidget* _pw)
+    void showWidget(QWidget* _pmain, QWidget* _pw)
     {
         if (main_form_.authWidget != _pw) {
             main_form_.authWidget->hide();
@@ -45,6 +47,8 @@ struct Widget::Data {
             main_form_.aboutWidget->hide();
         }
         _pw->show();
+        const int h = _pw->height() + tool_bar_.height() + main_form_.label->height();
+        _pmain->setFixedSize(QSize(_pw->width(), h));
     }
 };
 
@@ -52,6 +56,8 @@ Widget::Widget(QWidget* parent)
     : QMainWindow(parent)
     , pimpl_(solid::make_pimpl<Data>(this))
 {
+    setWindowFlags(windowFlags() & (~Qt::WindowMaximizeButtonHint));
+
     pimpl_->main_form_.setupUi(this);
     pimpl_->auth_form_.setupUi(pimpl_->main_form_.authWidget);
     //setWindowFlags(Qt::Drawer);
@@ -77,18 +83,21 @@ Widget::Widget(QWidget* parent)
     connect(this, SIGNAL(authSuccessSignal()), this, SLOT(onAuthSuccess()), Qt::QueuedConnection);
     connect(this, SIGNAL(closeSignal()), this, SLOT(close()), Qt::QueuedConnection);
 
-   // pimpl_->tool_bar_.setMovable(false);
-   // pimpl_->tool_bar_.setFixedHeight(38);
+    pimpl_->tool_bar_.setMovable(false);
+    pimpl_->tool_bar_.setFixedHeight(38);
     //pimpl_->tool_bar_.setContentsMargins(QMargins(0, 0, 0, 0));
-   // pimpl_->tool_bar_.setIconSize(QSize(32, 32));
-    //this->addToolBar(&pimpl_->tool_bar_);
-
- 
+    pimpl_->tool_bar_.setIconSize(QSize(32, 32));
+    
+    pimpl_->tool_bar_.setStyleSheet("QToolBar { border: 0px }");
+    //pimpl_->tool_bar_.setStyleSheet("QToolBar { icon-size: 32px 32px}");
     //pimpl_->tool_bar_.addSeparator();
-    //pimpl_->tool_bar_.addAction(&pimpl_->back_action_);
-    //pimpl_->tool_bar_.addAction(&pimpl_->home_action_);
+    pimpl_->tool_bar_.addAction(&pimpl_->back_action_);
+    pimpl_->tool_bar_.addAction(&pimpl_->home_action_);
+    pimpl_->tool_bar_.addAction(&pimpl_->create_action_);
 
-    pimpl_->showWidget(pimpl_->main_form_.authWidget);
+    this->addToolBar(&pimpl_->tool_bar_);
+
+    pimpl_->showWidget(this, pimpl_->main_form_.authWidget);
 }
 
 Widget::~Widget() {}
@@ -113,7 +122,7 @@ void Widget::onAuthClick()
         //close();
         pimpl_->auth_fnc_(pimpl_->auth_form_.userEdit->text().toStdString(), pimpl_->auth_form_.passwordEdit->text().toStdString());
     } else {
-        pimpl_->auth_form_.label->setText("Please provide an user name and a password");
+        pimpl_->main_form_.label->setText("Please provide an user name and a password");
     }
 }
 
@@ -121,9 +130,9 @@ void Widget::onOffline(bool _b)
 {
     solid_log(logger, Verbose, "" << _b);
     if (_b) {
-        pimpl_->auth_form_.label->setText("Offline...");
+        pimpl_->main_form_.label->setText("Offline...");
     } else {
-        pimpl_->auth_form_.label->setText("Online...");
+        pimpl_->main_form_.label->setText("Online...");
     }
 }
 
@@ -131,14 +140,14 @@ void Widget::onAuthFail()
 {
     solid_log(logger, Verbose, "");
 
-    pimpl_->auth_form_.label->setText("Failed authentication");
+    pimpl_->main_form_.label->setText("Failed authentication");
     pimpl_->auth_form_.passwordEdit->setText("");
     this->setEnabled(true);
 }
 void Widget::onAuthSuccess()
 {
     solid_log(logger, Verbose, "");
-    pimpl_->auth_form_.label->setText("Succes");
+    pimpl_->main_form_.label->setText("Succes");
 }
 
 void Widget::closeEvent(QCloseEvent*)

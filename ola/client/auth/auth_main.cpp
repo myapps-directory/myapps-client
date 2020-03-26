@@ -40,6 +40,7 @@
 
 #include <QApplication>
 #include <QtGui>
+#include <QStyleFactory>
 
 #include <signal.h>
 
@@ -213,8 +214,9 @@ int main(int argc, char* argv[])
             3,
             1024 * 1024 * 64);
     }
+    QApplication::setAttribute(Qt::AA_EnableHighDpiScaling);
 
-    QCoreApplication::addLibraryPath(get_qt_plugin_path());
+    QApplication::addLibraryPath(get_qt_plugin_path());
 
     QApplication app(argc, argv);
 
@@ -254,7 +256,8 @@ int main(int argc, char* argv[])
     SetWindowText(GetActiveWindow(), L"MyApps.space");
 
     front_configure_service(engine, params, front_rpc_service, aioscheduler, resolver);
-
+    
+    //app.setStyle("Fusion");
     const int rv = app.exec();
     front_rpc_service.stop();
     local_rpc_service.stop();
@@ -434,7 +437,7 @@ void Engine::onAuthStart(const string& _user, const string& _pass)
     //on gui thread
     {
         lock_guard<mutex> lock(mutex_);
-        front_auth_req_ptr_ = std::make_shared<front::AuthRequest>(_user, _pass);
+        front_auth_req_ptr_ = std::make_shared<front::AuthRequest>();
 
         if (!front_recipient_id_.empty()) {
             auto lambda = [this](
@@ -516,7 +519,7 @@ void Engine::onAuthResponse(
             auth_widget_.authSuccessSignal();
             if (!params_.local_port.empty()) {
 
-                local_auth_req_ptr_->user_  = _rsent_msg_ptr->auth_;
+                local_auth_req_ptr_->user_  = _rsent_msg_ptr->user_;
                 local_auth_req_ptr_->token_ = _rrecv_msg_ptr->message_;
                 auto lambda                 = [this](
                                   frame::mprpc::ConnectionContext&             _rctx,
