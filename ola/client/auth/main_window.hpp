@@ -17,14 +17,22 @@ class MainWindow : public QMainWindow {
     Q_OBJECT
     
 public:
-    using TryAuthenticateFunctionT = std::function<void(const std::string&, const std::string&, const std::string &)>;
+    using AuthenticateFunctionT = std::function<void(const std::string&, const std::string&, const std::string &)>;
+    using CreateFunctionT = std::function<void(const std::string&, const std::string &, const std::string &, const std::string &)>;
+    using AmendFunctionT = std::function<void(const std::string&, const std::string &, const std::string &, const std::string &)>;
+    using ValidateFunctionT = std::function<void(const std::string&)>;
 
     MainWindow(QWidget* parent = 0);
     ~MainWindow();
 
     void setUser(const std::string& _user);
 
-    void start(TryAuthenticateFunctionT&& _fnc);
+    void start(
+        AuthenticateFunctionT&& _auth_fnc,
+        CreateFunctionT &&_create_fnc,
+        AmendFunctionT &&_amend_fnc,
+        ValidateFunctionT &&_validate_fnc
+    );
 
     void onCaptcha(std::vector<uint8_t>&& _captcha_image);
 
@@ -33,6 +41,7 @@ signals:
     void onlineSignal(bool);
     void authFailSignal();
     void authSuccessSignal();
+    void authValidateSignal();
 
     void captchaSignal(CaptchaPointerT);
 private slots:
@@ -41,14 +50,17 @@ private slots:
     void onOnline(bool);
     void onAuthFail();
     void onAuthSuccess();
+    void onAuthValidate();
 
     void goAuthSlot(bool);
+    void goAmendSlot(bool);
     void goCreateSlot(bool);
     void goBackSlot(bool);
     void goAboutSlot(bool);
     void captchaSlot(CaptchaPointerT);
 
     void authTextEdited(const QString& text);
+    void createTextEdited(const QString& text);
 
 private:
     void closeEvent(QCloseEvent*) override;

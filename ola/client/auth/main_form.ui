@@ -66,6 +66,12 @@
        <widget class="QWidget" name="authWidget" native="true"/>
       </item>
       <item>
+       <widget class="QWidget" name="amendWidget" native="true"/>
+      </item>
+      <item>
+       <widget class="QWidget" name="validateWidget" native="true"/>
+      </item>
+      <item>
        <widget class="QLabel" name="label">
         <property name="sizePolicy">
          <sizepolicy hsizetype="Preferred" vsizetype="Fixed">

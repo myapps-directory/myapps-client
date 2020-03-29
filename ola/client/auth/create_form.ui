@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>326</width>
-    <height>236</height>
+    <width>337</width>
+    <height>270</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -15,7 +15,7 @@
   </property>
   <layout class="QVBoxLayout" name="verticalLayout">
    <item>
-    <widget class="QLineEdit" name="userLineEdit">
+    <widget class="QLineEdit" name="userEdit">
      <property name="placeholderText">
       <string>account name</string>
      </property>
@@ -25,7 +25,7 @@
     </widget>
    </item>
    <item>
-    <widget class="QLineEdit" name="emailLineEdit">
+    <widget class="QLineEdit" name="email1Edit">
      <property name="placeholderText">
       <string>e-mail address</string>
      </property>
@@ -35,7 +35,14 @@
     </widget>
    </item>
    <item>
-    <widget class="QLineEdit" name="password1LineEdit">
+    <widget class="QLineEdit" name="email2Edit">
+     <property name="placeholderText">
+      <string>retype e-mail address</string>
+     </property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QLineEdit" name="password1Edit">
      <property name="echoMode">
       <enum>QLineEdit::Password</enum>
      </property>
@@ -48,12 +55,12 @@
     </widget>
    </item>
    <item>
-    <widget class="QLineEdit" name="password2LineEdit">
+    <widget class="QLineEdit" name="password2Edit">
      <property name="echoMode">
       <enum>QLineEdit::Password</enum>
      </property>
      <property name="placeholderText">
-      <string>password retype</string>
+      <string>retype password</string>
      </property>
      <property name="clearButtonEnabled">
       <bool>true</bool>
@@ -63,7 +70,7 @@
    <item>
     <layout class="QHBoxLayout" name="horizontalLayout">
      <item>
-      <widget class="QLineEdit" name="codeLineEdit">
+      <widget class="QLineEdit" name="codeEdit">
        <property name="placeholderText">
         <string>code</string>
        </property>
@@ -108,6 +115,19 @@
       <string>Create</string>
      </property>
     </widget>
+   </item>
+   <item>
+    <spacer name="verticalSpacer">
+     <property name="orientation">
+      <enum>Qt::Vertical</enum>
+     </property>
+     <property name="sizeHint" stdset="0">
+      <size>
+       <width>20</width>
+       <height>40</height>
+      </size>
+     </property>
+    </spacer>
    </item>
   </layout>
  </widget>

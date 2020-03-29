@@ -96,10 +96,10 @@ struct Engine {
     Parameters&                           params_;
     shared_ptr<client::auth::AuthRequest> local_auth_req_ptr_;
     frame::mprpc::RecipientId             local_recipient_id_;
-    std::shared_ptr<front::AuthRequest>   front_auth_req_ptr_;
     frame::mprpc::RecipientId             front_recipient_id_;
     mutex                                 mutex_;
     string                                captcha_token_;
+    string                                temp_auth_token_;
 
     Engine(
         client::auth::MainWindow&   _main_window,
@@ -118,6 +118,10 @@ struct Engine {
     void onConnectionStop(frame::mprpc::ConnectionContext& _ctx);
 
     void onAuthStart(const string& _user, const string& _pass, const string& _code);
+    void onCreateStart(const string& _user, const string& _email, const string& _pass, const string& _code);
+    void onAmendStart(const string& _user, const string& _email, const string& _pass, const string& _new_pass);
+    void onValidateStart(const string& _code);
+
 
     void onCaptchaResponse(
         frame::mprpc::ConnectionContext& _rctx,
@@ -126,7 +130,7 @@ struct Engine {
         ErrorConditionT const&                              _rerror);
     void onAuthResponse(
         frame::mprpc::ConnectionContext&      _rctx,
-        std::shared_ptr<front::AuthRequest>&  _rsent_msg_ptr,
+        const string &_user,
         std::shared_ptr<front::AuthResponse>& _rrecv_msg_ptr,
         ErrorConditionT const&                _rerror);
 
@@ -257,10 +261,24 @@ int main(int argc, char* argv[])
     
     main_window.setWindowIcon(QIcon(":/auth.ico"));
  
-    main_window.start(
-        [&engine](const std::string& _user, const std::string& _pass, const std::string &_code) {
+    {
+        auto auth_lambda = [&engine](const string& _user, const string& _pass, const string& _code) {
             engine.onAuthStart(_user, ola::utility::sha256hex(_pass), _code);
-        });
+        };
+        auto create_lambda = [&engine](const string& _user, const string &_email, const string& _pass, const string& _code) {
+            engine.onCreateStart(_user, _email, ola::utility::sha256hex(_pass), _code);
+        };
+
+        auto amend_lambda = [&engine](const string& _user, const string& _email, const string& _pass, const string& _new_pass) {
+            engine.onAmendStart(_user, _email, ola::utility::sha256hex(_pass), _new_pass);
+        };
+
+        auto validate_lambda = [&engine](const string& _code) {
+            engine.onValidateStart(_code);
+        };
+
+        main_window.start(auth_lambda, create_lambda, amend_lambda, validate_lambda);
+    }
 
     SetWindowText(GetActiveWindow(), L"MyApps.space");
 
@@ -446,11 +464,11 @@ void Engine::onAuthStart(const string& _user, const string& _pass, const string 
     //on gui thread
     {
         lock_guard<mutex> lock(mutex_);
-        front_auth_req_ptr_ = std::make_shared<front::AuthRequest>();
-        front_auth_req_ptr_->captcha_text_ = _code;
-        front_auth_req_ptr_->captcha_token_ = captcha_token_;
-        front_auth_req_ptr_->user_          = _user;
-        front_auth_req_ptr_->pass_          = _pass;
+        auto req_ptr = std::make_shared<front::AuthRequest>();
+        req_ptr->captcha_text_ = _code;
+        req_ptr->captcha_token_ = captcha_token_;
+        req_ptr->user_          = _user;
+        req_ptr->pass_          = _pass;
 
         if (!front_recipient_id_.empty()) {
             auto lambda = [this](
@@ -458,13 +476,41 @@ void Engine::onAuthStart(const string& _user, const string& _pass, const string 
                               std::shared_ptr<front::AuthRequest>&  _rsent_msg_ptr,
                               std::shared_ptr<front::AuthResponse>& _rrecv_msg_ptr,
                               ErrorConditionT const&                _rerror) {
-                onAuthResponse(_rctx, _rsent_msg_ptr, _rrecv_msg_ptr, _rerror);
+                onAuthResponse(_rctx, _rsent_msg_ptr->user_, _rrecv_msg_ptr, _rerror);
             };
-            if (!front_rpc_service_.sendRequest(front_recipient_id_, front_auth_req_ptr_, lambda)) {
-                front_auth_req_ptr_.reset();
-            }
+            front_rpc_service_.sendRequest(front_recipient_id_, req_ptr, lambda);
         }
     }
+}
+
+void Engine::onCreateStart(const string& _user, const string& _email, const string& _pass, const string& _code)
+{
+    {
+        lock_guard<mutex> lock(mutex_);
+        auto req_ptr = std::make_shared<front::AuthCreateRequest>();
+        req_ptr->captcha_text_  = _code;
+        req_ptr->captcha_token_ = captcha_token_;
+        req_ptr->user_          = _user;
+        req_ptr->email_         = _email;
+        req_ptr->pass_          = _pass;
+
+        if (!front_recipient_id_.empty()) {
+            auto lambda = [this](
+                              frame::mprpc::ConnectionContext&      _rctx,
+                              std::shared_ptr<front::AuthCreateRequest>&  _rsent_msg_ptr,
+                              std::shared_ptr<front::AuthResponse>& _rrecv_msg_ptr,
+                              ErrorConditionT const&                _rerror) {
+                onAuthResponse(_rctx, _rsent_msg_ptr->user_, _rrecv_msg_ptr, _rerror);
+            };
+            front_rpc_service_.sendRequest(front_recipient_id_, req_ptr, lambda);
+        }
+    }
+}
+void Engine::onAmendStart(const string& _user, const string& _email, const string& _pass, const string& _new_pass) 
+{
+}
+void Engine::onValidateStart(const string& _code)
+{
 }
 
 void Engine::onConnectionStart(frame::mprpc::ConnectionContext& _ctx)
@@ -535,13 +581,16 @@ void Engine::onCaptchaResponse(
 
 void Engine::onAuthResponse(
     frame::mprpc::ConnectionContext&      _rctx,
-    std::shared_ptr<front::AuthRequest>&  _rsent_msg_ptr,
+    const string &_user,
     std::shared_ptr<front::AuthResponse>& _rrecv_msg_ptr,
     ErrorConditionT const&                _rerror)
 {
     if (_rrecv_msg_ptr) {
         solid_log(logger, Info, "AuthResponse: " << _rrecv_msg_ptr->error_ << " " << _rrecv_msg_ptr->message_);
-        if (_rrecv_msg_ptr->error_) {
+        if (_rrecv_msg_ptr->error_ == ola::utility::error_authentication_validate.value()) {
+            temp_auth_token_ = std::move(_rrecv_msg_ptr->message_);
+            main_window_.authValidateSignal();
+        }else if(_rrecv_msg_ptr->error_){
             main_window_.authFailSignal();
             this_thread::sleep_for(chrono::seconds(2));
             onConnectionInit(_rctx);
@@ -549,7 +598,7 @@ void Engine::onAuthResponse(
             main_window_.authSuccessSignal();
             if (!params_.local_port.empty()) {
 
-                local_auth_req_ptr_->user_  = _rsent_msg_ptr->user_;
+                local_auth_req_ptr_->user_  = _user;
                 local_auth_req_ptr_->token_ = _rrecv_msg_ptr->message_;
                 auto lambda                 = [this](
                                   frame::mprpc::ConnectionContext&             _rctx,
@@ -572,11 +621,6 @@ void Engine::onAuthResponse(
     } else {
         solid_log(logger, Info, "No AuthResponse");
         //offline
-
-        {
-            lock_guard<mutex> lock(mutex_);
-            front_auth_req_ptr_ = std::move(_rsent_msg_ptr);
-        }
     }
 }
 
