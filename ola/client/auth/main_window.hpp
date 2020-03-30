@@ -28,6 +28,7 @@ public:
     void setUser(const std::string& _user);
 
     void start(
+        const QString &_auth_user,
         AuthenticateFunctionT&& _auth_fnc,
         CreateFunctionT &&_create_fnc,
         AmendFunctionT &&_amend_fnc,
@@ -47,6 +48,8 @@ signals:
 private slots:
     void onAuthClick();
     void onCreateClick();
+    void onValidateClick();
+
     void onOnline(bool);
     void onAuthFail();
     void onAuthSuccess();
@@ -61,6 +64,7 @@ private slots:
 
     void authTextEdited(const QString& text);
     void createTextEdited(const QString& text);
+    void validateTextEdited(const QString& text);
 
 private:
     void closeEvent(QCloseEvent*) override;

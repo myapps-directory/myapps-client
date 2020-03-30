@@ -193,6 +193,7 @@ MainWindow::MainWindow(QWidget* parent)
 
     connect(pimpl_->auth_form_.authButton, SIGNAL(clicked()), this, SLOT(onAuthClick()));
     connect(pimpl_->create_form_.createButton, SIGNAL(clicked()), this, SLOT(onCreateClick()));
+    connect(pimpl_->validate_form_.validateButton, SIGNAL(clicked()), this, SLOT(onValidateClick()));
 
     connect(this, SIGNAL(onlineSignal(bool)), this, SLOT(onOnline(bool)), Qt::QueuedConnection);
     connect(this, SIGNAL(authFailSignal()), this, SLOT(onAuthFail()), Qt::QueuedConnection);
@@ -258,6 +259,7 @@ void MainWindow::setUser(const std::string& _user)
 }
 
 void MainWindow::start(
+    const QString&          _auth_user,
     AuthenticateFunctionT&& _auth_fnc,
     CreateFunctionT&&       _create_fnc,
     AmendFunctionT&&        _amend_fnc,
@@ -267,6 +269,8 @@ void MainWindow::start(
     pimpl_->create_fnc_ = std::move(_create_fnc);
     pimpl_->amend_fnc_   = std::move(_amend_fnc);
     pimpl_->validate_fnc_   = std::move(_validate_fnc);
+
+    pimpl_->auth_form_.userEdit->setText(_auth_user);
     this->show();
 }
 
@@ -290,6 +294,11 @@ void MainWindow::onCreateClick()
         pimpl_->create_form_.email1Edit->text().toStdString(),
         pimpl_->create_form_.password1Edit->text().toStdString(),
         pimpl_->create_form_.codeEdit->text().toStdString());
+}
+
+void MainWindow::onValidateClick()
+{
+    pimpl_->validate_fnc_(pimpl_->validate_form_.validateEdit->text().toStdString());
 }
 
 void MainWindow::onOnline(bool _b)
@@ -423,6 +432,13 @@ void MainWindow::createTextEdited(const QString& text) {
     enable = enable && pimpl_->create_form_.email1Edit->text() == pimpl_->create_form_.email2Edit->text();
 
     pimpl_->create_form_.createButton->setEnabled(enable);
+}
+
+void MainWindow::validateTextEdited(const QString& text) {
+    bool enable = true;
+
+    enable = enable && !pimpl_->create_form_.userEdit->text().isEmpty();
+    pimpl_->validate_form_.validateButton->setEnabled(enable);
 }
 
 } //namespace auth

@@ -46,13 +46,13 @@ if(${Qt5Widgets_FOUND})
     )
 
     if(WIN32)
-        set_source_files_properties(auth_main.cpp PROPERTIES COMPILE_FLAGS -bigobj)
         add_executable(
             ola_client_auth
             WIN32
             ${SRCS}
             auth_main.rc
         )
+        set_source_files_properties(auth_main.cpp PROPERTIES COMPILE_FLAGS "-DOLA_FRONT_URL=\\\"${OLA_FRONT_URL}\\\" -bigobj")
     elseif(APPLE)
         add_executable(
             ola_client_auth

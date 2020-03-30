@@ -18,7 +18,9 @@
 #include "solid/frame/manager.hpp"
 #include "solid/frame/scheduler.hpp"
 #include "solid/frame/service.hpp"
+
 #include "solid/system/log.hpp"
+#include "solid/system/exception.hpp"
 
 #include "solid/frame/aio/aioresolver.hpp"
 
@@ -57,6 +59,8 @@ using namespace ola;
 using namespace solid;
 using namespace std;
 
+namespace fs = boost::filesystem;
+
 using AioSchedulerT = frame::Scheduler<frame::aio::Reactor>;
 using SchedulerT    = frame::Scheduler<frame::Reactor>;
 
@@ -76,8 +80,8 @@ struct Parameters {
     bool           secure;
     bool           compress;
     string         front_endpoint;
-    string         local_port;
     string         secure_prefix;
+    string         path_prefix;
 
     Parameters() {}
 
@@ -92,25 +96,34 @@ struct Parameters {
 struct Engine {
     client::auth::MainWindow&             main_window_;
     frame::mprpc::ServiceT&               front_rpc_service_;
-    frame::mprpc::ServiceT&               local_rpc_service_;
     Parameters&                           params_;
-    shared_ptr<client::auth::AuthRequest> local_auth_req_ptr_;
-    frame::mprpc::RecipientId             local_recipient_id_;
     frame::mprpc::RecipientId             front_recipient_id_;
     mutex                                 mutex_;
     string                                captcha_token_;
-    string                                temp_auth_token_;
+    string                                auth_token_;
+    string                                auth_user_;
+    string                                auth_endpoint_;
 
     Engine(
         client::auth::MainWindow&   _main_window,
         frame::mprpc::ServiceT& _front_rpc_service,
-        frame::mprpc::ServiceT& _local_rpc_service,
         Parameters&             _params)
         : main_window_(_main_window)
         , front_rpc_service_(_front_rpc_service)
-        , local_rpc_service_(_local_rpc_service)
         , params_(_params)
     {
+    }
+
+    fs::path authDataDirectoryPath() const
+    {
+        fs::path p = params_.path_prefix;
+        p /= "config";
+        return p;
+    }
+
+    fs::path authDataFilePath() const
+    {
+        return authDataDirectoryPath() / "auth.data";
     }
 
     void onConnectionInit(frame::mprpc::ConnectionContext& _ctx);
@@ -134,11 +147,11 @@ struct Engine {
         std::shared_ptr<front::AuthResponse>& _rrecv_msg_ptr,
         ErrorConditionT const&                _rerror);
 
-    bool localRegister(client::auth::MainWindow& _rwidget);
+    void loadAuthData();
+    void storeAuthData(const string& _user, const string& _token);
 };
 
 void front_configure_service(Engine& _rengine, const Parameters& _params, frame::mprpc::ServiceT& _rsvc, AioSchedulerT& _rsch, frame::aio::Resolver& _rres);
-void local_configure_service(const Parameters& _params, frame::mprpc::ServiceT& _rsvc, AioSchedulerT& _rsch, frame::aio::Resolver& _rres);
 
 //TODO: find a better name
 string envLogPathPrefix()
@@ -153,6 +166,20 @@ string envLogPathPrefix()
 
     string r = v;
     r += "\\OLA\\client";
+    return r;
+}
+string env_config_path_prefix()
+{
+    const char* v = getenv("APPDATA");
+    if (v == nullptr) {
+        v = getenv("LOCALAPPDATA");
+        if (v == nullptr) {
+            v = "c:";
+        }
+    }
+
+    string r = v;
+    r += "\\OLA";
     return r;
 }
 
@@ -239,27 +266,18 @@ int main(int argc, char* argv[])
     frame::ServiceT service{manager};
 
     frame::mprpc::ServiceT front_rpc_service{manager};
-    frame::mprpc::ServiceT local_rpc_service{manager};
 
     CallPool<void()>     cwp{WorkPoolConfiguration(), 1};
     frame::aio::Resolver resolver(cwp);
 
     client::auth::MainWindow main_window;
-    Engine               engine(main_window, front_rpc_service, local_rpc_service, params);
+    Engine               engine(main_window, front_rpc_service, params);
 
     aioscheduler.start(1);
-
-    local_configure_service(params, local_rpc_service, aioscheduler, resolver);
-
-    solid_log(logger, Info, "try register on local service");
-
-    if (!engine.localRegister(main_window)) {
-        cout << "register failed" << endl;
-        solid_log(logger, Info, "register failed");
-        return 0;
-    }
     
     main_window.setWindowIcon(QIcon(":/auth.ico"));
+
+    engine.loadAuthData();
  
     {
         auto auth_lambda = [&engine](const string& _user, const string& _pass, const string& _code) {
@@ -277,7 +295,7 @@ int main(int argc, char* argv[])
             engine.onValidateStart(_code);
         };
 
-        main_window.start(auth_lambda, create_lambda, amend_lambda, validate_lambda);
+        main_window.start(QString::fromStdString(engine.auth_user_), auth_lambda, create_lambda, amend_lambda, validate_lambda);
     }
 
     SetWindowText(GetActiveWindow(), L"MyApps.space");
@@ -287,7 +305,6 @@ int main(int argc, char* argv[])
     //app.setStyle("Fusion");
     const int rv = app.exec();
     front_rpc_service.stop();
-    local_rpc_service.stop();
     return rv;
 }
 
@@ -306,11 +323,11 @@ bool Parameters::parse(ULONG argc, PWSTR* argv)
 			("debug-port,P", value<string>(&dbg_port)->default_value("9999"), "Debug server port (e.g. on linux use: nc -l 9999)")
 			("debug-console,C", value<bool>(&dbg_console)->implicit_value(true)->default_value(false), "Debug console")
 			("debug-buffered,S", value<bool>(&dbg_buffered)->implicit_value(true)->default_value(false), "Debug unbuffered")
-            ("front,f", value<std::string>(&front_endpoint)->required(), "Front Server endpoint: address:port")
-			("local,l", value<std::string>(&local_port)->default_value(""), "Local Server Port")
+            ("front,f", value<std::string>(&front_endpoint)->default_value(string(OLA_FRONT_URL)), "OLA Front Endpoint")
 			("unsecure", value<bool>(&secure)->implicit_value(false)->default_value(true), "Do not use SSL to secure communication")
 			("compress", value<bool>(&compress)->implicit_value(true)->default_value(false), "Use Snappy to compress communication")
             ("secure-prefix", value<std::string>(&secure_prefix)->default_value("certs"), "Secure Path prefix")
+            ("path-prefix", value<std::string>(&path_prefix)->default_value(env_config_path_prefix()), "Secure Path prefix")
         ;
         // clang-format on
         variables_map vm;
@@ -394,71 +411,6 @@ void front_configure_service(Engine& _rengine, const Parameters& _params, frame:
     _rsvc.createConnectionPool(_params.front_endpoint.c_str(), 1);
 }
 
-//-----------------------------------------------------------------------------
-// Local
-//-----------------------------------------------------------------------------
-struct LocalSetup {
-    template <class T>
-    void operator()(front::ProtocolT& _rprotocol, TypeToType<T> _t2t, const front::ProtocolT::TypeIdT& _rtid)
-    {
-        _rprotocol.registerMessage<T>(complete_message<T>, _rtid);
-    }
-};
-
-void local_configure_service(const Parameters& _params, frame::mprpc::ServiceT& _rsvc, AioSchedulerT& _rsch, frame::aio::Resolver& _rres)
-{
-    auto                        proto = client::auth::ProtocolT::create();
-    frame::mprpc::Configuration cfg(_rsch, proto);
-
-    client::auth::protocol_setup(LocalSetup(), *proto);
-
-    cfg.client.name_resolve_fnc = frame::mprpc::InternetResolverF(_rres, _params.local_port.c_str());
-
-    cfg.client.connection_start_state = frame::mprpc::ConnectionState::Active;
-
-    {
-        auto connection_stop_lambda = [](frame::mprpc::ConnectionContext& _ctx) {
-            QApplication::quit();
-        };
-
-        cfg.connection_stop_fnc = std::move(connection_stop_lambda);
-    }
-
-    _rsvc.start(std::move(cfg));
-}
-
-bool Engine::localRegister(client::auth::MainWindow& _rwidget)
-{
-    if (params_.local_port.empty()) {
-        return true;
-    }
-    promise<bool> prom;
-
-    auto msg_ptr = make_shared<client::auth::RegisterRequest>();
-    auto lambda  = [this, &prom, &_rwidget](
-                      frame::mprpc::ConnectionContext&                 _rctx,
-                      std::shared_ptr<client::auth::RegisterRequest>&  _rsent_msg_ptr,
-                      std::shared_ptr<client::auth::RegisterResponse>& _rrecv_msg_ptr,
-                      ErrorConditionT const&                           _rerror) {
-        if (_rrecv_msg_ptr) {
-            if (_rrecv_msg_ptr->error_) {
-                prom.set_value(false);
-            } else {
-
-                local_auth_req_ptr_ = std::make_shared<client::auth::AuthRequest>(*_rrecv_msg_ptr);
-                local_recipient_id_ = _rctx.recipientId();
-                _rwidget.setUser(_rrecv_msg_ptr->user_);
-                prom.set_value(true);
-            }
-        } else {
-            prom.set_value(false);
-        }
-    };
-    local_rpc_service_.sendRequest("127.0.0.1", msg_ptr, lambda, {frame::mprpc::MessageFlagsE::OneShotSend});
-    auto fut = prom.get_future();
-    return /*fut.wait_for(chrono::seconds(10)) == future_status::ready &&*/ fut.get();
-}
-
 void Engine::onAuthStart(const string& _user, const string& _pass, const string &_code)
 {
     //on gui thread
@@ -481,6 +433,7 @@ void Engine::onAuthStart(const string& _user, const string& _pass, const string 
             front_rpc_service_.sendRequest(front_recipient_id_, req_ptr, lambda);
         }
     }
+    auth_user_ = _user;
 }
 
 void Engine::onCreateStart(const string& _user, const string& _email, const string& _pass, const string& _code)
@@ -505,12 +458,28 @@ void Engine::onCreateStart(const string& _user, const string& _email, const stri
             front_rpc_service_.sendRequest(front_recipient_id_, req_ptr, lambda);
         }
     }
+    auth_user_ = _user;
 }
 void Engine::onAmendStart(const string& _user, const string& _email, const string& _pass, const string& _new_pass) 
 {
 }
 void Engine::onValidateStart(const string& _code)
 {
+    auto req_ptr = std::make_shared<front::AuthValidateRequest>();
+    req_ptr->text_ = _code;
+    req_ptr->ticket_ = auth_token_;
+    
+    lock_guard<mutex> lock(mutex_);
+    if (!front_recipient_id_.empty()) {
+        auto lambda = [this](
+                          frame::mprpc::ConnectionContext&           _rctx,
+                          std::shared_ptr<front::AuthValidateRequest>& _rsent_msg_ptr,
+                          std::shared_ptr<front::AuthResponse>&      _rrecv_msg_ptr,
+                          ErrorConditionT const&                     _rerror) {
+            onAuthResponse(_rctx, auth_user_, _rrecv_msg_ptr, _rerror);
+        };
+        front_rpc_service_.sendRequest(front_recipient_id_, req_ptr, lambda);
+    }
 }
 
 void Engine::onConnectionStart(frame::mprpc::ConnectionContext& _ctx)
@@ -588,40 +557,66 @@ void Engine::onAuthResponse(
     if (_rrecv_msg_ptr) {
         solid_log(logger, Info, "AuthResponse: " << _rrecv_msg_ptr->error_ << " " << _rrecv_msg_ptr->message_);
         if (_rrecv_msg_ptr->error_ == ola::utility::error_authentication_validate.value()) {
-            temp_auth_token_ = std::move(_rrecv_msg_ptr->message_);
+            auth_token_ = std::move(_rrecv_msg_ptr->message_);
             main_window_.authValidateSignal();
         }else if(_rrecv_msg_ptr->error_){
             main_window_.authFailSignal();
             this_thread::sleep_for(chrono::seconds(2));
             onConnectionInit(_rctx);
         } else {
+            solid_log(logger, Info, "Auth Success");
             main_window_.authSuccessSignal();
-            if (!params_.local_port.empty()) {
-
-                local_auth_req_ptr_->user_  = _user;
-                local_auth_req_ptr_->token_ = _rrecv_msg_ptr->message_;
-                auto lambda                 = [this](
-                                  frame::mprpc::ConnectionContext&             _rctx,
-                                  std::shared_ptr<client::auth::AuthRequest>&  _rsent_msg_ptr,
-                                  std::shared_ptr<client::auth::AuthResponse>& _rrecv_msg_ptr,
-                                  ErrorConditionT const&                       _rerror) {
-                    main_window_.closeSignal();
-                };
-
-                if (local_rpc_service_.sendMessage(
-                        local_recipient_id_,
-                        local_auth_req_ptr_,
-                        lambda,
-                        {frame::mprpc::MessageFlagsE::AwaitResponse, frame::mprpc::MessageFlagsE::Response})) {
-                    main_window_.closeSignal();
-                }
-            } else {
+            if (!_rrecv_msg_ptr->message_.empty()) {
+                auth_token_ = _rrecv_msg_ptr->message_;
             }
+            storeAuthData(auth_user_, auth_token_);
+            main_window_.closeSignal();
         }
     } else {
         solid_log(logger, Info, "No AuthResponse");
         //offline
     }
 }
+
+void Engine::loadAuthData()
+{
+    const auto path = authDataFilePath();
+    ifstream   ifs(path.generic_string());
+    if (ifs) {
+        getline(ifs, auth_endpoint_);
+        getline(ifs, auth_user_);
+        getline(ifs, auth_token_);
+        try {
+            auth_token_ = ola::utility::base64_decode(auth_token_);
+            solid_check(!auth_token_.empty() && auth_endpoint_ == params_.front_endpoint);
+        } catch (std::exception&) {
+            auth_user_.clear();
+            auth_token_.clear();
+            auth_endpoint_ = params_.front_endpoint;
+        }
+        solid_log(logger, Info, "Loaded auth data from: " << path.generic_string() << " for user: " << auth_user_);
+    } else {
+        solid_log(logger, Error, "Failed loading auth data from: " << path.generic_string());
+        auth_endpoint_ = params_.front_endpoint;
+    }
+}
+
+void Engine::storeAuthData(const string& _user, const string& _token)
+{
+    fs::create_directories(authDataDirectoryPath());
+    const auto path = authDataFilePath();
+
+    ofstream ofs(path.generic_string(), std::ios::trunc);
+    if (ofs) {
+        ofs << auth_endpoint_ << endl;
+        ofs << _user << endl;
+        ofs << ola::utility::base64_encode(_token) << endl;
+        ofs.flush();
+        solid_log(logger, Info, "Stored auth data to: " << path.generic_string());
+    } else {
+        solid_log(logger, Error, "Failed storing auth data to: " << path.generic_string());
+    }
+}
+
 
 } //namespace
