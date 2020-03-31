@@ -28,6 +28,13 @@
     </spacer>
    </item>
    <item>
+    <widget class="QPushButton" name="resendButton">
+     <property name="text">
+      <string>Resend validation e-mail</string>
+     </property>
+    </widget>
+   </item>
+   <item>
     <layout class="QVBoxLayout" name="verticalLayout">
      <item>
       <widget class="QLineEdit" name="validateEdit">
