@@ -21,6 +21,7 @@
 
 #include "solid/system/log.hpp"
 #include "solid/system/exception.hpp"
+#include "solid/utility/string.hpp"
 
 #include "solid/frame/aio/aioresolver.hpp"
 
@@ -101,8 +102,10 @@ struct Engine {
     mutex                                 mutex_;
     string                                captcha_token_;
     string                                auth_token_;
-    string                                auth_user_;
+    string                                auth_login_;
     string                                auth_endpoint_;
+    string                                auth_user_;
+    string                                auth_email_;
 
     Engine(
         client::auth::MainWindow&   _main_window,
@@ -130,10 +133,11 @@ struct Engine {
     void onConnectionStart(frame::mprpc::ConnectionContext& _ctx);
     void onConnectionStop(frame::mprpc::ConnectionContext& _ctx);
 
-    void onAuthStart(const string& _user, const string& _pass, const string& _code);
-    void onCreateStart(const string& _user, const string& _email, const string& _pass, const string& _code);
-    void onAmendStart(const string& _user, const string& _email, const string& _pass, const string& _new_pass);
-    void onValidateStart(const string& _code);
+    bool onAuthStart(const string& _user, const string& _pass, const string& _code);
+    bool onCreateStart(const string& _user, const string& _email, const string& _pass, const string& _code);
+    bool onAmendStart(string _user, string _email, const string& _pass, const string& _new_pass);
+    bool onValidateStart(const string& _code);
+    bool onAuthFetchStart();
 
 
     void onCaptchaResponse(
@@ -143,7 +147,6 @@ struct Engine {
         ErrorConditionT const&                              _rerror);
     void onAuthResponse(
         frame::mprpc::ConnectionContext&      _rctx,
-        const string &_user,
         std::shared_ptr<front::AuthResponse>& _rrecv_msg_ptr,
         ErrorConditionT const&                _rerror);
 
@@ -280,22 +283,33 @@ int main(int argc, char* argv[])
     engine.loadAuthData();
  
     {
-        auto auth_lambda = [&engine](const string& _user, const string& _pass, const string& _code) {
-            engine.onAuthStart(_user, ola::utility::sha256hex(_pass), _code);
+        client::auth::Configuration config;
+        config.authenticate_fnc_ = [&engine](const string& _user, const string& _pass, const string& _code) {
+            return engine.onAuthStart(_user, ola::utility::sha256hex(_pass), _code);
         };
-        auto create_lambda = [&engine](const string& _user, const string &_email, const string& _pass, const string& _code) {
-            engine.onCreateStart(_user, _email, ola::utility::sha256hex(_pass), _code);
-        };
-
-        auto amend_lambda = [&engine](const string& _user, const string& _email, const string& _pass, const string& _new_pass) {
-            engine.onAmendStart(_user, _email, ola::utility::sha256hex(_pass), _new_pass);
+        config.create_fnc_ = [&engine](const string& _user, const string &_email, const string& _pass, const string& _code) {
+            return engine.onCreateStart(_user, _email, ola::utility::sha256hex(_pass), _code);
         };
 
-        auto validate_lambda = [&engine](const string& _code) {
-            engine.onValidateStart(_code);
+        config.amend_fnc_ = [&engine](const string& _user, const string& _email, const string& _pass, const string& _new_pass) {
+            return engine.onAmendStart(_user, _email, ola::utility::sha256hex(_pass), _new_pass.empty() ? _new_pass : ola::utility::sha256hex(_new_pass));
         };
 
-        main_window.start(QString::fromStdString(engine.auth_user_), auth_lambda, create_lambda, amend_lambda, validate_lambda);
+        config.validate_fnc_ = [&engine](const string& _code) {
+            return engine.onValidateStart(_code);
+        };
+
+        config.resend_validate_fnc_ = [&engine]() {
+            return false;
+        };
+
+        config.auth_fetch_fnc_ = [&engine]() {
+            return engine.onAuthFetchStart();
+        };
+
+        config.login_ = QString::fromStdString(engine.auth_login_);
+
+        main_window.start(std::move(config));
     }
 
     SetWindowText(GetActiveWindow(), L"MyApps.space");
@@ -411,7 +425,7 @@ void front_configure_service(Engine& _rengine, const Parameters& _params, frame:
     _rsvc.createConnectionPool(_params.front_endpoint.c_str(), 1);
 }
 
-void Engine::onAuthStart(const string& _user, const string& _pass, const string &_code)
+bool Engine::onAuthStart(const string& _login, const string& _pass, const string &_code)
 {
     //on gui thread
     {
@@ -419,7 +433,7 @@ void Engine::onAuthStart(const string& _user, const string& _pass, const string 
         auto req_ptr = std::make_shared<front::AuthRequest>();
         req_ptr->captcha_text_ = _code;
         req_ptr->captcha_token_ = captcha_token_;
-        req_ptr->user_          = _user;
+        req_ptr->user_          = _login;
         req_ptr->pass_          = _pass;
 
         if (!front_recipient_id_.empty()) {
@@ -428,15 +442,19 @@ void Engine::onAuthStart(const string& _user, const string& _pass, const string 
                               std::shared_ptr<front::AuthRequest>&  _rsent_msg_ptr,
                               std::shared_ptr<front::AuthResponse>& _rrecv_msg_ptr,
                               ErrorConditionT const&                _rerror) {
-                onAuthResponse(_rctx, _rsent_msg_ptr->user_, _rrecv_msg_ptr, _rerror);
+                onAuthResponse(_rctx, _rrecv_msg_ptr, _rerror);
             };
             front_rpc_service_.sendRequest(front_recipient_id_, req_ptr, lambda);
+            auth_login_ = _login;
+            return true;
+        } else {
+            return false;
         }
     }
-    auth_user_ = _user;
+    
 }
 
-void Engine::onCreateStart(const string& _user, const string& _email, const string& _pass, const string& _code)
+bool Engine::onCreateStart(const string& _user, const string& _email, const string& _pass, const string& _code)
 {
     {
         lock_guard<mutex> lock(mutex_);
@@ -453,17 +471,77 @@ void Engine::onCreateStart(const string& _user, const string& _email, const stri
                               std::shared_ptr<front::AuthCreateRequest>&  _rsent_msg_ptr,
                               std::shared_ptr<front::AuthResponse>& _rrecv_msg_ptr,
                               ErrorConditionT const&                _rerror) {
-                onAuthResponse(_rctx, _rsent_msg_ptr->user_, _rrecv_msg_ptr, _rerror);
+                onAuthResponse(_rctx, _rrecv_msg_ptr, _rerror);
             };
             front_rpc_service_.sendRequest(front_recipient_id_, req_ptr, lambda);
+            auth_login_ = _user;
+            return true;
+        } else {
+            return false;
         }
     }
-    auth_user_ = _user;
 }
-void Engine::onAmendStart(const string& _user, const string& _email, const string& _pass, const string& _new_pass) 
+bool Engine::onAuthFetchStart()
 {
+    auto req_ptr = std::make_shared<front::AuthFetchRequest>();
+    lock_guard<mutex> lock(mutex_);
+    auth_user_.clear();
+    auth_email_.clear();
+
+    auto lambda = [this](
+                        frame::mprpc::ConnectionContext&           _rctx,
+                        std::shared_ptr<front::AuthFetchRequest>& _rsent_msg_ptr,
+                        std::shared_ptr<front::AuthFetchResponse>&      _rrecv_msg_ptr,
+                        ErrorConditionT const&                     _rerror) {
+        lock_guard<mutex> lock(mutex_);
+        if (_rrecv_msg_ptr) {
+            auth_user_ = _rrecv_msg_ptr->user_;
+            auth_email_ = _rrecv_msg_ptr->email_;
+        }
+        main_window_.onAmendFetch(auth_user_, auth_email_);
+    };
+    front_rpc_service_.sendRequest(auth_endpoint_.c_str(), req_ptr, lambda);
+    return true;
 }
-void Engine::onValidateStart(const string& _code)
+bool Engine::onAmendStart(string _user, string _email, const string& _pass, const string& _new_pass) 
+{
+    solid::to_lower(_user);
+    solid::to_lower(_email);
+
+    if (_user == auth_user_ && _email == auth_email_ && _new_pass.empty()) {
+        return false;
+    }
+
+    auto req_ptr = std::make_shared<front::AuthAmendRequest>();
+    req_ptr->ticket_ = auth_token_;
+    if (_user != auth_user_) {
+        auth_user_ = _user;
+        req_ptr->new_user_ = auth_user_;
+    }
+    if (_email != auth_email_) {
+        auth_email_         = _email;
+        req_ptr->new_email_ = auth_email_;
+    }
+    req_ptr->pass_ = _pass;
+    req_ptr->new_pass_ = _new_pass;
+
+    auto lambda = [this](
+                      frame::mprpc::ConnectionContext&           _rctx,
+                      std::shared_ptr<front::AuthAmendRequest>&  _rsent_msg_ptr,
+                      std::shared_ptr<front::AuthResponse>& _rrecv_msg_ptr,
+                      ErrorConditionT const&                     _rerror) {
+        {
+            lock_guard<mutex> lock(mutex_);
+            auth_login_ = auth_user_;
+        }
+        
+        onAuthResponse(_rctx, _rrecv_msg_ptr, _rerror);
+    };
+    front_rpc_service_.sendRequest(auth_endpoint_.c_str(), req_ptr, lambda);
+
+    return false;
+}
+bool Engine::onValidateStart(const string& _code)
 {
     auto req_ptr = std::make_shared<front::AuthValidateRequest>();
     req_ptr->text_ = _code;
@@ -476,10 +554,12 @@ void Engine::onValidateStart(const string& _code)
                           std::shared_ptr<front::AuthValidateRequest>& _rsent_msg_ptr,
                           std::shared_ptr<front::AuthResponse>&      _rrecv_msg_ptr,
                           ErrorConditionT const&                     _rerror) {
-            onAuthResponse(_rctx, auth_user_, _rrecv_msg_ptr, _rerror);
+            onAuthResponse(_rctx, _rrecv_msg_ptr, _rerror);
         };
         front_rpc_service_.sendRequest(front_recipient_id_, req_ptr, lambda);
+        return true;
     }
+    return false;
 }
 
 void Engine::onConnectionStart(frame::mprpc::ConnectionContext& _ctx)
@@ -524,6 +604,7 @@ void Engine::onConnectionInit(frame::mprpc::ConnectionContext& _ctx)
 }
 void Engine::onConnectionStop(frame::mprpc::ConnectionContext& _ctx)
 {
+    solid_log(logger, Warning, "reason: "<<_ctx.error().message()<<" system error: "<<_ctx.systemError().message());
     main_window_.onlineSignal(false);
     {
         lock_guard<mutex> lock(mutex_);
@@ -550,14 +631,16 @@ void Engine::onCaptchaResponse(
 
 void Engine::onAuthResponse(
     frame::mprpc::ConnectionContext&      _rctx,
-    const string &_user,
     std::shared_ptr<front::AuthResponse>& _rrecv_msg_ptr,
     ErrorConditionT const&                _rerror)
 {
     if (_rrecv_msg_ptr) {
-        solid_log(logger, Info, "AuthResponse: " << _rrecv_msg_ptr->error_ << " " << _rrecv_msg_ptr->message_);
+        solid_log(logger, Info, "AuthResponse: " << _rrecv_msg_ptr->error_);
         if (_rrecv_msg_ptr->error_ == ola::utility::error_authentication_validate.value()) {
             auth_token_ = std::move(_rrecv_msg_ptr->message_);
+            if (!_rctx.isConnectionActive()) {
+                _rctx.service().connectionNotifyEnterActiveState(_rctx.recipientId());
+            }
             main_window_.authValidateSignal();
         }else if(_rrecv_msg_ptr->error_){
             main_window_.authFailSignal();
@@ -569,7 +652,7 @@ void Engine::onAuthResponse(
             if (!_rrecv_msg_ptr->message_.empty()) {
                 auth_token_ = _rrecv_msg_ptr->message_;
             }
-            storeAuthData(auth_user_, auth_token_);
+            storeAuthData(auth_login_, auth_token_);
             main_window_.closeSignal();
         }
     } else {
@@ -584,17 +667,17 @@ void Engine::loadAuthData()
     ifstream   ifs(path.generic_string());
     if (ifs) {
         getline(ifs, auth_endpoint_);
-        getline(ifs, auth_user_);
+        getline(ifs, auth_login_);
         getline(ifs, auth_token_);
         try {
             auth_token_ = ola::utility::base64_decode(auth_token_);
             solid_check(!auth_token_.empty() && auth_endpoint_ == params_.front_endpoint);
         } catch (std::exception&) {
-            auth_user_.clear();
+            auth_login_.clear();
             auth_token_.clear();
             auth_endpoint_ = params_.front_endpoint;
         }
-        solid_log(logger, Info, "Loaded auth data from: " << path.generic_string() << " for user: " << auth_user_);
+        solid_log(logger, Info, "Loaded auth data from: " << path.generic_string() << " for user: " << auth_login_);
     } else {
         solid_log(logger, Error, "Failed loading auth data from: " << path.generic_string());
         auth_endpoint_ = params_.front_endpoint;

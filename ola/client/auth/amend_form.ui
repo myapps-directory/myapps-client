@@ -7,7 +7,7 @@
     <x>0</x>
     <y>0</y>
     <width>311</width>
-    <height>194</height>
+    <height>233</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -17,7 +17,7 @@
    <item>
     <layout class="QVBoxLayout" name="verticalLayout">
      <item>
-      <widget class="QLineEdit" name="userLineEdit">
+      <widget class="QLineEdit" name="userEdit">
        <property name="placeholderText">
         <string>account name</string>
        </property>
@@ -61,6 +61,9 @@
      </item>
      <item>
       <widget class="QLineEdit" name="newPassword1Edit">
+       <property name="echoMode">
+        <enum>QLineEdit::Password</enum>
+       </property>
        <property name="placeholderText">
         <string>new password</string>
        </property>
@@ -83,7 +86,7 @@
       </widget>
      </item>
      <item>
-      <widget class="QPushButton" name="createButton">
+      <widget class="QPushButton" name="amendButton">
        <property name="text">
         <string>Edit</string>
        </property>
