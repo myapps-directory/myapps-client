@@ -331,6 +331,9 @@ void MainWindow::onAmendClick()
     bool ok = pimpl_->config_.amend_fnc_(user, email, password, new_password);
     if (ok) {
         pimpl_->amend_form_.amendButton->setEnabled(false);
+        pimpl_->amend_form_.passwordEdit->setText("");
+        pimpl_->amend_form_.newPassword1Edit->setText("");
+        pimpl_->amend_form_.newPassword2Edit->setText("");
     }
 }
 
