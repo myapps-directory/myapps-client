@@ -212,6 +212,7 @@ MainWindow::MainWindow(QWidget* parent)
     connect(this, SIGNAL(closeSignal()), this, SLOT(close()), Qt::QueuedConnection);
     connect(this, &MainWindow::captchaSignal, this, &MainWindow::captchaSlot, Qt::QueuedConnection);
     connect(this, &MainWindow::amendFetchSignal, this, &MainWindow::amendFetchSlot, Qt::QueuedConnection);
+    connect(this, &MainWindow::emailValidationResentSignal, this, &MainWindow::emailValidationResentSlot, Qt::QueuedConnection);
 
     connect(&pimpl_->home_action_, &QAction::triggered, this, &MainWindow::goAuthSlot);
     connect(&pimpl_->create_action_, &QAction::triggered, this, &MainWindow::goCreateSlot);
@@ -339,7 +340,9 @@ void MainWindow::onAmendClick()
 
 void MainWindow::onValidateResendClick()
 {
-    pimpl_->config_.resend_validate_fnc_();
+    if (pimpl_->config_.resend_validate_fnc_()) {
+        pimpl_->validate_form_.resendButton->setEnabled(false);
+    }
 }
 
 void MainWindow::onOnline(bool _b)
@@ -464,6 +467,11 @@ void MainWindow::onAmendFetch(const std::string& _user, const std::string& _emai
     emit amendFetchSignal(ptr);
 }
 
+void MainWindow::onEmailValidationResent()
+{
+    emit emailValidationResentSignal();
+}
+
 void MainWindow::captchaSlot(CaptchaPointerT _captcha_ptr)
 {
     solid_log(logger, Info, "size = " << _captcha_ptr->size());
@@ -517,6 +525,11 @@ void MainWindow::validateTextEdited(const QString& text) {
 
     enable = enable && !pimpl_->create_form_.userEdit->text().isEmpty();
     pimpl_->validate_form_.validateButton->setEnabled(enable);
+}
+
+void MainWindow::emailValidationResentSlot()
+{
+    pimpl_->validate_form_.resendButton->setEnabled(true);
 }
 
 void MainWindow::amendTextEdited(const QString& text)

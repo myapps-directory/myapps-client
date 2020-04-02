@@ -53,7 +53,9 @@ public:
 
     void onCaptcha(std::vector<uint8_t>&& _captcha_image);
     void onAmendFetch(const std::string& _user, const std::string& _email);
- signals:
+    void onEmailValidationResent();
+ 
+signals:
     void closeSignal();
     void onlineSignal(bool);
     void authFailSignal();
@@ -62,6 +64,7 @@ public:
 
     void captchaSignal(CaptchaPointerT);
     void amendFetchSignal(AmendFetchPointerT);
+    void emailValidationResentSignal();
 private slots:
     void onAuthClick();
     void onCreateClick();
@@ -86,7 +89,7 @@ private slots:
     void createTextEdited(const QString& text);
     void validateTextEdited(const QString& text);
     void amendTextEdited(const QString& text);
-
+    void emailValidationResentSlot();
 private:
     void closeEvent(QCloseEvent*) override;
     bool eventFilter(QObject* obj, QEvent* event) override;

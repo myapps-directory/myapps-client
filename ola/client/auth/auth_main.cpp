@@ -300,7 +300,7 @@ int main(int argc, char* argv[])
         };
 
         config.resend_validate_fnc_ = [&engine]() {
-            return false;
+            return engine.onValidateStart("");
         };
 
         config.auth_fetch_fnc_ = [&engine]() {
@@ -554,7 +554,12 @@ bool Engine::onValidateStart(const string& _code)
                           std::shared_ptr<front::AuthValidateRequest>& _rsent_msg_ptr,
                           std::shared_ptr<front::AuthResponse>&      _rrecv_msg_ptr,
                           ErrorConditionT const&                     _rerror) {
-            onAuthResponse(_rctx, _rrecv_msg_ptr, _rerror);
+            if (_rsent_msg_ptr->text_.empty()) {
+                //validation email resend request
+                main_window_.onEmailValidationResent();
+            } else {
+                onAuthResponse(_rctx, _rrecv_msg_ptr, _rerror);
+            }
         };
         front_rpc_service_.sendRequest(front_recipient_id_, req_ptr, lambda);
         return true;
