@@ -63,7 +63,7 @@
        <widget class="QWidget" name="createWidget" native="true"/>
       </item>
       <item>
-       <widget class="QWidget" name="authWidget" native="true"/>
+       <widget class="QWidget" name="homeWidget" native="true"/>
       </item>
       <item>
        <widget class="QWidget" name="amendWidget" native="true"/>

@@ -26,6 +26,7 @@ struct Configuration {
     using ValidateFunctionT = std::function<bool(const std::string&)>;
     using ResendValidateFunctionT     = std::function<bool()>;
     using AuthFetchFunctionT = std::function<bool()>;
+    using LogoutFunctionT = std::function<bool()>;
 
     QString                 login_;
     AuthenticateFunctionT authenticate_fnc_;
@@ -34,6 +35,7 @@ struct Configuration {
     ValidateFunctionT     validate_fnc_;
     ResendValidateFunctionT resend_validate_fnc_;
     AuthFetchFunctionT      auth_fetch_fnc_;
+    LogoutFunctionT         logout_fnc_;
 };
 
 class MainWindow : public QMainWindow {
@@ -58,8 +60,7 @@ public:
 signals:
     void closeSignal();
     void onlineSignal(bool);
-    void authFailSignal();
-    void authSuccessSignal();
+    void authSignal(bool);
     void authValidateSignal();
 
     void captchaSignal(CaptchaPointerT);
@@ -67,14 +68,14 @@ signals:
     void emailValidationResentSignal();
 private slots:
     void onAuthClick();
+    void onLogoutClick();
     void onCreateClick();
     void onValidateClick();
     void onAmendClick();
     void onValidateResendClick();
 
     void onOnline(bool);
-    void onAuthFail();
-    void onAuthSuccess();
+    void onAuthSlot(bool);
     void onAuthValidate();
 
     void goAuthSlot(bool);

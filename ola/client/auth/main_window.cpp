@@ -1,5 +1,5 @@
 #include "main_window.hpp"
-#include "ui_auth_form.h"
+#include "ui_home_form.h"
 #include "ui_main_form.h"
 #include "ui_create_form.h"
 #include "ui_amend_form.h"
@@ -26,7 +26,7 @@ const solid::LoggerT logger("ola::client::auth::widget");
 
 
 enum struct ActionE {
-    Auth = 0,
+    Home = 0,
     Create,
     About,
     Amend,
@@ -51,7 +51,7 @@ using HistoryStackT    = std::stack<HistoryStub>;
 
 struct MainWindow::Data {
     Ui::MainWindow           main_form_;
-    Ui::AuthForm             auth_form_;
+    Ui::HomeForm             home_form_;
     Ui::CreateForm           create_form_;
     Ui::AboutForm            about_form_;
     Ui::AmendForm            amend_form_;
@@ -65,6 +65,7 @@ struct MainWindow::Data {
     QAction                  amend_action_;
     HistoryStackT            history_;
     ActionE                  current_action_;
+    bool                     authenticated_ = false;
 
     Data(QMainWindow* _pw)
         : tool_bar_(_pw)
@@ -78,10 +79,35 @@ struct MainWindow::Data {
 
     void showWidget(QWidget* _pmain, QWidget* _pw)
     {
-        if (main_form_.authWidget != _pw) {
-            main_form_.authWidget->hide();
+        if (main_form_.homeWidget != _pw) {
+            main_form_.homeWidget->hide();
         } else {
-            current_action_ = ActionE::Auth;
+            if (authenticated_) {
+                //hide everything but logoutButton
+                home_form_.logoutButton->show();
+                home_form_.authButton->hide();
+                home_form_.userEdit->hide();
+                home_form_.codeEdit->hide();
+                home_form_.label->hide();
+                home_form_.passwordEdit->hide();
+                home_form_.forgotButton->hide();
+                home_form_.resetButton->hide();
+                amend_action_.setEnabled(true);
+                create_action_.setEnabled(false);
+            } else {
+                //show everything but logoutButton
+                home_form_.logoutButton->hide();
+                home_form_.authButton->show();
+                home_form_.userEdit->show();
+                home_form_.codeEdit->show();
+                home_form_.label->show();
+                home_form_.passwordEdit->show();
+                home_form_.forgotButton->show();
+                home_form_.resetButton->show();
+                amend_action_.setEnabled(false);
+                create_action_.setEnabled(true);
+            }
+            current_action_ = ActionE::Home;
         }
         if (main_form_.createWidget != _pw) {
             main_form_.createWidget->hide();
@@ -114,11 +140,11 @@ struct MainWindow::Data {
         int maxh = 0;
         int maxw = 0;
 
-        if (main_form_.authWidget->width() > maxw) {
-            maxw = main_form_.authWidget->width();
+        if (main_form_.homeWidget->width() > maxw) {
+            maxw = main_form_.homeWidget->width();
         }
-        if (main_form_.authWidget->height() > maxh) {
-            maxh = main_form_.authWidget->height();
+        if (main_form_.homeWidget->height() > maxh) {
+            maxh = main_form_.homeWidget->height();
         }
 
         if (main_form_.createWidget->width() > maxw) {
@@ -173,7 +199,7 @@ MainWindow::MainWindow(QWidget* parent)
     setWindowFlags(windowFlags() & (~Qt::WindowMaximizeButtonHint));
 
     pimpl_->main_form_.setupUi(this);
-    pimpl_->auth_form_.setupUi(pimpl_->main_form_.authWidget);
+    pimpl_->home_form_.setupUi(pimpl_->main_form_.homeWidget);
     pimpl_->create_form_.setupUi(pimpl_->main_form_.createWidget);
     pimpl_->about_form_.setupUi(pimpl_->main_form_.aboutWidget);
     pimpl_->amend_form_.setupUi(pimpl_->main_form_.amendWidget);
@@ -199,15 +225,15 @@ MainWindow::MainWindow(QWidget* parent)
     }
     installEventFilter(this);
 
-    connect(pimpl_->auth_form_.authButton, SIGNAL(clicked()), this, SLOT(onAuthClick()));
+    connect(pimpl_->home_form_.authButton, SIGNAL(clicked()), this, SLOT(onAuthClick()));
+    connect(pimpl_->home_form_.logoutButton, SIGNAL(clicked()), this, SLOT(onLogoutClick()));
     connect(pimpl_->create_form_.createButton, SIGNAL(clicked()), this, SLOT(onCreateClick()));
     connect(pimpl_->validate_form_.validateButton, SIGNAL(clicked()), this, SLOT(onValidateClick()));
     connect(pimpl_->validate_form_.resendButton, SIGNAL(clicked()), this, SLOT(onValidateResendClick()));
     connect(pimpl_->amend_form_.amendButton, SIGNAL(clicked()), this, SLOT(onAmendClick()));
 
     connect(this, SIGNAL(onlineSignal(bool)), this, SLOT(onOnline(bool)), Qt::QueuedConnection);
-    connect(this, SIGNAL(authFailSignal()), this, SLOT(onAuthFail()), Qt::QueuedConnection);
-    connect(this, SIGNAL(authSuccessSignal()), this, SLOT(onAuthSuccess()), Qt::QueuedConnection);
+    connect(this, SIGNAL(authSignal(bool)), this, SLOT(onAuthSlot(bool)), Qt::QueuedConnection);;
     connect(this, SIGNAL(authValidateSignal()), this, SLOT(onAuthValidate()), Qt::QueuedConnection);
     connect(this, SIGNAL(closeSignal()), this, SLOT(close()), Qt::QueuedConnection);
     connect(this, &MainWindow::captchaSignal, this, &MainWindow::captchaSlot, Qt::QueuedConnection);
@@ -220,9 +246,9 @@ MainWindow::MainWindow(QWidget* parent)
     connect(&pimpl_->about_action_, &QAction::triggered, this, &MainWindow::goAboutSlot);
     connect(&pimpl_->amend_action_, &QAction::triggered, this, &MainWindow::goAmendSlot);
 
-    connect(pimpl_->auth_form_.userEdit, &QLineEdit::textChanged, this, &MainWindow::authTextEdited);
-    connect(pimpl_->auth_form_.passwordEdit, &QLineEdit::textChanged, this, &MainWindow::authTextEdited);
-    connect(pimpl_->auth_form_.codeEdit, &QLineEdit::textChanged, this, &MainWindow::authTextEdited);
+    connect(pimpl_->home_form_.userEdit, &QLineEdit::textChanged, this, &MainWindow::authTextEdited);
+    connect(pimpl_->home_form_.passwordEdit, &QLineEdit::textChanged, this, &MainWindow::authTextEdited);
+    connect(pimpl_->home_form_.codeEdit, &QLineEdit::textChanged, this, &MainWindow::authTextEdited);
 
     connect(pimpl_->create_form_.userEdit, &QLineEdit::textChanged, this, &MainWindow::createTextEdited);
     connect(pimpl_->create_form_.email1Edit, &QLineEdit::textChanged, this, &MainWindow::createTextEdited);
@@ -256,16 +282,16 @@ MainWindow::MainWindow(QWidget* parent)
     pimpl_->tool_bar_.addSeparator();
     pimpl_->tool_bar_.addAction(&pimpl_->about_action_);
 
-    pimpl_->auth_form_.authButton->setEnabled(false);
+    pimpl_->home_form_.authButton->setEnabled(false);
     pimpl_->create_form_.createButton->setEnabled(false);
 
     this->addToolBar(&pimpl_->tool_bar_);
 
-    pimpl_->showWidget(this, pimpl_->main_form_.authWidget);
+    pimpl_->showWidget(this, pimpl_->main_form_.homeWidget);
     pimpl_->history_.emplace(
-        ActionE::Auth,
+        ActionE::Home,
         [this]() {
-            pimpl_->showWidget(this, pimpl_->main_form_.authWidget);
+            pimpl_->showWidget(this, pimpl_->main_form_.homeWidget);
         });
 }
 
@@ -274,7 +300,7 @@ MainWindow::~MainWindow() {}
 void MainWindow::setUser(const std::string& _user)
 {
     solid_log(logger, Info, "" << _user);
-    pimpl_->auth_form_.userEdit->setText(_user.c_str());
+    pimpl_->home_form_.userEdit->setText(_user.c_str());
 }
 
 void MainWindow::start(
@@ -282,7 +308,7 @@ void MainWindow::start(
 {
     pimpl_->config_ = std::move(_config);
 
-    pimpl_->auth_form_.userEdit->setText(pimpl_->config_.login_);
+    pimpl_->home_form_.userEdit->setText(pimpl_->config_.login_);
     this->show();
 }
 
@@ -291,13 +317,17 @@ void MainWindow::onAuthClick()
     solid_log(logger, Verbose, "");
     
     bool ok = pimpl_->config_.authenticate_fnc_(
-        pimpl_->auth_form_.userEdit->text().toStdString(),
-        pimpl_->auth_form_.passwordEdit->text().toStdString(),
-        pimpl_->auth_form_.codeEdit->text().toStdString()
+        pimpl_->home_form_.userEdit->text().toStdString(),
+        pimpl_->home_form_.passwordEdit->text().toStdString(),
+        pimpl_->home_form_.codeEdit->text().toStdString()
     );
     if (ok) {
-        pimpl_->auth_form_.authButton->setEnabled(false);
+        pimpl_->home_form_.authButton->setEnabled(false);
     }
+}
+
+void MainWindow::onLogoutClick() {
+    pimpl_->config_.logout_fnc_();
 }
 
 void MainWindow::onCreateClick()
@@ -355,19 +385,26 @@ void MainWindow::onOnline(bool _b)
     }
 }
 
-void MainWindow::onAuthFail()
+void MainWindow::onAuthSlot(bool _authenticated)
 {
-    solid_log(logger, Verbose, "");
+    solid_log(logger, Verbose, "" << _authenticated);
 
-    pimpl_->main_form_.label->setText("Failed authentication");
-    pimpl_->auth_form_.passwordEdit->setText("");
-    pimpl_->auth_form_.codeEdit->setText("");
-    this->setEnabled(true);
-}
-void MainWindow::onAuthSuccess()
-{
-    solid_log(logger, Verbose, "");
-    pimpl_->main_form_.label->setText("Succes");
+    pimpl_->authenticated_ = _authenticated;
+    if (_authenticated) {
+        pimpl_->main_form_.label->setText("Logged in");
+        while (!pimpl_->history_.empty()) {
+            pimpl_->history_.pop();
+        }
+    } else {
+        pimpl_->main_form_.label->setText("Authentication failed");
+        pimpl_->home_form_.passwordEdit->setText("");
+        pimpl_->home_form_.codeEdit->setText("");
+        this->setEnabled(true);
+    }
+    
+    pimpl_->historyPush(ActionE::Home, [this]() {
+        pimpl_->showWidget(this, pimpl_->main_form_.homeWidget);
+    })();
 }
 
 void MainWindow::onAuthValidate()
@@ -386,7 +423,7 @@ bool MainWindow::eventFilter(QObject* obj, QEvent* event)
         QKeyEvent* key = static_cast<QKeyEvent*>(event);
         if ((key->key() == Qt::Key_Enter) || (key->key() == Qt::Key_Return)) {
             switch (pimpl_->current_action_) {
-            case ActionE::Auth:
+            case ActionE::Home:
                 onAuthClick();
                 break;
             case ActionE::Create:
@@ -412,8 +449,8 @@ bool MainWindow::eventFilter(QObject* obj, QEvent* event)
 }
 
 void MainWindow::goAuthSlot(bool) {
-    pimpl_->historyPush(ActionE::Auth, [this]() {
-        pimpl_->showWidget(this, pimpl_->main_form_.authWidget);
+    pimpl_->historyPush(ActionE::Home, [this]() {
+        pimpl_->showWidget(this, pimpl_->main_form_.homeWidget);
     })();
 }
 
@@ -477,7 +514,7 @@ void MainWindow::captchaSlot(CaptchaPointerT _captcha_ptr)
     solid_log(logger, Info, "size = " << _captcha_ptr->size());
     QImage img;
     if (img.loadFromData(reinterpret_cast<const uchar*>(_captcha_ptr->data()), _captcha_ptr->size())) {
-        pimpl_->auth_form_.label->setPixmap(QPixmap::fromImage(img, Qt::AutoColor));
+        pimpl_->home_form_.label->setPixmap(QPixmap::fromImage(img, Qt::AutoColor));
         pimpl_->create_form_.label->setPixmap(QPixmap::fromImage(img, Qt::AutoColor));
     }
 }
@@ -493,7 +530,8 @@ void MainWindow::amendFetchSlot(AmendFetchPointerT _amend_fetch_ptr)
 
 void MainWindow::authTextEdited(const QString& text)
 {
-    pimpl_->auth_form_.authButton->setEnabled(!(pimpl_->auth_form_.passwordEdit->text().isEmpty() || pimpl_->auth_form_.userEdit->text().isEmpty() || pimpl_->auth_form_.codeEdit->text().isEmpty()));
+    pimpl_->home_form_.authButton->setEnabled(!(pimpl_->home_form_.passwordEdit->text().isEmpty() || pimpl_->home_form_.userEdit->text().isEmpty() || pimpl_->home_form_.codeEdit->text().isEmpty()));
+    pimpl_->home_form_.forgotButton->setEnabled(!(pimpl_->home_form_.userEdit->text().isEmpty() || pimpl_->home_form_.codeEdit->text().isEmpty()));
 }
 
 namespace {
