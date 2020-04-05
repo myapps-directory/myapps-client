@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <ui version="4.0">
- <class>ValidateForm</class>
- <widget class="QWidget" name="ValidateForm">
+ <class>ResetForm</class>
+ <widget class="QWidget" name="ResetForm">
   <property name="geometry">
    <rect>
     <x>0</x>
@@ -28,18 +28,11 @@
     </spacer>
    </item>
    <item>
-    <widget class="QPushButton" name="resendButton">
-     <property name="text">
-      <string>Resend validation e-mail</string>
-     </property>
-    </widget>
-   </item>
-   <item>
     <layout class="QVBoxLayout" name="verticalLayout">
      <item>
-      <widget class="QLineEdit" name="validateEdit">
+      <widget class="QLineEdit" name="resetCodeEdit">
        <property name="placeholderText">
-        <string>e-mail validation code</string>
+        <string>reset password reset code received on e-mail</string>
        </property>
        <property name="clearButtonEnabled">
         <bool>true</bool>
@@ -47,9 +40,29 @@
       </widget>
      </item>
      <item>
-      <widget class="QPushButton" name="validateButton">
+      <widget class="QLineEdit" name="newPassword1Edit">
+       <property name="echoMode">
+        <enum>QLineEdit::Password</enum>
+       </property>
+       <property name="placeholderText">
+        <string>new password</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QLineEdit" name="newPasswor2Edit">
+       <property name="echoMode">
+        <enum>QLineEdit::Password</enum>
+       </property>
+       <property name="placeholderText">
+        <string>retype new password</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="resetButton">
        <property name="text">
-        <string>Validate</string>
+        <string>Reset Password</string>
        </property>
        <property name="flat">
         <bool>false</bool>

@@ -69,7 +69,7 @@
        <widget class="QWidget" name="amendWidget" native="true"/>
       </item>
       <item>
-       <widget class="QWidget" name="validateWidget" native="true"/>
+       <widget class="QWidget" name="resetWidget" native="true"/>
       </item>
       <item>
        <widget class="QLabel" name="label">

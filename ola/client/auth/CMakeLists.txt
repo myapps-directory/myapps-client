@@ -33,7 +33,7 @@ if(Qt5_FOUND AND WIN32 AND NOT TARGET Qt5::windeployqt)
 endif()
 
 if(${Qt5Widgets_FOUND})
-    QT5_WRAP_UI(FORMS_HEADERS main_form.ui home_form.ui create_form.ui about_form.ui amend_form.ui validate_form.ui)
+    QT5_WRAP_UI(FORMS_HEADERS main_form.ui home_form.ui create_form.ui about_form.ui amend_form.ui reset_form.ui)
     QT5_ADD_RESOURCES( FORMS_HEADERS main_form.qrc)
     
     set(SRCS

@@ -72,6 +72,7 @@ private slots:
     void onCreateClick();
     void onValidateClick();
     void onAmendClick();
+    void onResetClick();
     void onValidateResendClick();
 
     void onOnline(bool);

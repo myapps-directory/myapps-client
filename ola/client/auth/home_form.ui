@@ -13,7 +13,7 @@
     <x>0</x>
     <y>0</y>
     <width>368</width>
-    <height>306</height>
+    <height>415</height>
    </rect>
   </property>
   <property name="sizePolicy">
@@ -74,6 +74,20 @@
      </property>
      <property name="clearButtonEnabled">
       <bool>true</bool>
+     </property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QPushButton" name="validateEmailResendButton">
+     <property name="text">
+      <string>Resend validation E-Mail</string>
+     </property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QLineEdit" name="validateEmailEdit">
+     <property name="placeholderText">
+      <string>validation code received by e-mail</string>
      </property>
     </widget>
    </item>
@@ -575,6 +589,13 @@
     </widget>
    </item>
    <item>
+    <widget class="Line" name="line">
+     <property name="orientation">
+      <enum>Qt::Horizontal</enum>
+     </property>
+    </widget>
+   </item>
+   <item>
     <widget class="QPushButton" name="forgotButton">
      <property name="text">
       <string>Forgot password</string>
@@ -585,6 +606,13 @@
     <widget class="QPushButton" name="resetButton">
      <property name="text">
       <string>Reset password</string>
+     </property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QPushButton" name="validateEmailButton">
+     <property name="text">
+      <string>Validate E-Mail</string>
      </property>
     </widget>
    </item>

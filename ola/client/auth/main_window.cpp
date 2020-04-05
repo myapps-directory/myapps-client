@@ -3,8 +3,8 @@
 #include "ui_main_form.h"
 #include "ui_create_form.h"
 #include "ui_amend_form.h"
-#include "ui_validate_form.h"
 #include "ui_about_form.h"
+#include "ui_reset_form.h"
 #include <QKeyEvent>
 #include <QToolBar>
 #include <QToolButton>
@@ -30,7 +30,7 @@ enum struct ActionE {
     Create,
     About,
     Amend,
-    Validate,
+    Reset,
 };
 
 using HistoryFunctionT = std::function<void()>;
@@ -55,7 +55,7 @@ struct MainWindow::Data {
     Ui::CreateForm           create_form_;
     Ui::AboutForm            about_form_;
     Ui::AmendForm            amend_form_;
-    Ui::ValidateForm         validate_form_;
+    Ui::ResetForm            reset_form_;
     Configuration            config_;
     QToolBar                 tool_bar_;
     QAction                  back_action_;
@@ -66,6 +66,7 @@ struct MainWindow::Data {
     HistoryStackT            history_;
     ActionE                  current_action_;
     bool                     authenticated_ = false;
+    bool                     validate_email_ = false;
 
     Data(QMainWindow* _pw)
         : tool_bar_(_pw)
@@ -82,7 +83,21 @@ struct MainWindow::Data {
         if (main_form_.homeWidget != _pw) {
             main_form_.homeWidget->hide();
         } else {
-            if (authenticated_) {
+            if (validate_email_) {
+                home_form_.logoutButton->show();
+                home_form_.authButton->hide();
+                home_form_.userEdit->hide();
+                home_form_.codeEdit->hide();
+                home_form_.label->hide();
+                home_form_.passwordEdit->hide();
+                home_form_.validateEmailEdit->show();
+                home_form_.validateEmailButton->show();
+                home_form_.validateEmailResendButton->show();
+                home_form_.forgotButton->hide();
+                home_form_.resetButton->hide();
+                amend_action_.setEnabled(true);
+                create_action_.setEnabled(false);
+            }else if (authenticated_) {
                 //hide everything but logoutButton
                 home_form_.logoutButton->show();
                 home_form_.authButton->hide();
@@ -90,6 +105,9 @@ struct MainWindow::Data {
                 home_form_.codeEdit->hide();
                 home_form_.label->hide();
                 home_form_.passwordEdit->hide();
+                home_form_.validateEmailEdit->hide();
+                home_form_.validateEmailButton->hide();
+                home_form_.validateEmailResendButton->hide();
                 home_form_.forgotButton->hide();
                 home_form_.resetButton->hide();
                 amend_action_.setEnabled(true);
@@ -104,6 +122,9 @@ struct MainWindow::Data {
                 home_form_.passwordEdit->show();
                 home_form_.forgotButton->show();
                 home_form_.resetButton->show();
+                home_form_.validateEmailEdit->hide();
+                home_form_.validateEmailButton->hide();
+                home_form_.validateEmailResendButton->hide();
                 amend_action_.setEnabled(false);
                 create_action_.setEnabled(true);
             }
@@ -124,6 +145,12 @@ struct MainWindow::Data {
         } else {
             current_action_ = ActionE::Amend;
         }
+        if (main_form_.resetWidget != _pw) {
+            main_form_.resetWidget->hide();
+        } else {
+            current_action_ = ActionE::Reset;
+        }
+#if 0
         if (main_form_.validateWidget != _pw) {
             main_form_.validateWidget->hide();
         } else {
@@ -133,6 +160,7 @@ struct MainWindow::Data {
             amend_action_.setEnabled(true);
             current_action_ = ActionE::Validate;
         }
+#endif
         _pw->show();
     }
     
@@ -143,8 +171,15 @@ struct MainWindow::Data {
         if (main_form_.homeWidget->width() > maxw) {
             maxw = main_form_.homeWidget->width();
         }
-        if (main_form_.homeWidget->height() > maxh) {
-            maxh = main_form_.homeWidget->height();
+
+        int home_h = main_form_.homeWidget->height();
+        home_h -= home_form_.validateEmailEdit->height();
+        home_h -= home_form_.validateEmailButton->height();
+        home_h -= home_form_.validateEmailResendButton->height();
+        home_h -= home_form_.validateEmailResendButton->height();
+
+        if (home_h > maxh) {
+            maxh = home_h;
         }
 
         if (main_form_.createWidget->width() > maxw) {
@@ -166,13 +201,6 @@ struct MainWindow::Data {
         }
         if (main_form_.amendWidget->height() > maxh) {
             maxh = main_form_.amendWidget->height();
-        }
-
-        if (main_form_.validateWidget->width() > maxw) {
-            maxw = main_form_.validateWidget->width();
-        }
-        if (main_form_.validateWidget->height() > maxh) {
-            maxh = main_form_.validateWidget->height();
         }
 
         return QSize(maxw, maxh + tool_bar_.height() + main_form_.label->height());
@@ -203,7 +231,7 @@ MainWindow::MainWindow(QWidget* parent)
     pimpl_->create_form_.setupUi(pimpl_->main_form_.createWidget);
     pimpl_->about_form_.setupUi(pimpl_->main_form_.aboutWidget);
     pimpl_->amend_form_.setupUi(pimpl_->main_form_.amendWidget);
-    pimpl_->validate_form_.setupUi(pimpl_->main_form_.validateWidget);
+    pimpl_->reset_form_.setupUi(pimpl_->main_form_.resetWidget);
 
     setFixedSize(pimpl_->computeMaxSize());
     resize(pimpl_->computeMaxSize());
@@ -228,8 +256,9 @@ MainWindow::MainWindow(QWidget* parent)
     connect(pimpl_->home_form_.authButton, SIGNAL(clicked()), this, SLOT(onAuthClick()));
     connect(pimpl_->home_form_.logoutButton, SIGNAL(clicked()), this, SLOT(onLogoutClick()));
     connect(pimpl_->create_form_.createButton, SIGNAL(clicked()), this, SLOT(onCreateClick()));
-    connect(pimpl_->validate_form_.validateButton, SIGNAL(clicked()), this, SLOT(onValidateClick()));
-    connect(pimpl_->validate_form_.resendButton, SIGNAL(clicked()), this, SLOT(onValidateResendClick()));
+    connect(pimpl_->home_form_.validateEmailButton, SIGNAL(clicked()), this, SLOT(onValidateClick()));
+    connect(pimpl_->home_form_.validateEmailResendButton, SIGNAL(clicked()), this, SLOT(onValidateResendClick()));
+    connect(pimpl_->home_form_.resetButton, SIGNAL(clicked()), this, SLOT(onResetClick()));
     connect(pimpl_->amend_form_.amendButton, SIGNAL(clicked()), this, SLOT(onAmendClick()));
 
     connect(this, SIGNAL(onlineSignal(bool)), this, SLOT(onOnline(bool)), Qt::QueuedConnection);
@@ -249,6 +278,8 @@ MainWindow::MainWindow(QWidget* parent)
     connect(pimpl_->home_form_.userEdit, &QLineEdit::textChanged, this, &MainWindow::authTextEdited);
     connect(pimpl_->home_form_.passwordEdit, &QLineEdit::textChanged, this, &MainWindow::authTextEdited);
     connect(pimpl_->home_form_.codeEdit, &QLineEdit::textChanged, this, &MainWindow::authTextEdited);
+
+    connect(pimpl_->home_form_.validateEmailEdit, &QLineEdit::textChanged, this, &MainWindow::validateTextEdited);
 
     connect(pimpl_->create_form_.userEdit, &QLineEdit::textChanged, this, &MainWindow::createTextEdited);
     connect(pimpl_->create_form_.email1Edit, &QLineEdit::textChanged, this, &MainWindow::createTextEdited);
@@ -284,6 +315,7 @@ MainWindow::MainWindow(QWidget* parent)
 
     pimpl_->home_form_.authButton->setEnabled(false);
     pimpl_->create_form_.createButton->setEnabled(false);
+    pimpl_->home_form_.validateEmailButton->setEnabled(false);
 
     this->addToolBar(&pimpl_->tool_bar_);
 
@@ -346,9 +378,9 @@ void MainWindow::onCreateClick()
 
 void MainWindow::onValidateClick()
 {
-    bool ok = pimpl_->config_.validate_fnc_(pimpl_->validate_form_.validateEdit->text().toStdString());
+    bool ok = pimpl_->config_.validate_fnc_(pimpl_->home_form_.validateEmailEdit->text().toStdString());
     if (ok) {
-        pimpl_->validate_form_.validateButton->setEnabled(false);
+        pimpl_->home_form_.validateEmailButton->setEnabled(false);
     }
 }
 
@@ -368,10 +400,16 @@ void MainWindow::onAmendClick()
     }
 }
 
+void MainWindow::onResetClick()
+{
+
+    pimpl_->showWidget(this, pimpl_->main_form_.resetWidget);
+}
+
 void MainWindow::onValidateResendClick()
 {
     if (pimpl_->config_.resend_validate_fnc_()) {
-        pimpl_->validate_form_.resendButton->setEnabled(false);
+        pimpl_->home_form_.validateEmailResendButton->setEnabled(false);
     }
 }
 
@@ -396,6 +434,7 @@ void MainWindow::onAuthSlot(bool _authenticated)
             pimpl_->history_.pop();
         }
     } else {
+        pimpl_->validate_email_ = false;
         pimpl_->main_form_.label->setText("Authentication failed");
         pimpl_->home_form_.passwordEdit->setText("");
         pimpl_->home_form_.codeEdit->setText("");
@@ -409,7 +448,8 @@ void MainWindow::onAuthSlot(bool _authenticated)
 
 void MainWindow::onAuthValidate()
 {
-    pimpl_->showWidget(this, pimpl_->main_form_.validateWidget);
+    pimpl_->validate_email_ = true;
+    pimpl_->showWidget(this, pimpl_->main_form_.homeWidget);
 }
 
 void MainWindow::closeEvent(QCloseEvent*)
@@ -424,16 +464,29 @@ bool MainWindow::eventFilter(QObject* obj, QEvent* event)
         if ((key->key() == Qt::Key_Enter) || (key->key() == Qt::Key_Return)) {
             switch (pimpl_->current_action_) {
             case ActionE::Home:
-                onAuthClick();
+                if (pimpl_->validate_email_) {
+                    if (pimpl_->home_form_.validateEmailButton->isEnabled()) {
+                        onValidateClick();
+                    }
+                } else if (pimpl_->authenticated_) {
+                    if (pimpl_->home_form_.logoutButton->isEnabled()) {
+                        onLogoutClick();
+                    }
+                } else {
+                    if (pimpl_->home_form_.authButton->isEnabled()) {
+                        onAuthClick();
+                    }
+                }
                 break;
             case ActionE::Create:
-                onCreateClick();
+                if (pimpl_->create_form_.createButton->isEnabled()){
+                    onCreateClick();
+                }
                 break;
             case ActionE::Amend:
-                onAmendClick();
-                break;
-            case ActionE::Validate:
-                onValidateClick();
+                if (pimpl_->amend_form_.amendButton->isEnabled()) {
+                    onAmendClick();
+                }
                 break;
             default:
                 break;
@@ -561,13 +614,13 @@ void MainWindow::createTextEdited(const QString& text) {
 void MainWindow::validateTextEdited(const QString& text) {
     bool enable = true;
 
-    enable = enable && !pimpl_->create_form_.userEdit->text().isEmpty();
-    pimpl_->validate_form_.validateButton->setEnabled(enable);
+    enable = enable && !pimpl_->home_form_.validateEmailEdit->text().isEmpty();
+    pimpl_->home_form_.validateEmailButton->setEnabled(enable);
 }
 
 void MainWindow::emailValidationResentSlot()
 {
-    pimpl_->validate_form_.resendButton->setEnabled(true);
+    pimpl_->home_form_.validateEmailResendButton->setEnabled(true);
 }
 
 void MainWindow::amendTextEdited(const QString& text)
