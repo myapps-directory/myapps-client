@@ -1380,6 +1380,7 @@ void Engine::Implementation::releaseApplication(Entry& _rapp_entry)
                     new_app_id_vec.emplace_back(std::move(rad.app_id_), std::move(rad.app_unique_));
                     solid_log(logger, Info, "app " << rad.app_unique_ << " to be updated");
                 }
+                config_.folder_update_fnc_("");
             }
         }
     }
@@ -2115,13 +2116,13 @@ void Engine::Implementation::update()
         }
 
         auto req_ptr     = make_shared<ListAppsRequest>();
-        req_ptr->choice_ = 'a'; //TODO change to 'a' -> acquired apps
+        req_ptr->choice_ = 'a';
 
         const auto err = front_rpc_service_.sendRequest(auth_endpoint_.c_str(), req_ptr, list_lambda);
         if (!err) {
             unique_lock<mutex> lock(root_mutex_);
 
-            root_cv_.wait_for(lock, chrono::seconds(config_.update_poll_seconds_), [&done]() { return done != 0; });
+            root_cv_.wait(lock, [&done]() { return done != 0; });
             if (done > 0) {
                 updateApplications(updates_map);
             }
@@ -2136,6 +2137,7 @@ void Engine::Implementation::updateApplications(const UpdatesMapT& _updates_map)
     front::ListAppsResponse::AppVectorT new_app_id_vec;
 
     auto& rrd = root_entry_ptr_->rootData();
+    bool  erased_applications = false;
 
     for (const auto& u : _updates_map) {
         if (rrd.findApplication(u.first) == nullptr) {
@@ -2158,6 +2160,7 @@ void Engine::Implementation::updateApplications(const UpdatesMapT& _updates_map)
                 solid_log(logger, Info, "app " << rad.app_unique_ << " can be deleted");
                 auto entry_ptr = rrd.eraseApplication(rapp_entry); //rad will be valid as long as entry_ptr
                 if (entry_ptr) {
+                    erased_applications = true;
                     solid_check(entry_ptr.get() == &rapp_entry);
                     app_it = rrd.app_entry_map_.erase(app_it);
                     file_cache_engine_.removeApplication(rad.app_unique_, rad.build_unique_);
@@ -2177,6 +2180,7 @@ void Engine::Implementation::updateApplications(const UpdatesMapT& _updates_map)
             if (rad.canBeDeleted()) {
                 auto entry_ptr = rrd.eraseApplication(rapp_entry);
                 if (entry_ptr) {
+                    erased_applications = true;
                     solid_check(entry_ptr.get() == &rapp_entry);
                     file_cache_engine_.removeApplication(rad.app_unique_, rad.build_unique_);
                     new_app_id_vec.emplace_back(it->second.first, rad.app_unique_);
@@ -2212,6 +2216,8 @@ void Engine::Implementation::updateApplications(const UpdatesMapT& _updates_map)
         req_ptr->property_vec_.emplace_back("brief");
 
         remoteFetchApplication(new_app_id_vec, req_ptr, 0);
+    } else if(erased_applications){
+        config_.folder_update_fnc_("");
     }
 }
 
@@ -2223,6 +2229,7 @@ void Engine::Implementation::onAllApplicationsFetched()
         cleanFileCache();
         update_thread = thread(&Implementation::update, this);
     }
+    config_.folder_update_fnc_("");
 }
 
 void Engine::Implementation::onFrontListAppsResponse(

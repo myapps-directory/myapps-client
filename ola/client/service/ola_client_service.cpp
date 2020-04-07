@@ -14,6 +14,7 @@
 
 #include "ola/common/ola_front_protocol.hpp"
 
+#include "boost/filesystem.hpp"
 #include "boost/program_options.hpp"
 
 #include "ola/client/service/engine.hpp"
@@ -23,6 +24,8 @@
 #include <sstream>
 
 #include "solid/system/log.hpp"
+
+#include <Shlobj.h>
 
 #include <aclapi.h>
 #include <wtsapi32.h>
@@ -216,7 +219,7 @@ protected:
     NTSTATUS OnStop() override;
 
 private:
-    void onGuiStart(const string &_endpoint, int _port);
+    void onGuiStart(const string& _endpoint, int _port);
     void onGuiFail();
 };
 } //namespace
@@ -226,6 +229,13 @@ int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR pCmdLin
 {
     int     argc;
     LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+
+    {
+        const auto m_singleInstanceMutex = CreateMutex(NULL, TRUE, L"OLA_SERVICE_SHARED_MUTEX");
+        if (m_singleInstanceMutex == NULL || GetLastError() == ERROR_ALREADY_EXISTS) {
+            return -1; // Exit the app. For MFC, return false from InitInstance.
+        }
+    }
 #else
 int wmain(int argc, wchar_t** argv)
 {
@@ -348,7 +358,7 @@ bool Parameters::parse(ULONG argc, PWSTR* argv)
         ("debug-port,P", value<string>(&debug_port_)->default_value("9999"), "Debug server port (e.g. on linux use: nc -l 9999)")
         ("debug-console,C", value<bool>(&debug_console_)->implicit_value(true)->default_value(false), "Debug console")
         ("debug-buffered,S", value<bool>(&debug_buffered_)->implicit_value(true)->default_value(false), "Debug buffered")
-        ("mount-point,m", wvalue<wstring>(&mount_point_)->default_value(L"C:\\ola", "c:\\ola"), "Mount point")
+        ("mount-point,m", wvalue<wstring>(&mount_point_)->default_value(L"C:\\MyApps.space", "C:\\MyApps.space"), "Mount point")
         ("unsecure", value<bool>(&secure_)->implicit_value(false)->default_value(true), "Don not use SSL to secure communication")
         ("compress", value<bool>(&compress_)->implicit_value(true)->default_value(false), "Use Snappy to compress communication")
         ("front", value<std::string>(&front_endpoint_)->default_value(string(OLA_FRONT_URL)), "OLA Front Endpoint")
@@ -569,6 +579,23 @@ NTSTATUS FileSystemService::OnStart(ULONG argc, PWSTR *argv)
             1024 * 1024 * 64);
     }
 
+    {
+        namespace fs = boost::filesystem;
+        if(fs::exists(params_.mount_point_)){
+            if(fs::is_directory(params_.mount_point_)){
+                if(fs::is_empty(params_.mount_point_)){
+                    fs::remove(params_.mount_point_);
+                }else{
+                    log_fail(L"cannot mount file system - directory exists instead %s", params_.mount_point_.c_str());
+                    return STATUS_UNSUCCESSFUL;
+                }
+            }else{
+                log_fail(L"cannot mount file system - file exists instead %s", params_.mount_point_.c_str());
+                return STATUS_UNSUCCESSFUL;
+            }
+        }
+    }
+
     ola::client::service::Configuration cfg;
     cfg.secure_ = params_.secure_;
     cfg.compress_ = params_.compress_;
@@ -583,6 +610,9 @@ NTSTATUS FileSystemService::OnStart(ULONG argc, PWSTR *argv)
 	cfg.gui_start_fnc_ = [this](const string &_endpoint, int _port){
 		onGuiStart(_endpoint, _port);
 	};
+    cfg.folder_update_fnc_ = [this](const std::string &_folder){
+        SHChangeNotify(SHCNE_UPDATEDIR, SHCNF_PATH | SHCNF_FLUSHNOWAIT, params_.mount_point_.c_str(), NULL);
+    };
     engine_.start(cfg);
 	NTSTATUS  Result = STATUS_SUCCESS;
 	ULONG     DebugFlags     = 0;
