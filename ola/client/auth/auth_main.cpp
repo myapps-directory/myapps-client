@@ -223,11 +223,7 @@ int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR pCmdLin
     {
         const auto m_singleInstanceMutex = CreateMutex(NULL, TRUE, L"OLA_AUTH_SHARED_MUTEX");
         if (m_singleInstanceMutex == NULL || GetLastError() == ERROR_ALREADY_EXISTS) {
-<<<<<<< HEAD
             HWND existingApp = FindWindow(0, L"MyApps.space");
-=======
-            HWND existingApp = FindWindow(0, L"MyApps.space Auth");
->>>>>>> master
             if (existingApp) {
                 SetForegroundWindow(existingApp);
             }
@@ -333,13 +329,7 @@ int main(int argc, char* argv[])
         main_window.start(std::move(config));
     }
 
-<<<<<<< HEAD
     SetWindowText(GetActiveWindow(), L"MyApps.space");
-=======
-    SetWindowText(GetActiveWindow(), L"MyApps.space Auth");
-
-    front_configure_service(engine, params, front_rpc_service, aioscheduler, resolver);
->>>>>>> master
 
     front_configure_service(engine, params, front_rpc_service, aioscheduler, resolver);
     
