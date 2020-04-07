@@ -1812,7 +1812,8 @@ void Engine::Implementation::tryAuthenticate(frame::mprpc::ConnectionContext& _c
     getAuthToken(_ctx.recipientId(), auth_token, _ptoken);
 
     if (!auth_token.empty()) {
-        auto req_ptr = std::make_shared<AuthRequest>(auth_token);
+        auto req_ptr = std::make_shared<AuthRequest>();
+        req_ptr->pass_ = auth_token;
         auto lambda  = [this](
                           frame::mprpc::ConnectionContext&      _rctx,
                           std::shared_ptr<front::AuthRequest>&  _rsent_msg_ptr,
@@ -1860,7 +1861,7 @@ void Engine::Implementation::onFrontAuthResponse(
 
     if (_rrecv_msg_ptr->error_) {
         solid_log(logger, Info, "Failed authentincating user [" << auth_user_ << "] using stored credentials");
-        tryAuthenticate(_ctx, &_rreq.auth_);
+        tryAuthenticate(_ctx, &_rreq.pass_);
     } else {
         if (!_rrecv_msg_ptr->message_.empty()) {
             solid_log(logger, Info, "Success authentincating user [" << auth_user_ << "] using stored credentials");
@@ -1883,7 +1884,7 @@ void Engine::Implementation::onGuiAuthRequest(
     if (_rrecv_msg_ptr && !_rrecv_msg_ptr->token_.empty()) {
         solid_log(logger, Info, "Success password authenticating user: " << _rrecv_msg_ptr->user_);
         auto req_ptr   = std::make_shared<front::AuthRequest>();
-        req_ptr->auth_ = _rrecv_msg_ptr->token_;
+        req_ptr->pass_ = _rrecv_msg_ptr->token_;
         RecipientVectorT recipient_v;
         {
             lock_guard<mutex> lock(mutex_);
