@@ -110,6 +110,7 @@ struct MainWindow::Data {
                 home_form_.validateEmailResendButton->hide();
                 home_form_.forgotButton->hide();
                 home_form_.resetButton->hide();
+                home_form_.line->hide();
                 amend_action_.setEnabled(true);
                 create_action_.setEnabled(false);
             } else {
@@ -259,7 +260,9 @@ MainWindow::MainWindow(QWidget* parent)
     connect(pimpl_->home_form_.validateEmailButton, SIGNAL(clicked()), this, SLOT(onValidateClick()));
     connect(pimpl_->home_form_.validateEmailResendButton, SIGNAL(clicked()), this, SLOT(onValidateResendClick()));
     connect(pimpl_->home_form_.resetButton, SIGNAL(clicked()), this, SLOT(onResetClick()));
+    connect(pimpl_->home_form_.forgotButton, SIGNAL(clicked()), this, SLOT(onForgotClick()));
     connect(pimpl_->amend_form_.amendButton, SIGNAL(clicked()), this, SLOT(onAmendClick()));
+    connect(pimpl_->reset_form_.resetButton, SIGNAL(clicked()), this, SLOT(onResetPasswordClick()));
 
     connect(this, SIGNAL(onlineSignal(bool)), this, SLOT(onOnline(bool)), Qt::QueuedConnection);
     connect(this, SIGNAL(authSignal(bool)), this, SLOT(onAuthSlot(bool)), Qt::QueuedConnection);;
@@ -294,6 +297,11 @@ MainWindow::MainWindow(QWidget* parent)
     connect(pimpl_->amend_form_.passwordEdit, &QLineEdit::textChanged, this, &MainWindow::amendTextEdited);
     connect(pimpl_->amend_form_.newPassword1Edit, &QLineEdit::textChanged, this, &MainWindow::amendTextEdited);
     connect(pimpl_->amend_form_.newPassword2Edit, &QLineEdit::textChanged, this, &MainWindow::amendTextEdited);
+
+    connect(pimpl_->reset_form_.tokenEdit, &QLineEdit::textChanged, this, &MainWindow::resetTextEdited);
+    connect(pimpl_->reset_form_.newPassword1Edit, &QLineEdit::textChanged, this, &MainWindow::resetTextEdited);
+    connect(pimpl_->reset_form_.newPassword2Edit, &QLineEdit::textChanged, this, &MainWindow::resetTextEdited);
+    connect(pimpl_->reset_form_.codeEdit, &QLineEdit::textChanged, this, &MainWindow::resetTextEdited);
 
     pimpl_->tool_bar_.setMovable(false);
     pimpl_->tool_bar_.setFixedHeight(38);
@@ -386,12 +394,12 @@ void MainWindow::onValidateClick()
 
 void MainWindow::onAmendClick()
 {
-    auto user = pimpl_->amend_form_.userEdit->text().toStdString();
-    auto email = pimpl_->amend_form_.email1Edit->text().toStdString();
-    auto password = pimpl_->amend_form_.passwordEdit->text().toStdString();
-    auto new_password = pimpl_->amend_form_.newPassword1Edit->text().toStdString();
+    const auto user = pimpl_->amend_form_.userEdit->text().toStdString();
+    const auto email        = pimpl_->amend_form_.email1Edit->text().toStdString();
+    const auto password     = pimpl_->amend_form_.passwordEdit->text().toStdString();
+    const auto new_password = pimpl_->amend_form_.newPassword1Edit->text().toStdString();
 
-    bool ok = pimpl_->config_.amend_fnc_(user, email, password, new_password);
+    const bool ok = pimpl_->config_.amend_fnc_(user, email, password, new_password);
     if (ok) {
         pimpl_->amend_form_.amendButton->setEnabled(false);
         pimpl_->amend_form_.passwordEdit->setText("");
@@ -402,7 +410,6 @@ void MainWindow::onAmendClick()
 
 void MainWindow::onResetClick()
 {
-
     pimpl_->showWidget(this, pimpl_->main_form_.resetWidget);
 }
 
@@ -412,6 +419,30 @@ void MainWindow::onValidateResendClick()
         pimpl_->home_form_.validateEmailResendButton->setEnabled(false);
     }
 }
+
+void MainWindow::onForgotClick()
+{
+    const auto user = pimpl_->home_form_.userEdit->text().toStdString();
+    const auto code = pimpl_->home_form_.codeEdit->text().toStdString();
+
+    const bool ok = pimpl_->config_.forgot_fnc_(user, code);
+    if (ok) {
+        pimpl_->home_form_.forgotButton->setEnabled(false);
+    }
+}
+
+void MainWindow::onResetPasswordClick()
+{
+    const auto token = pimpl_->reset_form_.tokenEdit->text().toStdString();
+    const auto pass = pimpl_->reset_form_.newPassword1Edit->text().toStdString();
+    const auto code  = pimpl_->reset_form_.codeEdit->text().toStdString();
+
+    const bool ok = pimpl_->config_.reset_fnc_(token, pass, code);
+    if (ok) {
+        pimpl_->reset_form_.resetButton->setEnabled(false);
+    }
+}
+
 
 void MainWindow::onOnline(bool _b)
 {
@@ -486,6 +517,11 @@ bool MainWindow::eventFilter(QObject* obj, QEvent* event)
             case ActionE::Amend:
                 if (pimpl_->amend_form_.amendButton->isEnabled()) {
                     onAmendClick();
+                }
+                break;
+            case ActionE::Reset:
+                if (pimpl_->reset_form_.resetButton->isEnabled()) {
+                    onResetPasswordClick();
                 }
                 break;
             default:
@@ -567,8 +603,10 @@ void MainWindow::captchaSlot(CaptchaPointerT _captcha_ptr)
     solid_log(logger, Info, "size = " << _captcha_ptr->size());
     QImage img;
     if (img.loadFromData(reinterpret_cast<const uchar*>(_captcha_ptr->data()), _captcha_ptr->size())) {
-        pimpl_->home_form_.label->setPixmap(QPixmap::fromImage(img, Qt::AutoColor));
-        pimpl_->create_form_.label->setPixmap(QPixmap::fromImage(img, Qt::AutoColor));
+        auto pixmap = QPixmap::fromImage(img, Qt::AutoColor);
+        pimpl_->home_form_.label->setPixmap(pixmap);
+        pimpl_->create_form_.label->setPixmap(pixmap);
+        pimpl_->reset_form_.label->setPixmap(pixmap);
     }
 }
 
@@ -635,6 +673,18 @@ void MainWindow::amendTextEdited(const QString& text)
     enable = enable && pimpl_->amend_form_.newPassword1Edit->text() == pimpl_->amend_form_.newPassword2Edit->text();
 
     pimpl_->amend_form_.amendButton->setEnabled(enable);
+}
+
+void MainWindow::resetTextEdited(const QString& text)
+{
+    bool enable = true;
+
+    enable = enable && !pimpl_->reset_form_.tokenEdit->text().isEmpty();
+    enable = enable && !pimpl_->reset_form_.codeEdit->text().isEmpty();
+    enable = enable && !pimpl_->reset_form_.newPassword1Edit->text().isEmpty();
+    enable = enable && pimpl_->reset_form_.newPassword1Edit->text() == pimpl_->reset_form_.newPassword2Edit->text();
+
+    pimpl_->reset_form_.resetButton->setEnabled(enable);
 }
 
 } //namespace auth

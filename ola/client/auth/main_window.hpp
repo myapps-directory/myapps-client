@@ -27,6 +27,8 @@ struct Configuration {
     using ResendValidateFunctionT     = std::function<bool()>;
     using AuthFetchFunctionT = std::function<bool()>;
     using LogoutFunctionT = std::function<bool()>;
+    using ForgotFunctionT = std::function<bool(const std::string&, const std::string&)>;
+    using ResetFunctionT = std::function<bool(const std::string&, const std::string&, const std::string&)>;
 
     QString                 login_;
     AuthenticateFunctionT authenticate_fnc_;
@@ -36,6 +38,8 @@ struct Configuration {
     ResendValidateFunctionT resend_validate_fnc_;
     AuthFetchFunctionT      auth_fetch_fnc_;
     LogoutFunctionT         logout_fnc_;
+    ForgotFunctionT         forgot_fnc_;
+    ResetFunctionT          reset_fnc_;
 };
 
 class MainWindow : public QMainWindow {
@@ -74,6 +78,8 @@ private slots:
     void onAmendClick();
     void onResetClick();
     void onValidateResendClick();
+    void onForgotClick();
+    void onResetPasswordClick();
 
     void onOnline(bool);
     void onAuthSlot(bool);
@@ -91,6 +97,7 @@ private slots:
     void createTextEdited(const QString& text);
     void validateTextEdited(const QString& text);
     void amendTextEdited(const QString& text);
+    void resetTextEdited(const QString& text);
     void emailValidationResentSlot();
 private:
     void closeEvent(QCloseEvent*) override;

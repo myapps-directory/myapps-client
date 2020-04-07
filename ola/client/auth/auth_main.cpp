@@ -154,6 +154,9 @@ struct Engine {
     void storeAuthData(const string& _user, const string& _token);
 
     bool logout();
+
+    bool passwordForgot(const string& _login, const string& _code);
+    bool passwordReset(const string& _token, const string& _pass, const string& _code);
 };
 
 void front_configure_service(Engine& _rengine, const Parameters& _params, frame::mprpc::ServiceT& _rsvc, AioSchedulerT& _rsch, frame::aio::Resolver& _rres);
@@ -311,6 +314,14 @@ int main(int argc, char* argv[])
 
         config.logout_fnc_ = [&engine]() {
             return engine.logout();
+        };
+
+        config.forgot_fnc_ = [&engine](const string &_login, const string &_code) {
+            return engine.passwordForgot(_login, _code);
+        };
+
+        config.reset_fnc_ = [&engine](const string& _token, const string& _pass, const string& _code) {
+            return engine.passwordReset(_token, ola::utility::sha256hex(_pass), _code);
         };
 
         config.login_ = QString::fromStdString(engine.auth_login_);
@@ -746,5 +757,56 @@ void Engine::storeAuthData(const string& _user, const string& _token)
     }
 }
 
+bool Engine::passwordForgot(const string& _login, const string& _code)
+{
+    auto req_ptr     = std::make_shared<front::AuthResetRequest>();
+    req_ptr->login_   = _login;
+    req_ptr->captcha_text_ = _code;
+    req_ptr->captcha_token_ = captcha_token_;
+
+    lock_guard<mutex> lock(mutex_);
+    if (!front_recipient_id_.empty()) {
+        auto lambda = [this](
+                          frame::mprpc::ConnectionContext&             _rctx,
+                          std::shared_ptr<front::AuthResetRequest>& _rsent_msg_ptr,
+                          std::shared_ptr<front::AuthResponse>&        _rrecv_msg_ptr,
+                          ErrorConditionT const&                       _rerror) {
+            main_window_.authSignal(false);
+            //this_thread::sleep_for(chrono::seconds(2));
+            onConnectionInit(_rctx);
+        };
+        front_rpc_service_.sendRequest(front_recipient_id_, req_ptr, lambda);
+        return true;
+    }
+    return false;
+}
+bool Engine::passwordReset(const string& _token, const string& _pass, const string &_code)
+{
+    auto req_ptr            = std::make_shared<front::AuthResetRequest>();
+    req_ptr->login_         = utility::base64_decode(_token);
+    req_ptr->pass_          = _pass;
+    req_ptr->captcha_text_  = _code;
+    req_ptr->captcha_token_ = captcha_token_;
+
+    lock_guard<mutex> lock(mutex_);
+    if (!front_recipient_id_.empty()) {
+        auto lambda = [this](
+                          frame::mprpc::ConnectionContext&          _rctx,
+                          std::shared_ptr<front::AuthResetRequest>& _rsent_msg_ptr,
+                          std::shared_ptr<front::AuthResponse>&     _rrecv_msg_ptr,
+                          ErrorConditionT const&                    _rerror) {
+            if (_rrecv_msg_ptr) {
+                if (_rrecv_msg_ptr->error_ != 0) {
+                    lock_guard<mutex> lock(mutex_);
+                    auth_token_.clear();
+                }
+                onAuthResponse(_rctx, _rrecv_msg_ptr, _rerror);
+            }
+        };
+        front_rpc_service_.sendRequest(front_recipient_id_, req_ptr, lambda);
+        return true;
+    }
+    return false;
+}
 
 } //namespace
