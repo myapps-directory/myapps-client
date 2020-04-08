@@ -152,6 +152,7 @@ include(CTest)
 ###############################################################################
 add_subdirectory(ola)
 add_subdirectory(example)
+add_subdirectory(file_monitor)
 
 ###############################################################################
 include(cmake/source-format.cmake)
