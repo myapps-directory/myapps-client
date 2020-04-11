@@ -159,7 +159,7 @@ void Engine::Implementation::threadRun()
         ItemStub& ritem = ctx.directory(dir_idx).item_vec_.back();
         boost::system::error_code err;
         ritem.write_time_point_ = chrono::system_clock::from_time_t(fs::last_write_time(dir_path / ritem.name_, err));
-        ritem.fnc_(dir_path, ritem.name_);
+        ritem.fnc_(dir_path, ritem.name_, ritem.write_time_point_);
     }
 
     ctx.cons_dq_.clear();
@@ -189,7 +189,7 @@ void Engine::Implementation::threadRun()
                 ItemStub& ritem         = ctx.directory(dir_idx).item_vec_.back();
                 boost::system::error_code err;
                 ritem.write_time_point_ = chrono::system_clock::from_time_t(fs::last_write_time(dir_path / ritem.name_, err));
-                ritem.fnc_(dir_path, ritem.name_);
+                ritem.fnc_(dir_path, ritem.name_, ritem.write_time_point_);
             }
         } else if (waitrv > WAIT_OBJECT_0 && waitrv < (WAIT_OBJECT_0 + ctx.handle_vec_.size())) {
             const size_t handle_idx = waitrv - WAIT_OBJECT_0;
@@ -200,12 +200,13 @@ void Engine::Implementation::threadRun()
                 const auto new_time = chrono::system_clock::from_time_t(fs::last_write_time(dir.path_ / item.name_, err));
                 if (new_time != item.write_time_point_) {
                     item.write_time_point_ = new_time;
-                    item.fnc_(dir.path_, item.name_);
+                    item.fnc_(dir.path_, item.name_, item.write_time_point_);
                 }
             }
             FindNextChangeNotification(ctx.handle_vec_[handle_idx]);
         } else {
-            solid_assert_log(false, logger, "WaitForMultipleObjects returned " << waitrv);
+            //solid_assert_log(false, logger);
+            this_thread::sleep_for(chrono::seconds(1));
         }
     }
 

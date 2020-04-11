@@ -34,6 +34,7 @@
 #include "solid/frame/mprpc/mprpcsocketstub_openssl.hpp"
 
 #include "ola/common/utility/encode.hpp"
+#include "ola/client/utility/auth_file.hpp"
 
 #include "auth_protocol.hpp"
 #include "ola/common/ola_front_protocol.hpp"
@@ -151,7 +152,7 @@ struct Engine {
         ErrorConditionT const&                _rerror);
 
     void loadAuthData();
-    void storeAuthData(const string& _user, const string& _token);
+    void storeAuthData();
 
     bool logout();
 
@@ -358,7 +359,7 @@ bool Parameters::parse(ULONG argc, PWSTR* argv)
 			("unsecure", value<bool>(&secure)->implicit_value(false)->default_value(true), "Do not use SSL to secure communication")
 			("compress", value<bool>(&compress)->implicit_value(true)->default_value(false), "Use Snappy to compress communication")
             ("secure-prefix", value<std::string>(&secure_prefix)->default_value("certs"), "Secure Path prefix")
-            ("path-prefix", value<std::string>(&path_prefix)->default_value(env_config_path_prefix()), "Secure Path prefix")
+            ("path-prefix", value<std::string>(&path_prefix)->default_value(env_config_path_prefix()), "Path prefix")
         ;
         // clang-format on
         variables_map vm;
@@ -517,7 +518,7 @@ bool Engine::onAuthFetchStart()
         }
         main_window_.onAmendFetch(auth_user_, auth_email_);
     };
-    front_rpc_service_.sendRequest(auth_endpoint_.c_str(), req_ptr, lambda);
+    front_rpc_service_.sendRequest(front_recipient_id_, req_ptr, lambda);
     return true;
 }
 bool Engine::onAmendStart(string _user, string _email, const string& _pass, const string& _new_pass) 
@@ -693,8 +694,8 @@ void Engine::onAuthResponse(
             solid_log(logger, Info, "Auth Success");
             if (!_rrecv_msg_ptr->message_.empty()) {
                 auth_token_ = _rrecv_msg_ptr->message_;
+                storeAuthData();
             }
-            storeAuthData(auth_login_, auth_token_);
 
             main_window_.authSignal(true);
 
@@ -709,7 +710,7 @@ void Engine::onAuthResponse(
 bool Engine::logout() {
     lock_guard<mutex> lock(mutex_);
     auth_token_.clear();
-    storeAuthData(auth_login_, auth_token_);
+    storeAuthData();
     if (!front_recipient_id_.empty()) {
         front_rpc_service_.closeConnection(front_recipient_id_);
     }
@@ -720,6 +721,13 @@ bool Engine::logout() {
 void Engine::loadAuthData()
 {
     const auto path = authDataFilePath();
+
+    ola::client::utility::auth_read(path, auth_endpoint_, auth_login_, auth_token_);
+    if (auth_endpoint_.empty()) {
+        auth_endpoint_ = params_.front_endpoint;
+    }
+
+#if 0
     ifstream   ifs(path.generic_string());
     if (ifs) {
         getline(ifs, auth_endpoint_);
@@ -738,13 +746,16 @@ void Engine::loadAuthData()
         solid_log(logger, Error, "Failed loading auth data from: " << path.generic_string());
         auth_endpoint_ = params_.front_endpoint;
     }
+#endif
 }
 
-void Engine::storeAuthData(const string& _user, const string& _token)
+void Engine::storeAuthData()
 {
     fs::create_directories(authDataDirectoryPath());
     const auto path = authDataFilePath();
 
+    ola::client::utility::auth_write(path, auth_endpoint_, auth_login_, auth_token_);
+#if 0
     ofstream ofs(path.generic_string(), std::ios::trunc);
     if (ofs) {
         ofs << auth_endpoint_ << endl;
@@ -755,6 +766,7 @@ void Engine::storeAuthData(const string& _user, const string& _token)
     } else {
         solid_log(logger, Error, "Failed storing auth data to: " << path.generic_string());
     }
+#endif
 }
 
 bool Engine::passwordForgot(const string& _login, const string& _code)

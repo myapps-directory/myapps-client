@@ -12,8 +12,9 @@
 #include "solid/frame/mprpc/mprpcsocketstub_openssl.hpp"
 
 #include "ola/common/utility/encode.hpp"
-
 #include "ola/common/ola_front_protocol.hpp"
+
+#include "ola/client/utility/auth_file.hpp"
 
 #include <signal.h>
 
@@ -76,7 +77,6 @@ struct Parameters {
     bool           secure;
     bool           compress;
     string         front_endpoint;
-    bool           no_auth_file;
     string         secure_prefix;
 
     string securePath(const string& _name) const
@@ -97,8 +97,6 @@ struct Engine {
     string                  auth_endpoint_;
     string                  auth_user_;
     string                  auth_token_;
-    thread                  auth_thread_;
-    RecipientQueueT         auth_recipient_q_;
     string                  path_prefix_;
 
     fs::path authDataDirectoryPath() const
@@ -124,23 +122,23 @@ struct Engine {
 
     void start()
     {
-        if (!params().no_auth_file) {
-            const auto path = authDataFilePath();
-            ifstream   ifs(path.generic_string());
+        
+        const auto path = authDataFilePath();
+        ola::client::utility::auth_read(path, auth_endpoint_, auth_user_, auth_token_);
 
-            if (ifs) {
-                getline(ifs, auth_endpoint_);
-                getline(ifs, auth_user_);
-                getline(ifs, auth_token_);
-                try {
-                    auth_token_ = ola::utility::base64_decode(auth_token_);
-                    solid_check(!auth_token_.empty() && auth_endpoint_ == rparams_.front_endpoint);
-                } catch (std::exception& e) {
-                    auth_user_.clear();
-                    auth_token_.clear();
-                    auth_endpoint_ = rparams_.front_endpoint;
-                }
-            } else {
+        solid_check(!auth_token_.empty(), "Please authenticate using ola_client_auth application");
+
+#if 0
+        ifstream   ifs(path.generic_string());
+
+        if (ifs) {
+            getline(ifs, auth_endpoint_);
+            getline(ifs, auth_user_);
+            getline(ifs, auth_token_);
+            try {
+                auth_token_ = ola::utility::base64_decode(auth_token_);
+                solid_check(!auth_token_.empty() && auth_endpoint_ == rparams_.front_endpoint);
+            } catch (std::exception& e) {
                 auth_user_.clear();
                 auth_token_.clear();
                 auth_endpoint_ = rparams_.front_endpoint;
@@ -150,6 +148,7 @@ struct Engine {
             auth_token_.clear();
             auth_endpoint_ = rparams_.front_endpoint;
         }
+#endif
     }
 
     frame::mprpc::ServiceT& rpcService() const
@@ -175,19 +174,6 @@ struct Engine {
     void stop()
     {
         running_ = false;
-        if (auth_thread_.joinable()) {
-            auth_thread_.join();
-        }
-        if (!auth_token_.empty() && !params().no_auth_file) {
-            Directory::create_all(authDataDirectoryPath().generic_string().c_str());
-            ofstream ofs(authDataFilePath().generic_string(), std::ios::trunc);
-            if (ofs) {
-                ofs << auth_endpoint_ << endl;
-                ofs << auth_user_ << endl;
-                ofs << ola::utility::base64_encode(auth_token_) << endl;
-                ofs.flush();
-            }
-        }
     }
 };
 
@@ -399,7 +385,6 @@ bool parse_arguments(Parameters& _par, int argc, char* argv[])
             ("unsecure", value<bool>(&_par.secure)->implicit_value(false)->default_value(true), "Use SSL to secure communication")
             ("compress", value<bool>(&_par.compress)->implicit_value(true)->default_value(false), "Use Snappy to compress communication")
             ("front", value<std::string>(&_par.front_endpoint)->default_value(string(OLA_FRONT_URL)), "OLA Front Endpoint")
-            ("no-auth-file", value<bool>(&_par.no_auth_file)->implicit_value(true)->default_value(false), "Do not use auth file - prompt for authentication")
             ("secure-prefix", value<std::string>(&_par.secure_prefix)->default_value("certs"), "Secure Path prefix")
         ;
         // clang-format off
@@ -1612,107 +1597,6 @@ void handle_acquire(istream& _ris, Engine &_reng){
 // Engine
 //-----------------------------------------------------------------------------
 
-void Engine::authRun(){
-    
-    shared_ptr<AuthRequest> req_ptr;
-    
-    while(running_){
-        
-        if(!req_ptr){
-            req_ptr = std::make_shared<AuthRequest>();
-            cout<<"User: "<<flush;cin>>req_ptr->auth_;
-            cout<<"Pass: "<<flush;cin>>req_ptr->pass_;
-        
-            req_ptr->pass_ = ola::utility::sha256hex(req_ptr->pass_);
-        }
-        
-        promise<int> prom;
-        
-        auto lambda = [this, &prom, &req_ptr](
-            frame::mprpc::ConnectionContext&        _rctx,
-            std::shared_ptr<AuthRequest>&  _rsent_msg_ptr,
-            std::shared_ptr<AuthResponse>& _rrecv_msg_ptr,
-            ErrorConditionT const&                  _rerror
-        ){
-            if(_rrecv_msg_ptr){
-                solid_log(logger, Info, "received authentication response: "<<_rrecv_msg_ptr->error_<<" "<<_rrecv_msg_ptr->message_);
-                if(_rrecv_msg_ptr->error_ == 0){
-                    //authentication success
-                    {
-                        std::lock_guard<mutex> lock(mutex_);
-                        auth_token_ = _rrecv_msg_ptr->message_;
-                        auth_user_ = _rsent_msg_ptr->auth_;
-                        
-                        solid_check(!auth_recipient_q_.empty());
-                        
-                        rrpc_service_.connectionNotifyEnterActiveState(auth_recipient_q_.front());
-                        auth_recipient_q_.pop();
-                    }
-                    prom.set_value(0);
-                }else{
-                    //authentication fail
-                    req_ptr.reset();
-                    cout<<"Fail: "<<_rrecv_msg_ptr->message_<<endl;
-                    prom.set_value(-1);
-                }
-            }else{
-                prom.set_value(-1);
-            }
-        };
-        
-        {
-            lock_guard<mutex> lock(mutex_);
-            solid_check(!auth_recipient_q_.empty());
-    
-            while(!auth_recipient_q_.empty()){
-                auto err = rpcService().sendRequest(auth_recipient_q_.front(), req_ptr, lambda);
-                if(err){
-                    if(auth_recipient_q_.size() == 1){
-                        err = rpcService().sendRequest(serverEndpoint().c_str(), req_ptr, lambda, auth_recipient_q_.front());
-                        if(err){
-                            auth_recipient_q_.pop();
-                            prom.set_value(-1);
-                            break;
-                        }else{
-                            //success
-                            break;
-                        }
-                    }else{
-                        auth_recipient_q_.pop();
-                    }
-                }else{
-                    //success
-                    break;
-                }
-            }
-        }
-        
-        auto fut = prom.get_future();
-        
-        solid_check(fut.wait_for(chrono::seconds(100)) == future_status::ready, "Taking too long - waited 100 secs");
-        
-        if(fut.get() == 0){
-            lock_guard<mutex> lock(mutex_);
-            auto lambda = [this](
-                frame::mprpc::ConnectionContext&        _rctx,
-                std::shared_ptr<AuthRequest>&  _rsent_msg_ptr,
-                std::shared_ptr<AuthResponse>& _rrecv_msg_ptr,
-                ErrorConditionT const&                  _rerror
-            ){
-                if(_rrecv_msg_ptr){
-                    onAuthResponse(_rctx, *_rrecv_msg_ptr);
-                }
-            };
-            
-            while(!auth_recipient_q_.empty()){
-                rpcService().sendRequest(auth_recipient_q_.front(), std::make_shared<AuthRequest>(auth_token_), lambda);
-                auth_recipient_q_.pop();
-            }
-            break;
-        }
-    }
-}
-
 //-----------------------------------------------------------------------------
 
 void Engine::onConnectionStart(frame::mprpc::ConnectionContext &_ctx){
@@ -1737,65 +1621,34 @@ void Engine::onConnectionStart(frame::mprpc::ConnectionContext &_ctx){
 //-----------------------------------------------------------------------------
 
 void Engine::onConnectionInit(frame::mprpc::ConnectionContext &_ctx){
-    string auth_token;
-    {
-        std::lock_guard<mutex> lock(mutex_);
-        if(!auth_token_.empty()){
-            auth_token = auth_token_;
-        }else if(auth_recipient_q_.empty()){
-            auth_recipient_q_.emplace(_ctx.recipientId());
-        }else if(_ctx.recipientId() == auth_recipient_q_.front()){
-            return;
-        }else{
-            auth_recipient_q_.emplace(_ctx.recipientId());
+    solid_check(!auth_token_.empty());
+    std::lock_guard<mutex> lock(mutex_);
+    auto req_ptr = std::make_shared<AuthRequest>();
+    req_ptr->pass_ = auth_token_;
+    auto lambda = [this](
+        frame::mprpc::ConnectionContext&        _rctx,
+        std::shared_ptr<AuthRequest>&  _rsent_msg_ptr,
+        std::shared_ptr<AuthResponse>& _rrecv_msg_ptr,
+        ErrorConditionT const&                  _rerror
+    ){
+        if(_rrecv_msg_ptr){
+            onAuthResponse(_rctx, *_rrecv_msg_ptr);
         }
-    }
-    if(!auth_token.empty()){
-        auto req_ptr = std::make_shared<AuthRequest>(auth_token);
-        auto lambda = [this](
-            frame::mprpc::ConnectionContext&        _rctx,
-            std::shared_ptr<AuthRequest>&  _rsent_msg_ptr,
-            std::shared_ptr<AuthResponse>& _rrecv_msg_ptr,
-            ErrorConditionT const&                  _rerror
-        ){
-            if(_rrecv_msg_ptr){
-                onAuthResponse(_rctx, *_rrecv_msg_ptr);
-            }
-        };
+    };
         
-        rpcService().sendRequest(_ctx.recipientId(), req_ptr, lambda);
-    }else{
-        if(auth_thread_.joinable()){
-            auth_thread_.join();
-        }
-        auth_thread_ = std::thread(&Engine::authRun, this);
-    }
+    rpcService().sendRequest(_ctx.recipientId(), req_ptr, lambda);
 }
 
 //-----------------------------------------------------------------------------
 
 void Engine::onAuthResponse(frame::mprpc::ConnectionContext &_ctx, AuthResponse &_rresponse){
-    if(_rresponse.error_ == 0){
-        {
-            std::lock_guard<mutex> lock(mutex_);
-            auth_token_ = _rresponse.message_;
-        }
-        rrpc_service_.connectionNotifyEnterActiveState(_ctx.recipientId());
-    }else{
-        bool   start_auth_thread = false;
-        {
-            std::lock_guard<mutex> lock(mutex_);
-            auth_recipient_q_.emplace(_ctx.recipientId());
-            
-            if(auth_recipient_q_.size() != 1){
-                return;
-            }
-        }
-        if(auth_thread_.joinable()){
-            auth_thread_.join();
-        }
-        auth_thread_ = std::thread(&Engine::authRun, this);
+    solid_check(_rresponse.error_ == 0, "Please authenticate using ola_client_auth");
+
+    if(!_rresponse.message_.empty()){
+        std::lock_guard<mutex> lock(mutex_);
+        auth_token_ = _rresponse.message_;
     }
+    rrpc_service_.connectionNotifyEnterActiveState(_ctx.recipientId());
 }
 
 //-----------------------------------------------------------------------------

@@ -1,8 +1,11 @@
 #include "file_monitor/file_monitor.hpp"
 #include <boost/filesystem.hpp>
 #include <iostream>
+#include <iomanip>
 #include <thread>
 #include <fstream>
+#include <ctime>
+#include <chrono>
 
 using namespace std;
 namespace fs = boost::filesystem;
@@ -25,16 +28,19 @@ int test_file_monitor_basic(int argc, char* argv[])
 
     fm_engine.start();
     
-    fm_engine.add("test/t1.txt", [](const fs::path& _dir, const fs::path& _name) {
-        cout << "Modified: " << _dir << "/" << _name << endl;
+    fm_engine.add("test/t1.txt", [](const fs::path& _dir, const fs::path& _name, const chrono::system_clock::time_point& _time_point) {
+        const std::time_t t_c = std::chrono::system_clock::to_time_t(_time_point);
+        cout << "Modified: " << _dir << "/" << _name << " " << std::put_time(std::localtime(&t_c), "%F %T") << endl;
     });
     this_thread::sleep_for(chrono::seconds(1));
-    fm_engine.add("test/t2.txt", [](const fs::path& _dir, const fs::path& _name) {
-        cout << "Modified: " << _dir << "/" << _name << endl;
+    fm_engine.add("test/t2.txt", [](const fs::path& _dir, const fs::path& _name, const chrono::system_clock::time_point& _time_point) {
+        const std::time_t t_c = std::chrono::system_clock::to_time_t(_time_point);
+        cout << "Modified: " << _dir << "/" << _name << " " << std::put_time(std::localtime(&t_c), "%F %T") << endl;
     });
     this_thread::sleep_for(chrono::seconds(1));
-    fm_engine.add("test/t3.txt", [](const fs::path& _dir, const fs::path& _name) {
-        cout << "Modified: " << _dir << "/" << _name << endl;
+    fm_engine.add("test/t3.txt", [](const fs::path& _dir, const fs::path& _name, const chrono::system_clock::time_point& _time_point) {
+        const std::time_t t_c = std::chrono::system_clock::to_time_t(_time_point);
+        cout << "Modified: " << _dir << "/" << _name << " " << std::put_time(std::localtime(&t_c), "%F %T") << endl;
     });
 
     this_thread::sleep_for(chrono::seconds(2));

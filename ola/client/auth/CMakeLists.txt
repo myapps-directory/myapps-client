@@ -70,6 +70,7 @@ if(${Qt5Widgets_FOUND})
 
     target_link_libraries(
         ola_client_auth
+        ola_client_utility
 		ola_utility
         solid_frame_mprpc
         solid_frame_aio_openssl
