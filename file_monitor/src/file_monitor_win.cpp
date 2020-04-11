@@ -1,5 +1,6 @@
 #include "file_monitor/file_monitor.hpp"
 #include "solid/system/cassert.hpp"
+#include "solid/system/exception.hpp"
 #include "solid/system/log.hpp"
 
 #include <thread>
@@ -205,8 +206,7 @@ void Engine::Implementation::threadRun()
             }
             FindNextChangeNotification(ctx.handle_vec_[handle_idx]);
         } else {
-            //solid_assert_log(false, logger);
-            this_thread::sleep_for(chrono::seconds(1));
+            solid_check_log(false, logger, "WaitForMultipleObjects returned error. A Monitored Directory might not exist!");
         }
     }
 
