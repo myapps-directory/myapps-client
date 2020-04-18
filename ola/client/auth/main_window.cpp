@@ -8,6 +8,7 @@
 #include <QKeyEvent>
 #include <QToolBar>
 #include <QToolButton>
+#include <QDesktopWidget>
 
 #include <string>
 #include <stack>
@@ -47,8 +48,7 @@ struct HistoryStub {
 };
 using HistoryStackT    = std::stack<HistoryStub>;
 
-}
-
+}//namespace
 struct MainWindow::Data {
     Ui::MainWindow           main_form_;
     Ui::HomeForm             home_form_;
@@ -67,6 +67,10 @@ struct MainWindow::Data {
     ActionE                  current_action_;
     bool                     authenticated_ = false;
     bool                     validate_email_ = false;
+    int                      dpi_x_          = QApplication::desktop()->logicalDpiX();
+    int                      dpi_y_          = QApplication::desktop()->logicalDpiY();
+    double                   scale_x_        = double(dpi_x_) / 120.0; //173.0 / double(dpi_x_);
+    double                   scale_y_        = double(dpi_y_) / 120.0; //166.0 / double(dpi_y_);
 
     Data(QMainWindow* _pw)
         : tool_bar_(_pw)
@@ -204,7 +208,7 @@ struct MainWindow::Data {
             maxh = main_form_.amendWidget->height();
         }
 
-        return QSize(maxw, maxh + tool_bar_.height() + main_form_.label->height());
+        return QSize(maxw * scale_x_, (maxh * scale_y_) + tool_bar_.height() + main_form_.label->height());
     }
 
     template <class F>
@@ -234,8 +238,14 @@ MainWindow::MainWindow(QWidget* parent)
     pimpl_->amend_form_.setupUi(pimpl_->main_form_.amendWidget);
     pimpl_->reset_form_.setupUi(pimpl_->main_form_.resetWidget);
 
-    setFixedSize(pimpl_->computeMaxSize());
-    resize(pimpl_->computeMaxSize());
+    const auto max_size = pimpl_->computeMaxSize();
+    setFixedSize(max_size);
+    resize(max_size);
+
+    pimpl_->home_form_.label->setFixedSize(QSize(pimpl_->home_form_.label->width() * pimpl_->scale_x_, pimpl_->home_form_.label->height() * pimpl_->scale_y_));
+    pimpl_->create_form_.label->setFixedSize(QSize(pimpl_->create_form_.label->width() * pimpl_->scale_x_, pimpl_->create_form_.label->height() * pimpl_->scale_y_));
+    pimpl_->reset_form_.label->setFixedSize(QSize(pimpl_->reset_form_.label->width() * pimpl_->scale_x_, pimpl_->reset_form_.label->height() * pimpl_->scale_y_));
+
 
     //setWindowFlags(Qt::Drawer);
     //setStyleSheet("background-color:black;");
@@ -304,9 +314,9 @@ MainWindow::MainWindow(QWidget* parent)
     connect(pimpl_->reset_form_.codeEdit, &QLineEdit::textChanged, this, &MainWindow::resetTextEdited);
 
     pimpl_->tool_bar_.setMovable(false);
-    pimpl_->tool_bar_.setFixedHeight(38);
+    pimpl_->tool_bar_.setFixedHeight(38 * pimpl_->scale_y_);
     //pimpl_->tool_bar_.setContentsMargins(QMargins(0, 0, 0, 0));
-    pimpl_->tool_bar_.setIconSize(QSize(32, 32));
+    pimpl_->tool_bar_.setIconSize(QSize(32 * pimpl_->scale_x_, 32 * pimpl_->scale_y_));
     
     pimpl_->tool_bar_.setStyleSheet("QToolBar { border: 0px }");
     //pimpl_->tool_bar_.setStyleSheet("QToolBar { icon-size: 32px 32px}");

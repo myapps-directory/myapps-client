@@ -263,7 +263,12 @@ int main(int argc, char* argv[])
 
     qRegisterMetaType<ola::client::auth::CaptchaPointerT>("CaptchaPointerT");
 
-    QApplication::setAttribute(Qt::AA_EnableHighDpiScaling);
+    //QApplication::setHighDpiScaleFactorRoundingPolicy(Qt::HighDpiScaleFactorRoundingPolicy::PassThrough);
+    //QApplication::setAttribute(Qt::AA_EnableHighDpiScaling);
+    //QApplication::setAttribute(Qt::AA_DisableHighDpiScaling);
+    //SetProcessDPIAware();
+    SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+
 
     QApplication::addLibraryPath(get_qt_plugin_path());
 
