@@ -22,7 +22,6 @@ if(WIN32)
         ${FUSE_LIBRARY}
         ola_utility
         ola_client_utility
-        file_monitor
         solid_frame_mprpc
         solid_frame_aio_openssl
         solid_serialization_v2

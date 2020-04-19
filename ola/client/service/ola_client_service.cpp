@@ -20,8 +20,7 @@
 #include "ola/client/service/engine.hpp"
 #include "ola/client/utility/locale.hpp"
 #include "ola/client/utility/auth_file.hpp"
-
-#include "file_monitor/file_monitor.hpp"
+#include "ola/client/utility/file_monitor.hpp"
 
 #include <iostream>
 #include <sstream>
@@ -231,7 +230,7 @@ class FileSystemService final : public Service {
     string                           auth_user_;
     string                           auth_token_;
     WaitStatusE                      wait_status_ = WaitStatusE::NoWait;
-    file_monitor::Engine             file_monitor_engine_;
+    ola::client::utility::FileMonitor  file_monitor_;
 
 
     fs::path authDataDirectoryPath() const
@@ -716,13 +715,13 @@ NTSTATUS FileSystemService::OnStart(ULONG argc, PWSTR *argv)
     }
     wait_status_ = WaitStatusE::Wait;
 
-    this->file_monitor_engine_.add(
+    this->file_monitor_.add(
         authDataFilePath(),
         [this](const fs::path& _dir, const fs::path& _name, const chrono::system_clock::time_point& _time_point) mutable {
             onAuthFileChange(_time_point);
         }
     );
-    this->file_monitor_engine_.start();
+    this->file_monitor_.start();
 
     waitAuthentication();
     
