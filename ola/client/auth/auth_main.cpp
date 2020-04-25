@@ -445,7 +445,7 @@ void front_configure_service(Engine& _rengine, const Parameters& _params, frame:
     }
 
     _rsvc.start(std::move(cfg));
-    _rsvc.createConnectionPool(_params.front_endpoint.c_str(), 1);
+    _rsvc.createConnectionPool(_rengine.auth_endpoint_.c_str(), 1);
 }
 
 bool Engine::onAuthStart(const string& _login, const string& _pass, const string &_code)
@@ -728,30 +728,12 @@ void Engine::loadAuthData()
     const auto path = authDataFilePath();
 
     ola::client::utility::auth_read(path, auth_endpoint_, auth_login_, auth_token_);
-    if (auth_endpoint_.empty()) {
-        auth_endpoint_ = params_.front_endpoint;
-    }
 
-#if 0
-    ifstream   ifs(path.generic_string());
-    if (ifs) {
-        getline(ifs, auth_endpoint_);
-        getline(ifs, auth_login_);
-        getline(ifs, auth_token_);
-        try {
-            auth_token_ = ola::utility::base64_decode(auth_token_);
-            solid_check(auth_endpoint_ == params_.front_endpoint);
-        } catch (std::exception&) {
-            auth_login_.clear();
-            auth_token_.clear();
-            auth_endpoint_ = params_.front_endpoint;
-        }
-        solid_log(logger, Info, "Loaded auth data from: " << path.generic_string() << " for user: " << auth_login_);
-    } else {
-        solid_log(logger, Error, "Failed loading auth data from: " << path.generic_string());
+    if (auth_endpoint_ != params_.front_endpoint) {
+        auth_login_.clear();
+        auth_token_.clear();
         auth_endpoint_ = params_.front_endpoint;
     }
-#endif
 }
 
 void Engine::storeAuthData()

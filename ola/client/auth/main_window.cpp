@@ -470,6 +470,7 @@ void MainWindow::onAuthSlot(bool _authenticated)
 
     pimpl_->authenticated_ = _authenticated;
     if (_authenticated) {
+        pimpl_->validate_email_ = false;
         pimpl_->main_form_.label->setText("Logged in");
         while (!pimpl_->history_.empty()) {
             pimpl_->history_.pop();
