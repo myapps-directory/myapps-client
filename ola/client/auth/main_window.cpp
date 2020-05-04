@@ -491,6 +491,7 @@ void MainWindow::onAuthSlot(bool _authenticated)
 void MainWindow::onAuthValidate()
 {
     pimpl_->validate_email_ = true;
+    pimpl_->home_form_.validateEmailEdit->setText("");
     pimpl_->showWidget(this, pimpl_->main_form_.homeWidget);
 }
 

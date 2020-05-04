@@ -433,11 +433,11 @@ void front_configure_service(Engine& _rengine, const Parameters& _params, frame:
             cfg,
             [_params](frame::aio::openssl::Context& _rctx) -> ErrorCodeT {
                 _rctx.loadVerifyFile(_params.securePath("ola-ca-cert.pem").c_str());
-                _rctx.loadCertificateFile(_params.securePath("ola-client-front-cert.pem").c_str());
-                _rctx.loadPrivateKeyFile(_params.securePath("ola-client-front-key.pem").c_str());
+                //_rctx.loadCertificateFile(_params.securePath("ola-client-front-cert.pem").c_str());
+                //_rctx.loadPrivateKeyFile(_params.securePath("ola-client-front-key.pem").c_str());
                 return ErrorCodeT();
             },
-            frame::mprpc::openssl::NameCheckSecureStart{"ola-server"});
+            frame::mprpc::openssl::NameCheckSecureStart{"front.myapps.space"});
     }
 
     if (_params.compress) {

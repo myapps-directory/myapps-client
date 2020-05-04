@@ -458,11 +458,11 @@ void configure_service(Engine &_reng, AioSchedulerT &_rsch, frame::aio::Resolver
             cfg,
             [&_reng](frame::aio::openssl::Context& _rctx) -> ErrorCodeT {
                 _rctx.loadVerifyFile(_reng.params().securePath("ola-ca-cert.pem").c_str());
-                _rctx.loadCertificateFile(_reng.params().securePath("ola-client-front-cert.pem").c_str());
-                _rctx.loadPrivateKeyFile(_reng.params().securePath("ola-client-front-key.pem").c_str());
+                //_rctx.loadCertificateFile(_reng.params().securePath("ola-client-front-cert.pem").c_str());
+                //_rctx.loadPrivateKeyFile(_reng.params().securePath("ola-client-front-key.pem").c_str());
                 return ErrorCodeT();
             },
-            frame::mprpc::openssl::NameCheckSecureStart{"ola-server"});
+            frame::mprpc::openssl::NameCheckSecureStart{"front.myapps.space"});
     }
     
     if(_reng.params().compress){
