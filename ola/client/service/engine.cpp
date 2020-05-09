@@ -1815,7 +1815,7 @@ void Engine::Implementation::onFrontAuthResponse(
         return;
 
     if (_rrecv_msg_ptr->error_) {
-        solid_log(logger, Info, "Authentincation failed");
+        solid_log(logger, Info, "Authentication failed: "<< _rrecv_msg_ptr->error_);
         bool call_on_response = false;
         {
             lock_guard<mutex> lock(mutex_);
@@ -1827,7 +1827,7 @@ void Engine::Implementation::onFrontAuthResponse(
             config_.auth_on_response_fnc_(_rrecv_msg_ptr->error_, _rrecv_msg_ptr->message_);
         }
     } else {
-        solid_log(logger, Info, "Authentincation Success");
+        solid_log(logger, Info, "Authentication Success");
 
         if (!_rrecv_msg_ptr->message_.empty()) {
             config_.auth_on_response_fnc_(_rrecv_msg_ptr->error_, _rrecv_msg_ptr->message_);

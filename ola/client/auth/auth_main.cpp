@@ -285,7 +285,7 @@ int main(int argc, char* argv[])
     frame::aio::Resolver resolver(cwp);
 
     client::auth::MainWindow main_window;
-    Engine               engine(main_window, front_rpc_service, params);
+    Engine                   engine(main_window, front_rpc_service, params);
 
     aioscheduler.start(1);
     

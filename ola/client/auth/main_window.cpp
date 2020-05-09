@@ -360,6 +360,9 @@ void MainWindow::start(
 
     pimpl_->home_form_.userEdit->setText(pimpl_->config_.login_);
     this->show();
+    this->setWindowState((windowState() & ~Qt::WindowMinimized) | Qt::WindowActive);
+    this->raise();  // for MacOS
+    this->activateWindow(); // for Windows
 }
 
 void MainWindow::onAuthClick()
