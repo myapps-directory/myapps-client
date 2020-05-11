@@ -338,7 +338,12 @@ int main(int argc, char* argv[])
     SetWindowText(GetActiveWindow(), L"MyApps.space");
 
     front_configure_service(engine, params, front_rpc_service, aioscheduler, resolver);
-    
+    {
+        HWND existingApp = FindWindow(0, L"MyApps.space");
+        if (existingApp) {
+            SetForegroundWindow(existingApp);
+        }
+    }
     //app.setStyle("Fusion");
     const int rv = app.exec();
     front_rpc_service.stop();
