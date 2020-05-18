@@ -8,6 +8,7 @@ endif()
 
 target_link_libraries (ola_client_cli
     ola_utility
+    ola_client_utility
     solid_frame_mprpc
     solid_frame_aio_openssl
     solid_serialization_v2

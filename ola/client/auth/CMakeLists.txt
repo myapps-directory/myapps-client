@@ -33,25 +33,26 @@ if(Qt5_FOUND AND WIN32 AND NOT TARGET Qt5::windeployqt)
 endif()
 
 if(${Qt5Widgets_FOUND})
-    QT5_WRAP_UI(FORMS_HEADERS auth_form.ui)
+    QT5_WRAP_UI(FORMS_HEADERS main_form.ui home_form.ui create_form.ui about_form.ui amend_form.ui reset_form.ui)
+    QT5_ADD_RESOURCES( FORMS_HEADERS main_form.qrc)
     
     set(SRCS
-        auth_form.ui
+        main_form.ui
         auth_main.cpp
-        auth_widget.cpp
-        auth_widget.hpp
-		auth_protocol.hpp
+        main_window.cpp
+        main_window.hpp
+	    auth_protocol.hpp
         ${FORMS_HEADERS}
     )
 
     if(WIN32)
-        set_source_files_properties(auth_main.cpp PROPERTIES COMPILE_FLAGS -bigobj)
         add_executable(
             ola_client_auth
             WIN32
             ${SRCS}
             auth_main.rc
         )
+        set_source_files_properties(auth_main.cpp PROPERTIES COMPILE_FLAGS "-DOLA_FRONT_URL=\\\"${OLA_FRONT_URL}\\\" -bigobj")
     elseif(APPLE)
         add_executable(
             ola_client_auth
@@ -69,6 +70,7 @@ if(${Qt5Widgets_FOUND})
 
     target_link_libraries(
         ola_client_auth
+        ola_client_utility
 		ola_utility
         solid_frame_mprpc
         solid_frame_aio_openssl

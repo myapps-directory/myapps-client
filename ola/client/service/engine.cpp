@@ -752,16 +752,11 @@ struct Engine::Implementation {
     CallPool<void()>          workpool_;
     frame::aio::Resolver      resolver_;
     frame::mprpc::ServiceT    front_rpc_service_;
-    frame::mprpc::ServiceT    gui_rpc_service_;
     mutex                     mutex_;
     mutex                     root_mutex_;
     condition_variable        root_cv_;
+    RecipientVectorT          auth_recipient_vec_;
     bool                      running_ = true;
-    string                    auth_endpoint_;
-    string                    auth_user_;
-    string                    auth_token_;
-    RecipientVectorT          auth_recipient_v_;
-    frame::mprpc::RecipientId gui_recipient_id_;
     EntryPointerT             root_entry_ptr_;
     EntryPointerT             media_entry_ptr_;
     atomic<size_t>            current_mutex_index_ = 0;
@@ -782,13 +777,14 @@ public:
         , workpool_{WorkPoolConfiguration{}, 1}
         , resolver_{workpool_}
         , front_rpc_service_{manager_}
-        , gui_rpc_service_{manager_}
         , shortcut_creator_{config_.temp_folder_}
     {
     }
 
     ~Implementation()
     {
+        front_rpc_service_.stop();
+
         if (update_thread.joinable()) {
             {
                 lock_guard<mutex> lock(root_mutex_);
@@ -807,13 +803,6 @@ public:
         const front::AuthRequest&             _rreq,
         std::shared_ptr<front::AuthResponse>& _rrecv_msg_ptr);
 
-    void onGuiAuthRequest(
-        frame::mprpc::ConnectionContext&    _rctx,
-        std::shared_ptr<auth::AuthRequest>& _rrecv_msg_ptr,
-        ErrorConditionT const&              _rerror);
-    void onGuiRegisterRequest(
-        frame::mprpc::ConnectionContext& _rctx,
-        auth::RegisterRequest&           _rmsg);
     void loadAuthData();
 
     void onFrontListAppsResponse(
@@ -868,10 +857,8 @@ public:
     void releaseApplication(Entry& _rapp_entry);
 
 private:
-    void getAuthToken(const frame::mprpc::RecipientId& _recipient_id, string& _rtoken, const string* const _ptoken = nullptr);
-
-    void tryAuthenticate(frame::mprpc::ConnectionContext& _ctx, const string* const _ptoken = nullptr);
-
+    void tryAuthenticate(frame::mprpc::ConnectionContext& _ctx);
+#if 0
     fs::path authDataDirectoryPath() const
     {
         fs::path p = config_.path_prefix_;
@@ -879,12 +866,12 @@ private:
         return p;
     }
 
+
     fs::path authDataFilePath() const
     {
         return authDataDirectoryPath() / "auth.data";
     }
-
-    void storeAuthData(const string& _user, const string& _token);
+#endif
 
     void insertApplicationEntry(std::shared_ptr<front::FetchBuildConfigurationResponse>& _rrecv_msg_ptr);
     void insertMountEntry(EntryPointerT& _rparent_ptr, const fs::path& _local, const string& _remote);
@@ -932,32 +919,6 @@ struct FrontProtocolSetup {
 };
 } //namespace
 
-struct GuiProtocolSetup {
-    Engine::Implementation& impl_;
-    GuiProtocolSetup(Engine::Implementation& _impl)
-        : impl_(_impl)
-    {
-    }
-
-    void operator()(front::ProtocolT& _rprotocol, TypeToType<auth::RegisterRequest> _t2t, const front::ProtocolT::TypeIdT& _rtid)
-    {
-        auto lambda = [& impl_ = this->impl_](
-                          frame::mprpc::ConnectionContext&        _rctx,
-                          std::shared_ptr<auth::RegisterRequest>& _rsent_msg_ptr,
-                          std::shared_ptr<auth::RegisterRequest>& _rrecv_msg_ptr,
-                          ErrorConditionT const&                  _rerror) {
-            impl_.onGuiRegisterRequest(_rctx, *_rrecv_msg_ptr);
-        };
-        _rprotocol.registerMessage<auth::RegisterRequest>(lambda, _rtid);
-    }
-
-    template <class M>
-    void operator()(front::ProtocolT& _rprotocol, TypeToType<M> _t2t, const front::ProtocolT::TypeIdT& _rtid)
-    {
-        _rprotocol.registerMessage<M>(complete_message<M>, _rtid);
-    }
-};
-
 void Engine::start(const Configuration& _rcfg)
 {
     solid_log(logger, Verbose, "");
@@ -978,8 +939,6 @@ void Engine::start(const Configuration& _rcfg)
     }
 
     pimpl_->scheduler_.start(1);
-
-    pimpl_->loadAuthData();
 
     {
         auto                        proto = ProtocolT::create();
@@ -1007,11 +966,11 @@ void Engine::start(const Configuration& _rcfg)
                 cfg,
                 [_rcfg](frame::aio::openssl::Context& _rctx) -> ErrorCodeT {
                     _rctx.loadVerifyFile(_rcfg.securePath("ola-ca-cert.pem").c_str());
-                    _rctx.loadCertificateFile(_rcfg.securePath("ola-client-front-cert.pem").c_str());
-                    _rctx.loadPrivateKeyFile(_rcfg.securePath("ola-client-front-key.pem").c_str());
+                    //_rctx.loadCertificateFile(_rcfg.securePath("ola-client-front-cert.pem").c_str());
+                    //_rctx.loadPrivateKeyFile(_rcfg.securePath("ola-client-front-key.pem").c_str());
                     return ErrorCodeT();
                 },
-                frame::mprpc::openssl::NameCheckSecureStart{"ola-server"});
+                frame::mprpc::openssl::NameCheckSecureStart{"front.myapps.space"});
         }
 
         if (_rcfg.compress_) {
@@ -1021,18 +980,7 @@ void Engine::start(const Configuration& _rcfg)
         pimpl_->front_rpc_service_.start(std::move(cfg));
     }
 
-    {
-        auto                        proto = auth::ProtocolT::create();
-        frame::mprpc::Configuration cfg(pimpl_->scheduler_, proto);
-
-        auth::protocol_setup(GuiProtocolSetup(*pimpl_), *proto);
-
-        cfg.server.listener_address_str = "127.0.0.1:0";
-
-        pimpl_->gui_rpc_service_.start(std::move(cfg));
-    }
-
-    auto err = pimpl_->front_rpc_service_.createConnectionPool(pimpl_->auth_endpoint_.c_str(), 1);
+    auto err = pimpl_->front_rpc_service_.createConnectionPool(pimpl_->config_.auth_endpoint_.c_str(), 1);
     solid_check(!err, "creating connection pool: " << err.message());
 
     if (!err) {
@@ -1049,7 +997,7 @@ void Engine::start(const Configuration& _rcfg)
         auto req_ptr     = make_shared<ListAppsRequest>();
         req_ptr->choice_ = 'a'; //TODO change to 'a' -> aquired apps
 
-        err = pimpl_->front_rpc_service_.sendRequest(pimpl_->auth_endpoint_.c_str(), req_ptr, lambda);
+        err = pimpl_->front_rpc_service_.sendRequest(pimpl_->config_.auth_endpoint_.c_str(), req_ptr, lambda);
         solid_check(!err);
         pimpl_->running_ = true;
     }
@@ -1063,6 +1011,32 @@ void Engine::stop()
 void*& Engine::buffer(Descriptor& _rdesc)
 {
     return _rdesc.pdirectory_buffer_;
+}
+
+void Engine::relogin()
+{
+    Implementation::RecipientVectorT auth_recipient_vec;
+    {
+        lock_guard<mutex> lock(pimpl_->mutex_);
+        auth_recipient_vec = std::move(pimpl_->auth_recipient_vec_);
+    }
+
+    auto lambda = [this](
+                      frame::mprpc::ConnectionContext&      _rctx,
+                      std::shared_ptr<front::AuthRequest>&  _rsent_msg_ptr,
+                      std::shared_ptr<front::AuthResponse>& _rrecv_msg_ptr,
+                      ErrorConditionT const&                _rerror) {
+        if (_rrecv_msg_ptr) {
+            pimpl_->onFrontAuthResponse(_rctx, *_rsent_msg_ptr, _rrecv_msg_ptr);
+        }
+    };
+
+    auto req_ptr   = std::make_shared<front::AuthRequest>();
+    req_ptr->pass_ = pimpl_->config_.auth_get_token_fnc_();
+
+    for (const auto& recipient_id : auth_recipient_vec) {
+        pimpl_->front_rpc_service_.sendRequest(recipient_id, req_ptr, lambda);
+    }
 }
 
 bool Engine::info(const fs::path& _path, NodeFlagsT& _rnode_flags, uint64_t& _rsize)
@@ -1293,7 +1267,7 @@ bool Engine::Implementation::entry(const fs::path& _path, EntryPointerT& _rentry
         req_ptr->path_       = remote_path;
         req_ptr->storage_id_ = _rentry_ptr->pmaster_->remote_;
 
-        front_rpc_service_.sendRequest(auth_endpoint_.c_str(), req_ptr, lambda);
+        front_rpc_service_.sendRequest(config_.auth_endpoint_.c_str(), req_ptr, lambda);
     }
 
     if (_rentry_ptr->status_ == EntryStatusE::FetchPending) {
@@ -1780,40 +1754,18 @@ void Engine::Implementation::asyncFetch(EntryPointerT& _rentry_ptr, const size_t
     rfetch_stub.request_ptr_->offset_     = rfetch_stub.offset_;
     rfetch_stub.request_ptr_->size_       = rfetch_stub.size_;
 
-    front_rpc_service_.sendRequest(auth_endpoint_.c_str(), rfetch_stub.request_ptr_, lambda);
+    front_rpc_service_.sendRequest(config_.auth_endpoint_.c_str(), rfetch_stub.request_ptr_, lambda);
 }
 
 //-----------------------------------------------------------------------------
 
-void Engine::Implementation::getAuthToken(const frame::mprpc::RecipientId& _recipient_id, string& _rtoken, const string* const _ptoken)
+void Engine::Implementation::tryAuthenticate(frame::mprpc::ConnectionContext& _rctx)
 {
-    bool start_gui = false;
-    {
-        lock_guard<mutex> lock(mutex_);
-        if (_ptoken != nullptr && auth_token_ == *_ptoken) {
-            auth_token_.clear();
-        }
-        if (!auth_token_.empty()) {
-            _rtoken = auth_token_;
-            return;
-        } else {
-            auth_recipient_v_.emplace_back(_recipient_id);
-            start_gui = auth_recipient_v_.size() == 1 && gui_recipient_id_.empty();
-        }
-    }
-    if (start_gui) {
-        solid_log(logger, Info, "No stored credentials - start gui");
-        config_.gui_start_fnc_(auth_endpoint_, gui_rpc_service_.configuration().server.listenerPort());
-    }
-}
-
-void Engine::Implementation::tryAuthenticate(frame::mprpc::ConnectionContext& _ctx, const string* const _ptoken)
-{
-    string auth_token;
-    getAuthToken(_ctx.recipientId(), auth_token, _ptoken);
+    string auth_token = config_.auth_get_token_fnc_();
 
     if (!auth_token.empty()) {
-        auto req_ptr = std::make_shared<AuthRequest>(auth_token);
+        auto req_ptr = std::make_shared<AuthRequest>();
+        req_ptr->pass_ = auth_token;
         auto lambda  = [this](
                           frame::mprpc::ConnectionContext&      _rctx,
                           std::shared_ptr<front::AuthRequest>&  _rsent_msg_ptr,
@@ -1824,7 +1776,10 @@ void Engine::Implementation::tryAuthenticate(frame::mprpc::ConnectionContext& _c
             }
         };
 
-        front_rpc_service_.sendRequest(_ctx.recipientId(), req_ptr, lambda);
+        front_rpc_service_.sendRequest(_rctx.recipientId(), req_ptr, lambda);
+    } else {
+        lock_guard<mutex> lock(mutex_);
+        auth_recipient_vec_.emplace_back(_rctx.recipientId());
     }
 }
 
@@ -1852,7 +1807,7 @@ void Engine::Implementation::onFrontConnectionInit(frame::mprpc::ConnectionConte
 }
 
 void Engine::Implementation::onFrontAuthResponse(
-    frame::mprpc::ConnectionContext&      _ctx,
+    frame::mprpc::ConnectionContext&      _rctx,
     const front::AuthRequest&             _rreq,
     std::shared_ptr<front::AuthResponse>& _rrecv_msg_ptr)
 {
@@ -1860,137 +1815,24 @@ void Engine::Implementation::onFrontAuthResponse(
         return;
 
     if (_rrecv_msg_ptr->error_) {
-        solid_log(logger, Info, "Failed authentincating user [" << auth_user_ << "] using stored credentials");
-        tryAuthenticate(_ctx, &_rreq.auth_);
+        solid_log(logger, Info, "Authentication failed: "<< _rrecv_msg_ptr->error_);
+        bool call_on_response = false;
+        {
+            lock_guard<mutex> lock(mutex_);
+            auth_recipient_vec_.emplace_back(_rctx.recipientId());
+            call_on_response = (auth_recipient_vec_.size() == 1);
+        }
+
+        if (call_on_response) {
+            config_.auth_on_response_fnc_(_rrecv_msg_ptr->error_, _rrecv_msg_ptr->message_);
+        }
     } else {
+        solid_log(logger, Info, "Authentication Success");
+
         if (!_rrecv_msg_ptr->message_.empty()) {
-            solid_log(logger, Info, "Success authentincating user [" << auth_user_ << "] using stored credentials");
-            lock_guard<mutex> lock(mutex_);
-            auth_token_ = std::move(_rrecv_msg_ptr->message_);
+            config_.auth_on_response_fnc_(_rrecv_msg_ptr->error_, _rrecv_msg_ptr->message_);
         }
-        front_rpc_service_.connectionNotifyEnterActiveState(_ctx.recipientId());
-    }
-}
-
-void Engine::Implementation::onGuiAuthRequest(
-    frame::mprpc::ConnectionContext&    _rctx,
-    std::shared_ptr<auth::AuthRequest>& _rrecv_msg_ptr,
-    ErrorConditionT const&              _rerror)
-{
-    if (_rrecv_msg_ptr) {
-        auto res_ptr = std::make_shared<auth::AuthResponse>(*_rrecv_msg_ptr);
-        _rctx.service().sendResponse(_rctx.recipientId(), res_ptr);
-    }
-    if (_rrecv_msg_ptr && !_rrecv_msg_ptr->token_.empty()) {
-        solid_log(logger, Info, "Success password authenticating user: " << _rrecv_msg_ptr->user_);
-        auto req_ptr   = std::make_shared<front::AuthRequest>();
-        req_ptr->auth_ = _rrecv_msg_ptr->token_;
-        RecipientVectorT recipient_v;
-        {
-            lock_guard<mutex> lock(mutex_);
-            gui_recipient_id_.clear();
-            recipient_v = std::move(auth_recipient_v_);
-            auth_user_  = _rrecv_msg_ptr->user_;
-            auth_token_ = _rrecv_msg_ptr->token_;
-        }
-
-        auto lambda = [this](
-                          frame::mprpc::ConnectionContext&      _rctx,
-                          std::shared_ptr<front::AuthRequest>&  _rsent_msg_ptr,
-                          std::shared_ptr<front::AuthResponse>& _rrecv_msg_ptr,
-                          ErrorConditionT const&                _rerror) {
-            if (_rrecv_msg_ptr) {
-                onFrontAuthResponse(_rctx, *_rsent_msg_ptr, _rrecv_msg_ptr);
-            }
-        };
-
-        for (const auto& recipient_id : recipient_v) {
-            front_rpc_service_.sendRequest(recipient_id, req_ptr, lambda);
-        }
-        storeAuthData(_rrecv_msg_ptr->user_, _rrecv_msg_ptr->token_);
-    } else {
-        solid_log(logger, Error, "Failed to authenticate - closing");
-        //gui failed
-        RecipientVectorT recipient_v;
-        {
-            lock_guard<mutex> lock(mutex_);
-            gui_recipient_id_.clear();
-            recipient_v = std::move(auth_recipient_v_);
-        }
-        for (const auto& recipient_id : recipient_v) {
-            front_rpc_service_.closeConnection(recipient_id);
-        }
-        config_.gui_fail_fnc_();
-    }
-}
-
-void Engine::Implementation::onGuiRegisterRequest(
-    frame::mprpc::ConnectionContext& _rctx,
-    auth::RegisterRequest&           _rmsg)
-{
-    auto rsp_ptr = make_shared<auth::RegisterResponse>(_rmsg);
-    {
-        lock_guard<mutex> lock(mutex_);
-        if (gui_recipient_id_.empty()) {
-            gui_recipient_id_ = _rctx.recipientId();
-            rsp_ptr->error_   = 0;
-            rsp_ptr->user_    = auth_user_;
-        } else {
-            rsp_ptr->error_ = 1; //TODO: proper id
-        }
-    }
-    if (rsp_ptr->error_ == 0) {
-
-        auto lambda = [this](
-                          frame::mprpc::ConnectionContext&         _rctx,
-                          std::shared_ptr<auth::RegisterResponse>& _rsent_msg_ptr,
-                          std::shared_ptr<auth::AuthRequest>&      _rrecv_msg_ptr,
-                          ErrorConditionT const&                   _rerror) {
-            onGuiAuthRequest(_rctx, _rrecv_msg_ptr, _rerror);
-        };
-        gui_rpc_service_.sendMessage(_rctx.recipientId(), rsp_ptr, lambda, {frame::mprpc::MessageFlagsE::AwaitResponse, frame::mprpc::MessageFlagsE::Response});
-    } else {
-        gui_rpc_service_.sendResponse(_rctx.recipientId(), rsp_ptr);
-    }
-}
-
-void Engine::Implementation::loadAuthData()
-{
-    const auto path = authDataFilePath();
-    ifstream   ifs(path.generic_string());
-    if (ifs) {
-        getline(ifs, auth_endpoint_);
-        getline(ifs, auth_user_);
-        getline(ifs, auth_token_);
-        try {
-            auth_token_ = ola::utility::base64_decode(auth_token_);
-            solid_check(!auth_token_.empty() && auth_endpoint_ == config_.front_endpoint_);
-        } catch (std::exception& e) {
-            auth_user_.clear();
-            auth_token_.clear();
-            auth_endpoint_ = config_.front_endpoint_;
-        }
-        solid_log(logger, Info, "Loaded auth data from: " << path.generic_string() << " for user: " << auth_user_);
-    } else {
-        solid_log(logger, Error, "Failed loading auth data from: " << path.generic_string());
-        auth_endpoint_ = config_.front_endpoint_;
-    }
-}
-
-void Engine::Implementation::storeAuthData(const string& _user, const string& _token)
-{
-    fs::create_directories(authDataDirectoryPath());
-    const auto path = authDataFilePath();
-
-    ofstream ofs(path.generic_string(), std::ios::trunc);
-    if (ofs) {
-        ofs << auth_endpoint_ << endl;
-        ofs << _user << endl;
-        ofs << ola::utility::base64_encode(_token) << endl;
-        ofs.flush();
-        solid_log(logger, Info, "Stored auth data to: " << path.generic_string());
-    } else {
-        solid_log(logger, Error, "Failed storing auth data to: " << path.generic_string());
+        front_rpc_service_.connectionNotifyEnterActiveState(_rctx.recipientId());
     }
 }
 
@@ -2030,7 +1872,7 @@ void Engine::Implementation::remoteFetchApplication(
         }
     };
 
-    front_rpc_service_.sendRequest(auth_endpoint_.c_str(), _rsent_msg_ptr, lambda);
+    front_rpc_service_.sendRequest(config_.auth_endpoint_.c_str(), _rsent_msg_ptr, lambda);
 }
 
 void Engine::Implementation::cleanFileCache()
@@ -2093,7 +1935,7 @@ void Engine::Implementation::update()
                 }
             };
 
-            const auto err = front_rpc_service_.sendRequest(auth_endpoint_.c_str(), req_ptr, lambda);
+            const auto err = front_rpc_service_.sendRequest(config_.auth_endpoint_.c_str(), req_ptr, lambda);
             if (!err) {
                 return;
             }
@@ -2117,7 +1959,7 @@ void Engine::Implementation::update()
         auto req_ptr     = make_shared<ListAppsRequest>();
         req_ptr->choice_ = 'a';
 
-        const auto err = front_rpc_service_.sendRequest(auth_endpoint_.c_str(), req_ptr, list_lambda);
+        const auto err = front_rpc_service_.sendRequest(config_.auth_endpoint_.c_str(), req_ptr, list_lambda);
         if (!err) {
             unique_lock<mutex> lock(root_mutex_);
 

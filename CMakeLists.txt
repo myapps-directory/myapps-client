@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.10 FATAL_ERROR)
 
-project(OlaClient VERSION 1.0)
+project(OlaClient VERSION 1.1)
 
 set(EXTERNAL_DIR "" CACHE PATH "External dependencies folder")
 
@@ -170,7 +170,7 @@ endif()
 install (FILES ${CMAKE_CURRENT_SOURCE_DIR}/cpack/readme.txt DESTINATION "/")
 
 message(STATUS "Generating ${CPACK_GENERATOR}  package")
-    
+
 string(TIMESTAMP OLA_YMDHM "%y%m%d%H%M")
 string(TIMESTAMP OLA_YEAR "%Y")
 
@@ -181,7 +181,7 @@ set(CPACK_PACKAGE_VERSION_MINOR         "${PROJECT_VERSION_MINOR}")
 set(CPACK_PACKAGING_INSTALL_PREFIX      ${CMAKE_CURRENT_BINARY_DIR})
 set(CPACK_RELEASE_VER                   ${OLA_YMDHM})
 set(CPACK_PACKAGE_NAME                  "myapps.space")
-set(CPACK_PACKAGE_EXECUTABLES           "ola_client_cli" "OLA CLI" "ola_client_auth" "OLA Client Authenticator GUI" "ola_client_service" "OLA Client Service")
+set(CPACK_PACKAGE_EXECUTABLES           "ola_client_cli" "MyApps.space CLI" "ola_client_auth" "MyApps.space Login" "ola_client_service" "MyApps.space Service")
 set(CPACK_PACKAGE_FILE_NAME             "${CPACK_PACKAGE_NAME}-${CMAKE_BUILD_TYPE}-${CPACK_PACKAGE_VERSION}-${CMAKE_SYSTEM_PROCESSOR}")
 set(CPACK_PACKAGE_CONTACT               "office@myapps.space")
 set(CPACK_PACKAGING_INSTALL_PREFIX      ${PACKAGING_INSTALL_PREFIX})
@@ -206,15 +206,19 @@ if(CMAKE_BUILD_TYPE MATCHES "debug")
     if (MSVC)
         #string(REGEX REPLACE "Visual Studio ([0-9]+).*" "\\1" MSVC_VERSION "${CMAKE_GENERATOR}")
         set(OLA_MSVC_VERSION 14)
-        message("VCRUNTIME library found: vcruntime${OLA_MSVC_VERSION}0_1d.dll")
         # Starting with Visual Studio 2015 (MSVC_VERSION==14) the msvcr dll has been renamed to vcruntime.
-        find_file(OLA_VCRUNTIME_DLL "vcruntime${OLA_MSVC_VERSION}0_1d.dll" PATHS "$ENV{SYSTEMROOT}\\System32")
+        find_file(OLA_VCRUNTIME_DLL "vcruntime${OLA_MSVC_VERSION}0.dll" PATHS "$ENV{SYSTEMROOT}\\System32")
         install(FILES  ${OLA_VCRUNTIME_DLL} DESTINATION "bin")
+        find_file(OLA_VCRUNTIMED_DLL "vcruntime${OLA_MSVC_VERSION}0d.dll" PATHS "$ENV{SYSTEMROOT}\\System32")
+        install(FILES  ${OLA_VCRUNTIMED_DLL} DESTINATION "bin")
+        find_file(OLA_VCP_DLL "msvcp${OLA_MSVC_VERSION}0d.dll" PATHS "$ENV{SYSTEMROOT}\\System32")
+        install(FILES  ${OLA_VCP_DLL} DESTINATION "bin")
     endif()
 endif()
 
 set(CMAKE_INSTALL_SYSTEM_RUNTIME_DESTINATION "bin")
 set(CMAKE_INSTALL_UCRT_LIBRARIES TRUE)
+set(CMAKE_INSTALL_DEBUG_LIBRARIES TRUE)
 
 include(InstallRequiredSystemLibraries)
 

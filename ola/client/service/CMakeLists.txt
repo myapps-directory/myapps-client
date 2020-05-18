@@ -21,6 +21,7 @@ if(WIN32)
     target_link_libraries(ola_client_service
         ${FUSE_LIBRARY}
         ola_utility
+        ola_client_utility
         solid_frame_mprpc
         solid_frame_aio_openssl
         solid_serialization_v2

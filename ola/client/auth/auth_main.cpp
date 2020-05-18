@@ -13,12 +13,15 @@
 #endif
 #include <windows.h>
 
-#include "auth_widget.hpp"
+#include "main_window.hpp"
 
 #include "solid/frame/manager.hpp"
 #include "solid/frame/scheduler.hpp"
 #include "solid/frame/service.hpp"
+
 #include "solid/system/log.hpp"
+#include "solid/system/exception.hpp"
+#include "solid/utility/string.hpp"
 
 #include "solid/frame/aio/aioresolver.hpp"
 
@@ -31,6 +34,7 @@
 #include "solid/frame/mprpc/mprpcsocketstub_openssl.hpp"
 
 #include "ola/common/utility/encode.hpp"
+#include "ola/client/utility/auth_file.hpp"
 
 #include "auth_protocol.hpp"
 #include "ola/common/ola_front_protocol.hpp"
@@ -40,6 +44,7 @@
 
 #include <QApplication>
 #include <QtGui>
+#include <QStyleFactory>
 
 #include <signal.h>
 
@@ -56,6 +61,8 @@ using namespace ola;
 using namespace solid;
 using namespace std;
 
+namespace fs = boost::filesystem;
+
 using AioSchedulerT = frame::Scheduler<frame::aio::Reactor>;
 using SchedulerT    = frame::Scheduler<frame::Reactor>;
 
@@ -67,7 +74,7 @@ namespace {
 const solid::LoggerT logger("ola::client::auth");
 
 struct Parameters {
-    vector<string> dbg_modules = {"ola::.*:VIEW"};
+    vector<string> dbg_modules;
     string         dbg_addr;
     string         dbg_port;
     bool           dbg_console  = false;
@@ -75,8 +82,8 @@ struct Parameters {
     bool           secure;
     bool           compress;
     string         front_endpoint;
-    string         local_port;
     string         secure_prefix;
+    string         path_prefix;
 
     Parameters() {}
 
@@ -89,45 +96,71 @@ struct Parameters {
 };
 
 struct Engine {
-    client::auth::Widget&                 auth_widget_;
+    client::auth::MainWindow&             main_window_;
     frame::mprpc::ServiceT&               front_rpc_service_;
-    frame::mprpc::ServiceT&               local_rpc_service_;
     Parameters&                           params_;
-    shared_ptr<client::auth::AuthRequest> local_auth_req_ptr_;
-    frame::mprpc::RecipientId             local_recipient_id_;
-    std::shared_ptr<front::AuthRequest>   front_auth_req_ptr_;
     frame::mprpc::RecipientId             front_recipient_id_;
     mutex                                 mutex_;
+    string                                captcha_token_;
+    string                                auth_token_;
+    string                                auth_login_;
+    string                                auth_endpoint_;
+    string                                auth_user_;
+    string                                auth_email_;
 
     Engine(
-        client::auth::Widget&   _auth_widget,
+        client::auth::MainWindow&   _main_window,
         frame::mprpc::ServiceT& _front_rpc_service,
-        frame::mprpc::ServiceT& _local_rpc_service,
         Parameters&             _params)
-        : auth_widget_(_auth_widget)
+        : main_window_(_main_window)
         , front_rpc_service_(_front_rpc_service)
-        , local_rpc_service_(_local_rpc_service)
         , params_(_params)
     {
+    }
+
+    fs::path authDataDirectoryPath() const
+    {
+        fs::path p = params_.path_prefix;
+        p /= "config";
+        return p;
+    }
+
+    fs::path authDataFilePath() const
+    {
+        return authDataDirectoryPath() / "auth.data";
     }
 
     void onConnectionInit(frame::mprpc::ConnectionContext& _ctx);
     void onConnectionStart(frame::mprpc::ConnectionContext& _ctx);
     void onConnectionStop(frame::mprpc::ConnectionContext& _ctx);
 
-    void onAuthStart(const string& _user, const string& _pass);
+    bool onAuthStart(const string& _user, const string& _pass, const string& _code);
+    bool onCreateStart(const string& _user, const string& _email, const string& _pass, const string& _code);
+    bool onAmendStart(string _user, string _email, const string& _pass, const string& _new_pass);
+    bool onValidateStart(const string& _code);
+    bool onAuthFetchStart();
 
+
+    void onCaptchaResponse(
+        frame::mprpc::ConnectionContext& _rctx,
+        std::shared_ptr<front::CaptchaRequest>&                _rsent_msg_ptr,
+        std::shared_ptr<front::CaptchaResponse>& _rrecv_msg_ptr,
+        ErrorConditionT const&                              _rerror);
     void onAuthResponse(
         frame::mprpc::ConnectionContext&      _rctx,
-        std::shared_ptr<front::AuthRequest>&  _rsent_msg_ptr,
         std::shared_ptr<front::AuthResponse>& _rrecv_msg_ptr,
         ErrorConditionT const&                _rerror);
 
-    bool localRegister(client::auth::Widget& _rwidget);
+    void loadAuthData();
+    void storeAuthData();
+
+    bool logout();
+
+    bool passwordForgot(const string& _login, const string& _code);
+    bool passwordReset(const string& _token, const string& _pass, const string& _code);
 };
 
 void front_configure_service(Engine& _rengine, const Parameters& _params, frame::mprpc::ServiceT& _rsvc, AioSchedulerT& _rsch, frame::aio::Resolver& _rres);
-void local_configure_service(const Parameters& _params, frame::mprpc::ServiceT& _rsvc, AioSchedulerT& _rsch, frame::aio::Resolver& _rres);
 
 //TODO: find a better name
 string envLogPathPrefix()
@@ -142,6 +175,20 @@ string envLogPathPrefix()
 
     string r = v;
     r += "\\OLA\\client";
+    return r;
+}
+string env_config_path_prefix()
+{
+    const char* v = getenv("APPDATA");
+    if (v == nullptr) {
+        v = getenv("LOCALAPPDATA");
+        if (v == nullptr) {
+            v = "c:";
+        }
+    }
+
+    string r = v;
+    r += "\\OLA";
     return r;
 }
 
@@ -177,7 +224,7 @@ int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR pCmdLin
     {
         const auto m_singleInstanceMutex = CreateMutex(NULL, TRUE, L"OLA_AUTH_SHARED_MUTEX");
         if (m_singleInstanceMutex == NULL || GetLastError() == ERROR_ALREADY_EXISTS) {
-            HWND existingApp = FindWindow(0, L"MyApps.space Auth");
+            HWND existingApp = FindWindow(0, L"MyApps.space");
             if (existingApp) {
                 SetForegroundWindow(existingApp);
             }
@@ -214,7 +261,16 @@ int main(int argc, char* argv[])
             1024 * 1024 * 64);
     }
 
-    QCoreApplication::addLibraryPath(get_qt_plugin_path());
+    qRegisterMetaType<ola::client::auth::CaptchaPointerT>("CaptchaPointerT");
+
+    //QApplication::setHighDpiScaleFactorRoundingPolicy(Qt::HighDpiScaleFactorRoundingPolicy::PassThrough);
+    //QApplication::setAttribute(Qt::AA_EnableHighDpiScaling);
+    //QApplication::setAttribute(Qt::AA_DisableHighDpiScaling);
+    //SetProcessDPIAware();
+    SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+
+
+    QApplication::addLibraryPath(get_qt_plugin_path());
 
     QApplication app(argc, argv);
 
@@ -224,40 +280,73 @@ int main(int argc, char* argv[])
     frame::ServiceT service{manager};
 
     frame::mprpc::ServiceT front_rpc_service{manager};
-    frame::mprpc::ServiceT local_rpc_service{manager};
 
     CallPool<void()>     cwp{WorkPoolConfiguration(), 1};
     frame::aio::Resolver resolver(cwp);
 
-    client::auth::Widget auth_widget;
-    Engine               engine(auth_widget, front_rpc_service, local_rpc_service, params);
+    client::auth::MainWindow main_window;
+    Engine                   engine(main_window, front_rpc_service, params);
 
     aioscheduler.start(1);
-
-    local_configure_service(params, local_rpc_service, aioscheduler, resolver);
-
-    solid_log(logger, Info, "try register on local service");
-
-    if (!engine.localRegister(auth_widget)) {
-        cout << "register failed" << endl;
-        solid_log(logger, Info, "register failed");
-        return 0;
-    }
     
-    auth_widget.setWindowIcon(QIcon(":/auth.ico"));
- 
-    auth_widget.start(
-        [&engine](const std::string& _user, const std::string& _pass) {
-            engine.onAuthStart(_user, ola::utility::sha256hex(_pass));
-        });
+    main_window.setWindowIcon(QIcon(":/auth.ico"));
 
-    SetWindowText(GetActiveWindow(), L"MyApps.space Auth");
+    engine.loadAuthData();
+ 
+    {
+        client::auth::Configuration config;
+        config.authenticate_fnc_ = [&engine](const string& _user, const string& _pass, const string& _code) {
+            return engine.onAuthStart(_user, ola::utility::sha256hex(_pass), _code);
+        };
+        config.create_fnc_ = [&engine](const string& _user, const string &_email, const string& _pass, const string& _code) {
+            return engine.onCreateStart(_user, _email, ola::utility::sha256hex(_pass), _code);
+        };
+
+        config.amend_fnc_ = [&engine](const string& _user, const string& _email, const string& _pass, const string& _new_pass) {
+            return engine.onAmendStart(_user, _email, ola::utility::sha256hex(_pass), _new_pass.empty() ? _new_pass : ola::utility::sha256hex(_new_pass));
+        };
+
+        config.validate_fnc_ = [&engine](const string& _code) {
+            return engine.onValidateStart(_code);
+        };
+
+        config.resend_validate_fnc_ = [&engine]() {
+            return engine.onValidateStart("");
+        };
+
+        config.auth_fetch_fnc_ = [&engine]() {
+            return engine.onAuthFetchStart();
+        };
+
+        config.logout_fnc_ = [&engine]() {
+            return engine.logout();
+        };
+
+        config.forgot_fnc_ = [&engine](const string &_login, const string &_code) {
+            return engine.passwordForgot(_login, _code);
+        };
+
+        config.reset_fnc_ = [&engine](const string& _token, const string& _pass, const string& _code) {
+            return engine.passwordReset(_token, ola::utility::sha256hex(_pass), _code);
+        };
+
+        config.login_ = QString::fromStdString(engine.auth_login_);
+
+        main_window.start(std::move(config));
+    }
+
+    SetWindowText(GetActiveWindow(), L"MyApps.space");
 
     front_configure_service(engine, params, front_rpc_service, aioscheduler, resolver);
-
+    {
+        HWND existingApp = FindWindow(0, L"MyApps.space");
+        if (existingApp) {
+            SetForegroundWindow(existingApp);
+        }
+    }
+    //app.setStyle("Fusion");
     const int rv = app.exec();
     front_rpc_service.stop();
-    local_rpc_service.stop();
     return rv;
 }
 
@@ -271,16 +360,16 @@ bool Parameters::parse(ULONG argc, PWSTR* argv)
         // clang-format off
 		desc.add_options()
 			("help,h", "List program options")
-			("debug-modules,M", value<vector<string>>(&dbg_modules), "Debug logging modules (e.g. \".*:EW\", \"\\*:VIEW\")")
+			("debug-modules,M", value<vector<string>>(&dbg_modules)->default_value(std::vector<std::string>{"ola::.*:VI=",".*:EWX"}, ""), "Debug logging modules (e.g. \".*:EW\", \"\\*:VIEWX\")")
 			("debug-address,A", value<string>(&dbg_addr), "Debug server address (e.g. on linux use: nc -l 9999)")
 			("debug-port,P", value<string>(&dbg_port)->default_value("9999"), "Debug server port (e.g. on linux use: nc -l 9999)")
 			("debug-console,C", value<bool>(&dbg_console)->implicit_value(true)->default_value(false), "Debug console")
 			("debug-buffered,S", value<bool>(&dbg_buffered)->implicit_value(true)->default_value(false), "Debug unbuffered")
-            ("front,f", value<std::string>(&front_endpoint)->required(), "Front Server endpoint: address:port")
-			("local,l", value<std::string>(&local_port)->default_value(""), "Local Server Port")
+            ("front,f", value<std::string>(&front_endpoint)->default_value(string(OLA_FRONT_URL)), "OLA Front Endpoint")
 			("unsecure", value<bool>(&secure)->implicit_value(false)->default_value(true), "Do not use SSL to secure communication")
 			("compress", value<bool>(&compress)->implicit_value(true)->default_value(false), "Use Snappy to compress communication")
             ("secure-prefix", value<std::string>(&secure_prefix)->default_value("certs"), "Secure Path prefix")
+            ("path-prefix", value<std::string>(&path_prefix)->default_value(env_config_path_prefix()), "Path prefix")
         ;
         // clang-format on
         variables_map vm;
@@ -349,11 +438,11 @@ void front_configure_service(Engine& _rengine, const Parameters& _params, frame:
             cfg,
             [_params](frame::aio::openssl::Context& _rctx) -> ErrorCodeT {
                 _rctx.loadVerifyFile(_params.securePath("ola-ca-cert.pem").c_str());
-                _rctx.loadCertificateFile(_params.securePath("ola-client-front-cert.pem").c_str());
-                _rctx.loadPrivateKeyFile(_params.securePath("ola-client-front-key.pem").c_str());
+                //_rctx.loadCertificateFile(_params.securePath("ola-client-front-cert.pem").c_str());
+                //_rctx.loadPrivateKeyFile(_params.securePath("ola-client-front-key.pem").c_str());
                 return ErrorCodeT();
             },
-            frame::mprpc::openssl::NameCheckSecureStart{"ola-server"});
+            frame::mprpc::openssl::NameCheckSecureStart{"front.myapps.space"});
     }
 
     if (_params.compress) {
@@ -361,80 +450,19 @@ void front_configure_service(Engine& _rengine, const Parameters& _params, frame:
     }
 
     _rsvc.start(std::move(cfg));
-    _rsvc.createConnectionPool(_params.front_endpoint.c_str(), 1);
+    _rsvc.createConnectionPool(_rengine.auth_endpoint_.c_str(), 1);
 }
 
-//-----------------------------------------------------------------------------
-// Local
-//-----------------------------------------------------------------------------
-struct LocalSetup {
-    template <class T>
-    void operator()(front::ProtocolT& _rprotocol, TypeToType<T> _t2t, const front::ProtocolT::TypeIdT& _rtid)
-    {
-        _rprotocol.registerMessage<T>(complete_message<T>, _rtid);
-    }
-};
-
-void local_configure_service(const Parameters& _params, frame::mprpc::ServiceT& _rsvc, AioSchedulerT& _rsch, frame::aio::Resolver& _rres)
-{
-    auto                        proto = client::auth::ProtocolT::create();
-    frame::mprpc::Configuration cfg(_rsch, proto);
-
-    client::auth::protocol_setup(LocalSetup(), *proto);
-
-    cfg.client.name_resolve_fnc = frame::mprpc::InternetResolverF(_rres, _params.local_port.c_str());
-
-    cfg.client.connection_start_state = frame::mprpc::ConnectionState::Active;
-
-    {
-        auto connection_stop_lambda = [](frame::mprpc::ConnectionContext& _ctx) {
-            QApplication::quit();
-        };
-
-        cfg.connection_stop_fnc = std::move(connection_stop_lambda);
-    }
-
-    _rsvc.start(std::move(cfg));
-}
-
-bool Engine::localRegister(client::auth::Widget& _rwidget)
-{
-    if (params_.local_port.empty()) {
-        return true;
-    }
-    promise<bool> prom;
-
-    auto msg_ptr = make_shared<client::auth::RegisterRequest>();
-    auto lambda  = [this, &prom, &_rwidget](
-                      frame::mprpc::ConnectionContext&                 _rctx,
-                      std::shared_ptr<client::auth::RegisterRequest>&  _rsent_msg_ptr,
-                      std::shared_ptr<client::auth::RegisterResponse>& _rrecv_msg_ptr,
-                      ErrorConditionT const&                           _rerror) {
-        if (_rrecv_msg_ptr) {
-            if (_rrecv_msg_ptr->error_) {
-                prom.set_value(false);
-            } else {
-
-                local_auth_req_ptr_ = std::make_shared<client::auth::AuthRequest>(*_rrecv_msg_ptr);
-                local_recipient_id_ = _rctx.recipientId();
-                _rwidget.setUser(_rrecv_msg_ptr->user_);
-                prom.set_value(true);
-            }
-        } else {
-            prom.set_value(false);
-        }
-    };
-    local_rpc_service_.sendRequest("127.0.0.1", msg_ptr, lambda, {frame::mprpc::MessageFlagsE::OneShotSend});
-    auto fut = prom.get_future();
-    return /*fut.wait_for(chrono::seconds(10)) == future_status::ready &&*/ fut.get();
-}
-
-void Engine::onAuthStart(const string& _user, const string& _pass)
+bool Engine::onAuthStart(const string& _login, const string& _pass, const string &_code)
 {
     //on gui thread
     {
         lock_guard<mutex> lock(mutex_);
-        front_auth_req_ptr_ = std::make_shared<front::AuthRequest>(_user, _pass);
+        auto req_ptr = std::make_shared<front::AuthRequest>();
+        req_ptr->captcha_text_ = _code;
+        req_ptr->captcha_token_ = captcha_token_;
+        req_ptr->user_          = _login;
+        req_ptr->pass_          = _pass;
 
         if (!front_recipient_id_.empty()) {
             auto lambda = [this](
@@ -442,13 +470,129 @@ void Engine::onAuthStart(const string& _user, const string& _pass)
                               std::shared_ptr<front::AuthRequest>&  _rsent_msg_ptr,
                               std::shared_ptr<front::AuthResponse>& _rrecv_msg_ptr,
                               ErrorConditionT const&                _rerror) {
-                onAuthResponse(_rctx, _rsent_msg_ptr, _rrecv_msg_ptr, _rerror);
+                onAuthResponse(_rctx, _rrecv_msg_ptr, _rerror);
             };
-            if (!front_rpc_service_.sendRequest(front_recipient_id_, front_auth_req_ptr_, lambda)) {
-                front_auth_req_ptr_.reset();
-            }
+            front_rpc_service_.sendRequest(front_recipient_id_, req_ptr, lambda);
+            auth_login_ = _login;
+            return true;
+        } else {
+            return false;
         }
     }
+    
+}
+
+bool Engine::onCreateStart(const string& _user, const string& _email, const string& _pass, const string& _code)
+{
+    {
+        lock_guard<mutex> lock(mutex_);
+        auto req_ptr = std::make_shared<front::AuthCreateRequest>();
+        req_ptr->captcha_text_  = _code;
+        req_ptr->captcha_token_ = captcha_token_;
+        req_ptr->user_          = _user;
+        req_ptr->email_         = _email;
+        req_ptr->pass_          = _pass;
+
+        if (!front_recipient_id_.empty()) {
+            auto lambda = [this](
+                              frame::mprpc::ConnectionContext&      _rctx,
+                              std::shared_ptr<front::AuthCreateRequest>&  _rsent_msg_ptr,
+                              std::shared_ptr<front::AuthResponse>& _rrecv_msg_ptr,
+                              ErrorConditionT const&                _rerror) {
+                onAuthResponse(_rctx, _rrecv_msg_ptr, _rerror);
+            };
+            front_rpc_service_.sendRequest(front_recipient_id_, req_ptr, lambda);
+            auth_login_ = _user;
+            return true;
+        } else {
+            return false;
+        }
+    }
+}
+bool Engine::onAuthFetchStart()
+{
+    auto req_ptr = std::make_shared<front::AuthFetchRequest>();
+    lock_guard<mutex> lock(mutex_);
+    auth_user_.clear();
+    auth_email_.clear();
+
+    auto lambda = [this](
+                        frame::mprpc::ConnectionContext&           _rctx,
+                        std::shared_ptr<front::AuthFetchRequest>& _rsent_msg_ptr,
+                        std::shared_ptr<front::AuthFetchResponse>&      _rrecv_msg_ptr,
+                        ErrorConditionT const&                     _rerror) {
+        lock_guard<mutex> lock(mutex_);
+        if (_rrecv_msg_ptr) {
+            auth_user_ = _rrecv_msg_ptr->user_;
+            auth_email_ = _rrecv_msg_ptr->email_;
+        }
+        main_window_.onAmendFetch(auth_user_, auth_email_);
+    };
+    front_rpc_service_.sendRequest(front_recipient_id_, req_ptr, lambda);
+    return true;
+}
+bool Engine::onAmendStart(string _user, string _email, const string& _pass, const string& _new_pass) 
+{
+    solid::to_lower(_user);
+    solid::to_lower(_email);
+
+    if (_user == auth_user_ && _email == auth_email_ && _new_pass.empty()) {
+        return false;
+    }
+
+    auto req_ptr = std::make_shared<front::AuthAmendRequest>();
+    req_ptr->ticket_ = auth_token_;
+    if (_user != auth_user_) {
+        auth_user_ = _user;
+        req_ptr->new_user_ = auth_user_;
+    }
+    if (_email != auth_email_) {
+        auth_email_         = _email;
+        req_ptr->new_email_ = auth_email_;
+    }
+    req_ptr->pass_ = _pass;
+    req_ptr->new_pass_ = _new_pass;
+
+    auto lambda = [this](
+                      frame::mprpc::ConnectionContext&           _rctx,
+                      std::shared_ptr<front::AuthAmendRequest>&  _rsent_msg_ptr,
+                      std::shared_ptr<front::AuthResponse>& _rrecv_msg_ptr,
+                      ErrorConditionT const&                     _rerror) {
+        {
+            lock_guard<mutex> lock(mutex_);
+            auth_login_ = auth_user_;
+        }
+        
+        onAuthResponse(_rctx, _rrecv_msg_ptr, _rerror);
+    };
+    front_rpc_service_.sendRequest(auth_endpoint_.c_str(), req_ptr, lambda);
+
+    return false;
+}
+bool Engine::onValidateStart(const string& _code)
+{
+    auto req_ptr = std::make_shared<front::AuthValidateRequest>();
+    req_ptr->text_ = _code;
+    req_ptr->ticket_ = auth_token_;
+    
+    lock_guard<mutex> lock(mutex_);
+    if (!front_recipient_id_.empty()) {
+        auto lambda = [this](
+                          frame::mprpc::ConnectionContext&           _rctx,
+                          std::shared_ptr<front::AuthValidateRequest>& _rsent_msg_ptr,
+                          std::shared_ptr<front::AuthResponse>&      _rrecv_msg_ptr,
+                          ErrorConditionT const&                     _rerror) {
+            if (_rsent_msg_ptr->text_.empty()) {
+                //validation email resend request
+                main_window_.onEmailValidationResent();
+            } else {
+                onAuthResponse(_rctx, _rrecv_msg_ptr, _rerror);
+            }
+        };
+        front_rpc_service_.sendRequest(front_recipient_id_, req_ptr, lambda);
+        return true;
+    }
+    return false;
 }
 
 void Engine::onConnectionStart(frame::mprpc::ConnectionContext& _ctx)
@@ -473,27 +617,49 @@ void Engine::onConnectionStart(frame::mprpc::ConnectionContext& _ctx)
 
 void Engine::onConnectionInit(frame::mprpc::ConnectionContext& _ctx)
 {
-    auth_widget_.offlineSignal(false);
+    main_window_.onlineSignal(true);
     {
         lock_guard<mutex> lock(mutex_);
         front_recipient_id_ = _ctx.recipientId();
-        if (front_auth_req_ptr_) {
+
+        if (auth_token_.empty()) {
+            auto req_ptr = std::make_shared<front::CaptchaRequest>();
+
             auto lambda = [this](
-                              frame::mprpc::ConnectionContext&      _rctx,
-                              std::shared_ptr<front::AuthRequest>&  _rsent_msg_ptr,
-                              std::shared_ptr<front::AuthResponse>& _rrecv_msg_ptr,
-                              ErrorConditionT const&                _rerror) {
-                onAuthResponse(_rctx, _rsent_msg_ptr, _rrecv_msg_ptr, _rerror);
+                              frame::mprpc::ConnectionContext&         _rctx,
+                              std::shared_ptr<front::CaptchaRequest>&  _rsent_msg_ptr,
+                              std::shared_ptr<front::CaptchaResponse>& _rrecv_msg_ptr,
+                              ErrorConditionT const&                   _rerror) {
+                onCaptchaResponse(_rctx, _rsent_msg_ptr, _rrecv_msg_ptr, _rerror);
             };
-            if (!front_rpc_service_.sendRequest(front_recipient_id_, front_auth_req_ptr_, lambda)) {
-                front_auth_req_ptr_.reset();
-            }
+
+            _ctx.service().sendRequest(_ctx.recipientId(), req_ptr, lambda);
+        } else {
+            auto req_ptr = std::make_shared<front::AuthRequest>();
+            req_ptr->pass_ = auth_token_;
+
+            auto lambda = [this](
+                              frame::mprpc::ConnectionContext&         _rctx,
+                              std::shared_ptr<front::AuthRequest>&     _rsent_msg_ptr,
+                              std::shared_ptr<front::AuthResponse>& _rrecv_msg_ptr,
+                              ErrorConditionT const&                   _rerror) {
+                if (_rrecv_msg_ptr) {
+                    if (_rrecv_msg_ptr->error_ != 0) {
+                        lock_guard<mutex> lock(mutex_);
+                        auth_token_.clear();
+                    }
+                    onAuthResponse(_rctx, _rrecv_msg_ptr, _rerror);
+                }
+            };
+
+            _ctx.service().sendRequest(_ctx.recipientId(), req_ptr, lambda);
         }
     }
 }
 void Engine::onConnectionStop(frame::mprpc::ConnectionContext& _ctx)
 {
-    auth_widget_.offlineSignal(true);
+    solid_log(logger, Warning, "reason: "<<_ctx.error().message()<<" system error: "<<_ctx.systemError().message());
+    main_window_.onlineSignal(false);
     {
         lock_guard<mutex> lock(mutex_);
         if (front_recipient_id_ == _ctx.recipientId()) {
@@ -502,49 +668,149 @@ void Engine::onConnectionStop(frame::mprpc::ConnectionContext& _ctx)
     }
 }
 
+void Engine::onCaptchaResponse(
+    frame::mprpc::ConnectionContext&         _rctx,
+    std::shared_ptr<front::CaptchaRequest>&  _rsent_msg_ptr,
+    std::shared_ptr<front::CaptchaResponse>& _rrecv_msg_ptr,
+    ErrorConditionT const&                   _rerror)
+{
+    if (_rrecv_msg_ptr && !_rrecv_msg_ptr->captcha_image_.empty() && !_rrecv_msg_ptr->captcha_token_.empty()) {
+        lock_guard<mutex> lock(mutex_);
+        captcha_token_ = std::move(_rrecv_msg_ptr->captcha_token_);
+        main_window_.onCaptcha(std::move(_rrecv_msg_ptr->captcha_image_));
+    } else {
+        this_thread::sleep_for(chrono::seconds(2));
+    }
+}
+
 void Engine::onAuthResponse(
     frame::mprpc::ConnectionContext&      _rctx,
-    std::shared_ptr<front::AuthRequest>&  _rsent_msg_ptr,
     std::shared_ptr<front::AuthResponse>& _rrecv_msg_ptr,
     ErrorConditionT const&                _rerror)
 {
     if (_rrecv_msg_ptr) {
-        solid_log(logger, Info, "AuthResponse: " << _rrecv_msg_ptr->error_ << " " << _rrecv_msg_ptr->message_);
-        if (_rrecv_msg_ptr->error_) {
-            auth_widget_.authFailSignal();
-        } else {
-            auth_widget_.authSuccessSignal();
-            if (!params_.local_port.empty()) {
-
-                local_auth_req_ptr_->user_  = _rsent_msg_ptr->auth_;
-                local_auth_req_ptr_->token_ = _rrecv_msg_ptr->message_;
-                auto lambda                 = [this](
-                                  frame::mprpc::ConnectionContext&             _rctx,
-                                  std::shared_ptr<client::auth::AuthRequest>&  _rsent_msg_ptr,
-                                  std::shared_ptr<client::auth::AuthResponse>& _rrecv_msg_ptr,
-                                  ErrorConditionT const&                       _rerror) {
-                    auth_widget_.closeSignal();
-                };
-
-                if (local_rpc_service_.sendMessage(
-                        local_recipient_id_,
-                        local_auth_req_ptr_,
-                        lambda,
-                        {frame::mprpc::MessageFlagsE::AwaitResponse, frame::mprpc::MessageFlagsE::Response})) {
-                    auth_widget_.closeSignal();
-                }
-            } else {
+        solid_log(logger, Info, "AuthResponse: " << _rrecv_msg_ptr->error_);
+        if (_rrecv_msg_ptr->error_ == ola::utility::error_authentication_validate.value()) {
+            auth_token_ = std::move(_rrecv_msg_ptr->message_);
+            if (!_rctx.isConnectionActive()) {
+                _rctx.service().connectionNotifyEnterActiveState(_rctx.recipientId());
             }
+            main_window_.authValidateSignal();
+        }else if(_rrecv_msg_ptr->error_){
+            main_window_.authSignal(false);
+            //this_thread::sleep_for(chrono::seconds(2));
+            onConnectionInit(_rctx);
+        } else {
+            solid_log(logger, Info, "Auth Success");
+            if (!_rrecv_msg_ptr->message_.empty()) {
+                auth_token_ = _rrecv_msg_ptr->message_;
+                storeAuthData();
+            }
+
+            main_window_.authSignal(true);
+
+            //main_window_.closeSignal();
         }
     } else {
         solid_log(logger, Info, "No AuthResponse");
         //offline
-
-        {
-            lock_guard<mutex> lock(mutex_);
-            front_auth_req_ptr_ = std::move(_rsent_msg_ptr);
-        }
     }
+}
+
+bool Engine::logout() {
+    lock_guard<mutex> lock(mutex_);
+    auth_token_.clear();
+    storeAuthData();
+    if (!front_recipient_id_.empty()) {
+        front_rpc_service_.closeConnection(front_recipient_id_);
+    }
+    main_window_.authSignal(false);
+    return true;
+}
+
+void Engine::loadAuthData()
+{
+    const auto path = authDataFilePath();
+
+    ola::client::utility::auth_read(path, auth_endpoint_, auth_login_, auth_token_);
+
+    if (auth_endpoint_ != params_.front_endpoint) {
+        auth_login_.clear();
+        auth_token_.clear();
+        auth_endpoint_ = params_.front_endpoint;
+    }
+}
+
+void Engine::storeAuthData()
+{
+    fs::create_directories(authDataDirectoryPath());
+    const auto path = authDataFilePath();
+
+    ola::client::utility::auth_write(path, auth_endpoint_, auth_login_, auth_token_);
+#if 0
+    ofstream ofs(path.generic_string(), std::ios::trunc);
+    if (ofs) {
+        ofs << auth_endpoint_ << endl;
+        ofs << _user << endl;
+        ofs << ola::utility::base64_encode(_token) << endl;
+        ofs.flush();
+        solid_log(logger, Info, "Stored auth data to: " << path.generic_string());
+    } else {
+        solid_log(logger, Error, "Failed storing auth data to: " << path.generic_string());
+    }
+#endif
+}
+
+bool Engine::passwordForgot(const string& _login, const string& _code)
+{
+    auto req_ptr     = std::make_shared<front::AuthResetRequest>();
+    req_ptr->login_   = _login;
+    req_ptr->captcha_text_ = _code;
+    req_ptr->captcha_token_ = captcha_token_;
+
+    lock_guard<mutex> lock(mutex_);
+    if (!front_recipient_id_.empty()) {
+        auto lambda = [this](
+                          frame::mprpc::ConnectionContext&             _rctx,
+                          std::shared_ptr<front::AuthResetRequest>& _rsent_msg_ptr,
+                          std::shared_ptr<front::AuthResponse>&        _rrecv_msg_ptr,
+                          ErrorConditionT const&                       _rerror) {
+            main_window_.authSignal(false);
+            //this_thread::sleep_for(chrono::seconds(2));
+            onConnectionInit(_rctx);
+        };
+        front_rpc_service_.sendRequest(front_recipient_id_, req_ptr, lambda);
+        return true;
+    }
+    return false;
+}
+bool Engine::passwordReset(const string& _token, const string& _pass, const string &_code)
+{
+    auto req_ptr            = std::make_shared<front::AuthResetRequest>();
+    req_ptr->login_         = utility::base64_decode(_token);
+    req_ptr->pass_          = _pass;
+    req_ptr->captcha_text_  = _code;
+    req_ptr->captcha_token_ = captcha_token_;
+
+    lock_guard<mutex> lock(mutex_);
+    if (!front_recipient_id_.empty()) {
+        auto lambda = [this](
+                          frame::mprpc::ConnectionContext&          _rctx,
+                          std::shared_ptr<front::AuthResetRequest>& _rsent_msg_ptr,
+                          std::shared_ptr<front::AuthResponse>&     _rrecv_msg_ptr,
+                          ErrorConditionT const&                    _rerror) {
+            if (_rrecv_msg_ptr) {
+                if (_rrecv_msg_ptr->error_ != 0) {
+                    lock_guard<mutex> lock(mutex_);
+                    auth_token_.clear();
+                }
+                onAuthResponse(_rctx, _rrecv_msg_ptr, _rerror);
+            }
+        };
+        front_rpc_service_.sendRequest(front_recipient_id_, req_ptr, lambda);
+        return true;
+    }
+    return false;
 }
 
 } //namespace

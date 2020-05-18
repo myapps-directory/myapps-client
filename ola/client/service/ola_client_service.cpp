@@ -19,9 +19,13 @@
 
 #include "ola/client/service/engine.hpp"
 #include "ola/client/utility/locale.hpp"
+#include "ola/client/utility/auth_file.hpp"
+#include "ola/client/utility/file_monitor.hpp"
 
 #include <iostream>
 #include <sstream>
+#include <future>
+#include <thread>
 
 #include "solid/system/log.hpp"
 
@@ -49,6 +53,8 @@ using namespace Fsp;
 using namespace std;
 using namespace ola::client;
 
+namespace fs = boost::filesystem;
+
 namespace {
 
 const solid::LoggerT logger("ola::client::service");
@@ -64,8 +70,8 @@ struct Parameters {
     bool           debug_buffered_;
     bool           secure_;
     bool           compress_;
-    string         front_endpoint_;
     string         secure_prefix_;
+    string         path_prefix_;
 
     bool parse(ULONG argc, PWSTR* argv);
 };
@@ -206,21 +212,55 @@ private:
 };
 
 class FileSystemService final : public Service {
-    ola::client::service::Engine engine_;
-    FileSystem                   fs_;
-    FileSystemHost               host_;
-    Parameters                   params_;
+    enum struct WaitStatusE {
+        NoWait,
+        Wait,
+        Done,
+        Restart,
+    };
+
+    ola::client::service::Engine        engine_;
+    FileSystem                          fs_;
+    FileSystemHost                      host_;
+    Parameters                          params_;
+    mutex                               mutex_;
+    condition_variable                  condition_;
+    chrono::system_clock::time_point    auth_file_time_point_;
+    string                              auth_endpoint_;
+    string                              auth_user_;
+    string                              auth_token_;
+    WaitStatusE                         wait_status_ = WaitStatusE::NoWait;
+    ola::client::utility::FileMonitor   file_monitor_;
+
+
+    fs::path authDataDirectoryPath() const
+    {
+        fs::path p = params_.path_prefix_;
+        p /= "config";
+        return p;
+    }
+
+    fs::path authDataFilePath() const
+    {
+        return authDataDirectoryPath() / "auth.data";
+    }
 
 public:
     FileSystemService();
+
+    bool waitAuthentication();
+    void onAuthFileChange(const chrono::system_clock::time_point& _time_point);
 
 protected:
     NTSTATUS OnStart(ULONG Argc, PWSTR* Argv) override;
     NTSTATUS OnStop() override;
 
 private:
-    void onGuiStart(const string& _endpoint, int _port);
+    void guiStart();
+    void meStart();
+#if 0
     void onGuiFail();
+#endif
 };
 } //namespace
 
@@ -230,12 +270,11 @@ int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR pCmdLin
     int     argc;
     LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
 
-    {
-        const auto m_singleInstanceMutex = CreateMutex(NULL, TRUE, L"OLA_SERVICE_SHARED_MUTEX");
-        if (m_singleInstanceMutex == NULL || GetLastError() == ERROR_ALREADY_EXISTS) {
-            return -1; // Exit the app. For MFC, return false from InitInstance.
-        }
+    const auto m_singleInstanceMutex = CreateMutex(NULL, TRUE, L"OLA_SERVICE_SHARED_MUTEX");
+    if (m_singleInstanceMutex == NULL || GetLastError() == ERROR_ALREADY_EXISTS) {
+        return -1; // Exit the app. For MFC, return false from InitInstance.
     }
+
 #else
 int wmain(int argc, wchar_t** argv)
 {
@@ -244,7 +283,24 @@ int wmain(int argc, wchar_t** argv)
     SetWindowPos(GetConsoleWindow(), NULL, 5000, 5000, 0, 0, 0);
     ShowWindow(GetConsoleWindow(), SW_HIDE);
 #endif
-    return FileSystemService().Run();
+
+    FileSystemService service;
+    const auto rv = service.Run();
+    if (!service.waitAuthentication()) {
+        return rv;
+    } else {
+        //we need to restart the service
+        TCHAR szFileName[MAX_PATH];
+        vector<WCHAR*> arg_vec;
+        for (int i = 0; i < argc; ++i) {
+            arg_vec.emplace_back(argv[i]);
+        }
+        arg_vec.emplace_back(nullptr);
+        GetModuleFileName(NULL, szFileName, MAX_PATH);
+        ReleaseMutex(m_singleInstanceMutex);
+        CloseHandle(m_singleInstanceMutex);
+        _wexecv(szFileName, arg_vec.data());
+    }
 }
 
 namespace {
@@ -361,8 +417,8 @@ bool Parameters::parse(ULONG argc, PWSTR* argv)
         ("mount-point,m", wvalue<wstring>(&mount_point_)->default_value(L"C:\\MyApps.space", "C:\\MyApps.space"), "Mount point")
         ("unsecure", value<bool>(&secure_)->implicit_value(false)->default_value(true), "Don not use SSL to secure communication")
         ("compress", value<bool>(&compress_)->implicit_value(true)->default_value(false), "Use Snappy to compress communication")
-        ("front", value<std::string>(&front_endpoint_)->default_value(string(OLA_FRONT_URL)), "OLA Front Endpoint")
         ("secure-prefix", value<std::string>(&secure_prefix_)->default_value("certs"), "Secure Path prefix")
+        ("path-prefix", value<std::string>(&path_prefix_)->default_value(env_config_path_prefix()), "Path prefix")
     ;
     // clang-format off
     variables_map vm;
@@ -545,6 +601,68 @@ void WriteErrorLogEntry(PWSTR pszFunction, DWORD dwError)
     WriteEventLogEntry(szMessage, EVENTLOG_ERROR_TYPE); 
 } 
 
+void FileSystemService::onAuthFileChange(const chrono::system_clock::time_point& _time_point)
+{
+    unique_lock<mutex> lock(mutex_);
+    string endpoint;
+    string user;
+    string token;
+    ola::client::utility::auth_read(authDataFilePath(), endpoint, user, token);
+    
+    if((auth_endpoint_.empty() || endpoint == auth_endpoint_) && (auth_user_.empty() || user == auth_user_)){
+        auth_endpoint_ = endpoint;
+        auth_user_ = user;
+
+        if(token.empty()){//logged out
+            auth_token_.clear();
+            if(wait_status_ == WaitStatusE::Wait){
+                wait_status_ = WaitStatusE::Done;
+                condition_.notify_one();
+            }else{
+                wait_status_ = WaitStatusE::Wait;
+                Stop();
+            }
+            return;
+        }else{
+            auth_token_ = token;
+            if(wait_status_ == WaitStatusE::Wait){
+                wait_status_ = WaitStatusE::Done;
+                condition_.notify_one();
+            }
+            else {
+                lock.unlock();
+                engine_.relogin();
+            }
+        }
+    }else{
+        auth_token_.clear();
+        if(wait_status_ == WaitStatusE::Wait){
+            wait_status_ = WaitStatusE::Done;
+            condition_.notify_one();
+        }else{
+            wait_status_ = WaitStatusE::Restart;
+            Stop();
+        }
+        return;
+    }
+}
+
+bool FileSystemService::waitAuthentication()
+{
+    unique_lock<mutex> lock(mutex_);
+    if(wait_status_ == WaitStatusE::NoWait){
+        return false;
+    }else if(wait_status_ == WaitStatusE::Restart){
+        return true;
+    }else{
+        while(wait_status_ == WaitStatusE::Wait){
+            condition_.wait(lock);
+        }
+        wait_status_ = WaitStatusE::NoWait;
+        return true;
+    }
+}
+
 NTSTATUS FileSystemService::OnStart(ULONG argc, PWSTR *argv)
 {
     SetEnvironmentVariable(L"QT_QPA_PLATFORM_PLUGIN_PATH", L".\platforms");
@@ -595,21 +713,63 @@ NTSTATUS FileSystemService::OnStart(ULONG argc, PWSTR *argv)
             }
         }
     }
+    {
+        boost::system::error_code err;
+        fs::create_directories( authDataDirectoryPath(), err);
+    }
+    wait_status_ = WaitStatusE::Wait;
 
+    this->file_monitor_.add(
+        authDataFilePath(),
+        [this](const fs::path& _dir, const fs::path& _name, const chrono::system_clock::time_point& _time_point) mutable {
+            onAuthFileChange(_time_point);
+        }
+    );
+    this->file_monitor_.start();
+
+    waitAuthentication();
+    
     ola::client::service::Configuration cfg;
+
+    {
+        lock_guard<mutex> lock(mutex_);
+        if(auth_token_.empty()){
+            wait_status_ = WaitStatusE::Wait;
+            guiStart();
+            return STATUS_UNSUCCESSFUL;
+        }
+        cfg.auth_endpoint_ = auth_endpoint_;
+    }
     cfg.secure_ = params_.secure_;
     cfg.compress_ = params_.compress_;
-    cfg.front_endpoint_ = params_.front_endpoint_;
     cfg.secure_prefix_ = params_.secure_prefix_;
-	cfg.path_prefix_ = env_config_path_prefix();
+	cfg.path_prefix_ = params_.path_prefix_;
 	cfg.mount_prefix_ = utility::narrow(params_.mount_point_);
 	cfg.temp_folder_ = env_temp_prefix();
+    cfg.auth_get_token_fnc_ = [this](){
+        lock_guard<mutex> lock(mutex_);
+        return auth_token_;
+    };
+
+    cfg.auth_on_response_fnc_ = [this](uint32_t _error, const std::string& _message){
+        if(_error == 0 && !_message.empty()){
+            lock_guard<mutex> lock(mutex_);
+            auth_token_ = _message;
+            ola::client::utility::auth_update(authDataFilePath(), auth_file_time_point_, auth_endpoint_, auth_user_, auth_token_);
+        }else if(_error != 0){
+            lock_guard<mutex> lock(mutex_);
+            guiStart();
+        }
+    };
+
+#if 0
 	cfg.gui_fail_fnc_ = [this](){
 		onGuiFail();
 	};
-	cfg.gui_start_fnc_ = [this](const string &_endpoint, int _port){
+	cfg.gui_start_fnc_ = [this](const string &_endpoint){
 		onGuiStart(_endpoint, _port);
 	};
+#endif
     cfg.folder_update_fnc_ = [this](const std::string &_folder){
         SHChangeNotify(SHCNE_UPDATEDIR, SHCNF_PATH | SHCNF_FLUSHNOWAIT, params_.mount_point_.c_str(), NULL);
     };
@@ -642,9 +802,9 @@ wstring a2w(const string &_a) {
 	return wstring(_a.begin(), _a.end());
 }
 
-void FileSystemService::onGuiStart(const string &_endpoint, int _port){
+void FileSystemService::guiStart(){
 	wostringstream oss;
-	oss<<L"ola_client_auth.exe --front "<<a2w(_endpoint)<<L" --local "<<_port;
+	oss<<L"ola_client_auth.exe";
     DWORD dwExitCode;
     if (!CreateInteractiveProcess(oss.str(), FALSE, 0, 
         &dwExitCode))
@@ -655,6 +815,20 @@ void FileSystemService::onGuiStart(const string &_endpoint, int _port){
     }
 }
 
+void FileSystemService::meStart(){
+	wostringstream oss;
+	oss<<L"ola_client_auth.exe";
+    DWORD dwExitCode;
+    if (!CreateInteractiveProcess(oss.str(), FALSE, 0, 
+        &dwExitCode))
+    {
+        // Log the error and exit.
+        WriteErrorLogEntry(L"CreateInteractiveProcess", GetLastError());
+        return;
+    }
+}
+
+#if 0
 void FileSystemService::onGuiFail(){
 	DWORD dwSessionId = GetSessionIdOfUser(NULL, NULL); 
     if (dwSessionId == 0xFFFFFFFF) 
@@ -679,6 +853,7 @@ void FileSystemService::onGuiFail(){
 	std::thread  t{&FileSystemService::Stop, this};
 	t.detach();
 }
+#endif
 
 // -- FileSystem --------------------------------------------------------------
 

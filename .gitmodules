@@ -1,3 +1,7 @@
 [submodule "ola/common"]
 	path = ola/common
 	url = git@github.com:vipalade/ola-common.git
+[submodule "ola/client/utility"]
+	path = ola/client/utility
+	url = git@github.com:vipalade/ola-client-utility.git
+	branch = master
