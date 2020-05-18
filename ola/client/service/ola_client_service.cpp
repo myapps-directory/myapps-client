@@ -219,18 +219,18 @@ class FileSystemService final : public Service {
         Restart,
     };
 
-    ola::client::service::Engine     engine_;
-    FileSystem                       fs_;
-    FileSystemHost               host_;
-    Parameters                   params_;
-    mutex                        mutex_;
-    condition_variable           condition_;
-    chrono::system_clock::time_point auth_file_time_point_;
-    string                           auth_endpoint_;
-    string                           auth_user_;
-    string                           auth_token_;
-    WaitStatusE                      wait_status_ = WaitStatusE::NoWait;
-    ola::client::utility::FileMonitor  file_monitor_;
+    ola::client::service::Engine        engine_;
+    FileSystem                          fs_;
+    FileSystemHost                      host_;
+    Parameters                          params_;
+    mutex                               mutex_;
+    condition_variable                  condition_;
+    chrono::system_clock::time_point    auth_file_time_point_;
+    string                              auth_endpoint_;
+    string                              auth_user_;
+    string                              auth_token_;
+    WaitStatusE                         wait_status_ = WaitStatusE::NoWait;
+    ola::client::utility::FileMonitor   file_monitor_;
 
 
     fs::path authDataDirectoryPath() const
@@ -628,6 +628,10 @@ void FileSystemService::onAuthFileChange(const chrono::system_clock::time_point&
             if(wait_status_ == WaitStatusE::Wait){
                 wait_status_ = WaitStatusE::Done;
                 condition_.notify_one();
+            }
+            else {
+                lock.unlock();
+                engine_.relogin();
             }
         }
     }else{
