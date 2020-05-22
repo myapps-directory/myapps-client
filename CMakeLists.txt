@@ -80,6 +80,8 @@ include(cmake/build-snappy.cmake)
 
 include(cmake/build-config.cmake)
 
+include(cmake/build-yaml.cmake)
+
 include(cmake/build-libzip.cmake)
 
 include(cmake/build-replxx.cmake)

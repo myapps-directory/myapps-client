@@ -1,0 +1,51 @@
+name: windows
+tag: r1.3
+dictionary:
+  - language: en-US
+    name: Example Basic APPID
+    description: |
+        ExampleBasicAPPID description.
+        The quick brown fox jumps over the lazy dog.
+        Lorem ipsum dolor sit amet, mea ea tation vivendum, id idque dicat nominavi nec.
+        Has vero legendos et. Dolorem erroribus qui te.
+        Qui ea utinam consetetur, in pro elit regione liberavisse.
+        Mucius melius intellegat et nam, ad meliore partiendo pro.
+        Inani tollit ei vim, agam omnesque hendrerit ex ius.
+        Et mollis saperet pri.
+    brief: "ExampleBasicAPPID brief. The quick brown fox jumps over the lazy dog.\nThe quick brown fox jumps over the lazy dog.\n"
+    company: "Company APPID INC."
+  - language: ro-RO
+    name: Exemplu Simplu APPID
+    description: |
+        Descriere ExempluSimpluAPPID șî țâfnos
+        Lorem ipsum dolor sit amet, mea ea tation vivendum, id idque dicat nominavi nec.
+        Has vero legendos et. Dolorem erroribus qui te.
+        Qui ea utinam consetetur, in pro elit regione liberavisse.
+        Mucius melius intellegat et nam, ad meliore partiendo pro.
+        Inani tollit ei vim, agam omnesque hendrerit ex ius.
+        Et mollis saperet pri.
+    brief: |
+        Exemplu Simplu APPID brief. The quick brown fox jumps over the lazy dog.
+        Vulpea brună și rapidă sare peste câinele leneș.
+    company: "Ștuțărie APPID SRL"
+properties:
+  name: ${name}
+  description: ${description}
+configurations:
+  - name: windows64bit
+    directory: ${name}
+    flags:
+      - HiddenDirectory
+    oses:
+      - Windows10x86_64
+    exes:
+      - example_basic.exe
+    properties:
+      name: ${name}
+      description: ${description}
+      brief: ${brief}
+      company: ${company}
+    shortcuts:
+      - name: ${name}
+        command: example_basic.exe
+        icon: icon.ico
