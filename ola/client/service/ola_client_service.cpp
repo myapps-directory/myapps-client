@@ -316,7 +316,7 @@ string env_config_path_prefix()
     }
 
     string r = v;
-    r += "\\OLA";
+    r += "\\MyApps.space";
     return r;
 }
 
@@ -344,7 +344,7 @@ string env_log_path_prefix()
     }
 
     string r = v;
-    r += "\\OLA\\client";
+    r += "\\MyApps.space\\client";
     return r;
 }
 

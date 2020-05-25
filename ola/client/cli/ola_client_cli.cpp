@@ -386,7 +386,7 @@ bool parse_arguments(Parameters& _par, int argc, char* argv[])
             ("debug-buffered,S", value<bool>(&_par.dbg_buffered)->implicit_value(true)->default_value(false), "Debug buffered")
             ("unsecure", value<bool>(&_par.secure)->implicit_value(false)->default_value(true), "Use SSL to secure communication")
             ("compress", value<bool>(&_par.compress)->implicit_value(true)->default_value(false), "Use Snappy to compress communication")
-            ("front", value<std::string>(&_par.front_endpoint)->default_value(string(OLA_FRONT_URL)), "OLA Front Endpoint")
+            ("front", value<std::string>(&_par.front_endpoint)->default_value(string(OLA_FRONT_URL)), "MyApps.space Front Endpoint")
             ("secure-prefix", value<std::string>(&_par.secure_prefix)->default_value("certs"), "Secure Path prefix")
         ;
         // clang-format off
@@ -1398,35 +1398,6 @@ void handle_create(istream& _ris, Engine &_reng){
 //-----------------------------------------------------------------------------
 //  Generate
 //-----------------------------------------------------------------------------
-#ifdef APP_CONFIG
-void handle_generate_app(istream& _ris, Engine &_reng){
-    string config_path;
-    _ris>>std::quoted(config_path);
-    
-    ola::utility::Application cfg;
-    
-    cfg.dictionary_dq_ = {
-        {"", "en-US"},
-        {"NAME", "bubbles"},
-        {"DESCRIPTION", "bubbles description"},
-        {"", "ro-RO"},
-        {"NAME", "bule"},
-        {"DESCRIPTION", "descriere bule"},
-    };
-    
-    cfg.property_vec_ = {
-        {"name", "${NAME}"},
-        {"description", "${DESCRIPTION}"}
-    };
-    store_app_config(cfg, path(config_path));
-    {
-        ola::utility::Application cfg_check;
-        load_app_config(cfg_check, path(config_path));
-        solid_check(cfg == cfg_check);
-    }
-}
-#endif
-
 //-----------------------------------------------------------------------------
 
 void handle_generate_buid(istream& _ris, Engine &_reng){
@@ -1758,10 +1729,10 @@ string env_config_path_prefix()
     }
 
     string r = v;
-    r += "\\OLA";
+    r += "\\MyApps.space";
     return r;
 #else
-    return get_home_env() + "/.ola";
+    return get_home_env() + "/.myapps.space";
 #endif
 }
 
@@ -1797,7 +1768,7 @@ string envConfigPathPrefix()
     }
 
     string r = v;
-    r += "\\OLA";
+    r += "\\MyApps.space";
     return r;
 }
 
@@ -2043,8 +2014,8 @@ bool load_build_config(ola::utility::Build& _rcfg, const string& _path) {
                             return false;
                         }
 
-                        if ((*it)["mounts"] && (*it)["mounts"].Type() == NodeType::Sequence) {
-                            Node mounts = (*it)["mounts"];
+                        if ((*it)["mount-points"] && (*it)["mount-points"].Type() == NodeType::Sequence) {
+                            Node mounts = (*it)["mount-points"];
                             for (const_iterator it = mounts.begin(); it != mounts.end(); ++it) {
                                 string local;
                                 string remote;
@@ -2067,7 +2038,7 @@ bool load_build_config(ola::utility::Build& _rcfg, const string& _path) {
                             }
                         }
                         else {
-                            cout << "Error: configuration must have an mounts sequence field" << endl;
+                            cout << "Error: configuration must have an mount-points sequence field" << endl;
                             return false;
                         }
 
@@ -2202,7 +2173,7 @@ bool store_build_config(const ola::utility::Build& _rcfg, const string& _path) {
 
                     mounts.push_back(mount);
                 }
-                item["mounts"] = mounts;
+                item["mount-points"] = mounts;
             }
 
             {
@@ -2275,8 +2246,8 @@ bool load_media_config(ola::utility::Media& _rcfg, const string& _path) {
                         }
 
                         if ((*it)["entries"] && (*it)["entries"].Type() == NodeType::Sequence) {
-                            Node mounts = (*it)["entries"];
-                            for (const_iterator it = mounts.begin(); it != mounts.end(); ++it) {
+                            Node entries = (*it)["entries"];
+                            for (const_iterator it = entries.begin(); it != entries.end(); ++it) {
                                 string thumb;
                                 string media;
                                 if ((*it)["thumbnail"]) {
@@ -2298,7 +2269,7 @@ bool load_media_config(ola::utility::Media& _rcfg, const string& _path) {
                             }
                         }
                         else {
-                            cout << "Error: configuration must have an mounts sequence field" << endl;
+                            cout << "Error: configuration must have an entries sequence field" << endl;
                             return false;
                         }
                         _rcfg.configuration_vec_.emplace_back(std::move(c));

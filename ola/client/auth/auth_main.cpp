@@ -174,7 +174,7 @@ string envLogPathPrefix()
     }
 
     string r = v;
-    r += "\\OLA\\client";
+    r += "\\MyApps.space\\client";
     return r;
 }
 string env_config_path_prefix()
@@ -188,7 +188,7 @@ string env_config_path_prefix()
     }
 
     string r = v;
-    r += "\\OLA";
+    r += "\\MyApps.space";
     return r;
 }
 
@@ -365,7 +365,7 @@ bool Parameters::parse(ULONG argc, PWSTR* argv)
 			("debug-port,P", value<string>(&dbg_port)->default_value("9999"), "Debug server port (e.g. on linux use: nc -l 9999)")
 			("debug-console,C", value<bool>(&dbg_console)->implicit_value(true)->default_value(false), "Debug console")
 			("debug-buffered,S", value<bool>(&dbg_buffered)->implicit_value(true)->default_value(false), "Debug unbuffered")
-            ("front,f", value<std::string>(&front_endpoint)->default_value(string(OLA_FRONT_URL)), "OLA Front Endpoint")
+            ("front,f", value<std::string>(&front_endpoint)->default_value(string(OLA_FRONT_URL)), "MyApps.space Front Endpoint")
 			("unsecure", value<bool>(&secure)->implicit_value(false)->default_value(true), "Do not use SSL to secure communication")
 			("compress", value<bool>(&compress)->implicit_value(true)->default_value(false), "Use Snappy to compress communication")
             ("secure-prefix", value<std::string>(&secure_prefix)->default_value("certs"), "Secure Path prefix")
