@@ -50,3 +50,5 @@ configurations:
       - name: ${name}
         command: example_basic.exe
         icon: icon.ico
+        arguments: ""
+        run_folder: ""
