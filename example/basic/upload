@@ -22,8 +22,8 @@ createBuild()
     cp example_basic.exe tmp/build
     cp example_basic_dlls/* tmp/build
     echo "$INDEX" > tmp/build/id.txt
-    sed "s/APPID/$INDEX/g" example_basic.build > tmp/example_basic.build
-    echo -ne "create build $APPID $INDEX tmp/example_basic.build tmp/build tmp/main.png\nq\n" | ./ola_client_cli
+    sed "s/APPID/$INDEX/g" example_basic.build.yml > tmp/example_basic.build.yml
+    echo -ne "create build $APPID $INDEX tmp/example_basic.build.yml tmp/build tmp/main.png\nq\n" | ./ola_client_cli
 }
 
 createMedia()
@@ -40,8 +40,8 @@ createMedia()
     magick example_basic_thumb.png  -fill blue  -undercolor '#00000080'  -pointsize 100 -gravity Center -annotate +0+5 " ${INDEX} "  tmp/media/blue_thumb.jpg
     magick example_basic.png  -fill blue  -undercolor '#00000080' -pointsize 100 -gravity Center -annotate +0+5 " ${INDEX} "  tmp/media/blue_image.jpg
 
-    sed "s/APPID/$INDEX/g" example_basic.media > tmp/example_basic.media
-    echo -ne "create media $APPID $INDEX tmp/example_basic.media tmp/media\nq\n" | ./ola_client_cli
+    sed "s/APPID/$INDEX/g" example_basic.media.yml > tmp/example_basic.media.yml
+    echo -ne "create media $APPID $INDEX tmp/example_basic.media.yml tmp/media\nq\n" | ./ola_client_cli
 }
 
 for (( num=${START}; num<${LAST}; num++ )); do

@@ -28,9 +28,7 @@
 #include "replxx.hxx"
 #include "zip.h"
 
-#define LIBCONFIGXX_STATIC
-#define LIBCONFIG_STATIC
-#include "libconfig.h++"
+#include "yaml-cpp/yaml.h"
 
 #include <fstream>
 #include <future>
@@ -191,6 +189,7 @@ void handle_fetch(istream& _ris, Engine& _reng);
 void handle_create(istream& _ris, Engine& _reng);
 void handle_generate(istream& _ris, Engine& _reng);
 void handle_acquire(istream& _ris, Engine& _reng);
+void handle_parse(istream& _ris, Engine& _reng);
 
 } //namespace
 
@@ -309,6 +308,9 @@ int main(int argc, char* argv[])
         } else if (cmd == "generate") {
             handle_generate(iss, engine);
             rx.history_add(line);
+        } else if (cmd == "parse") {
+            handle_parse(iss, engine);
+            rx.history_add(line);
         } else if (cmd == "acquire") {
             handle_acquire(iss, engine);
             rx.history_add(line);
@@ -384,7 +386,7 @@ bool parse_arguments(Parameters& _par, int argc, char* argv[])
             ("debug-buffered,S", value<bool>(&_par.dbg_buffered)->implicit_value(true)->default_value(false), "Debug buffered")
             ("unsecure", value<bool>(&_par.secure)->implicit_value(false)->default_value(true), "Use SSL to secure communication")
             ("compress", value<bool>(&_par.compress)->implicit_value(true)->default_value(false), "Use Snappy to compress communication")
-            ("front", value<std::string>(&_par.front_endpoint)->default_value(string(OLA_FRONT_URL)), "OLA Front Endpoint")
+            ("front", value<std::string>(&_par.front_endpoint)->default_value(string(OLA_FRONT_URL)), "MyApps.space Front Endpoint")
             ("secure-prefix", value<std::string>(&_par.secure_prefix)->default_value("certs"), "Secure Path prefix")
         ;
         // clang-format off
@@ -483,16 +485,20 @@ void handle_help(istream& _ris, Engine &_reng){
     cout<<"> fetch app APP_ID\n\n";
     cout<<"> fetch build APP_ID BUILD_ID\n\n";
     cout<<"> fetch config APP_ID LANGUAGE_ID OS_ID\n\n"; 
+#ifdef APP_CONFIG
     cout<<"> generate app ~/path/to/app.cfg\n\n";
-    cout<<"> generate build ~/path/to/build.cfg\n\n";
-    cout<<"> generate media ~/path/to/media.cfg\n\n";
+#endif
+    cout<<"> generate build ~/path/to/build.yml\n\n";
+    cout<<"> generate media ~/path/to/media.yml\n\n";
+    cout << "> parse build ~/path/to/build.yml\n\n";
+    cout << "> parse media ~/path/to/media.yml\n\n";
     cout<<"> create app\n\n";
-    cout<<"> create build APP_ID BUILD_TAG ~/path/to/build.cfg ~/path/to/build_folder ~/path/to/build_icon.png\n";
+    cout<<"> create build APP_ID BUILD_TAG ~/path/to/build.yml ~/path/to/build_folder ~/path/to/build_icon.png\n";
     cout<<"> fetch updates LANGUAGE_ID OS_ID APP_ID [APP_ID]\n";
     cout<<"\nExamples:\n";
     cout<<"> create app bubbles.app\n";
-    cout<<"> create build l/AQPpeZWqoR1Fcngt3t2w== first bubbles.bld ~/tmp/bubbles_client ~/tmp/bubbles.png\n";
-    cout<<"> create media l/AQPpeZWqoR1Fcngt3t2w== first bubbles.media ~/tmp/bubbles_media\n";
+    cout<<"> create build l/AQPpeZWqoR1Fcngt3t2w== first bubbles.build.yml ~/tmp/bubbles_client ~/tmp/bubbles.png\n";
+    cout<<"> create media l/AQPpeZWqoR1Fcngt3t2w== first bubbles.media.yml ~/tmp/bubbles_media\n";
     cout<<"> fetch config l/AQPpeZWqoR1Fcngt3t2w== en-US Windows10x86_64 desc\n";
     cout<<"> fetch config uv0oHriZYsfwec566VTXew== US_en Windows10x86_64\n";
     cout<<"> fetch media uv0oHriZYsfwec566VTXew== US_en Windows10x86_64\n";
@@ -729,6 +735,13 @@ ostream& operator<<(ostream &_ros, const utility::Media::Configuration &c){
 ostream& operator<<(ostream &_ros, const utility::Build &_cfg){
     _ros<<"Name : "<<_cfg.name_<<endl;
     _ros<<"Tag: "<<_cfg.tag_<<endl;
+
+    _ros << "Dictionary:{";
+    for (const auto& p : _cfg.dictionary_dq_) {
+        _ros << "{[" << p.first << "][" << p.second << "]} ";
+    }
+    _ros << '}' << endl;
+
     _ros<<"Properties:{";
     for(const auto& p: _cfg.property_vec_){
         _ros<<"{["<<p.first<<"]["<<p.second<<"]} ";
@@ -739,6 +752,15 @@ ostream& operator<<(ostream &_ros, const utility::Build &_cfg){
         _ros<<c<<"\n\n";
     }
     _ros<<'}'<<endl;
+    return _ros;
+}
+
+ostream& operator<<(ostream& _ros, const utility::Media& _cfg) {
+    _ros << "Configurations: {\n";
+    for (const auto& c : _cfg.configuration_vec_) {
+        _ros << c << "\n\n";
+    }
+    _ros << '}' << endl;
     return _ros;
 }
 
@@ -1376,35 +1398,6 @@ void handle_create(istream& _ris, Engine &_reng){
 //-----------------------------------------------------------------------------
 //  Generate
 //-----------------------------------------------------------------------------
-#ifdef APP_CONFIG
-void handle_generate_app(istream& _ris, Engine &_reng){
-    string config_path;
-    _ris>>std::quoted(config_path);
-    
-    ola::utility::Application cfg;
-    
-    cfg.dictionary_dq_ = {
-        {"", "en-US"},
-        {"NAME", "bubbles"},
-        {"DESCRIPTION", "bubbles description"},
-        {"", "ro-RO"},
-        {"NAME", "bule"},
-        {"DESCRIPTION", "descriere bule"},
-    };
-    
-    cfg.property_vec_ = {
-        {"name", "${NAME}"},
-        {"description", "${DESCRIPTION}"}
-    };
-    store_app_config(cfg, path(config_path));
-    {
-        ola::utility::Application cfg_check;
-        load_app_config(cfg_check, path(config_path));
-        solid_check(cfg == cfg_check);
-    }
-}
-#endif
-
 //-----------------------------------------------------------------------------
 
 void handle_generate_buid(istream& _ris, Engine &_reng){
@@ -1418,23 +1411,23 @@ void handle_generate_buid(istream& _ris, Engine &_reng){
     
     cfg.dictionary_dq_ = {
         {"", "en-US"},
-        {"NAME", "Bubbles"},
-        {"DESCRIPTION", "Bubbles description"},
+        {"name", "Bubbles"},
+        {"description", "Bubbles description\non multiple\nrows"},
         {"", "ro-RO"},
-        {"NAME", "Bule"},
-        {"DESCRIPTION", "Descriere Bule"},
+        {"name", "Bule"},
+        {"description", "Descriere Bule\r\npe mai multe\r\nranduri"},
     };
     
     cfg.property_vec_ = {
-        {"name", "${NAME}"},
-        {"description", "${DESCRIPTION}"}
+        {"name", "${name}"},
+        {"description", "${description}"}
     };
     
     cfg.configuration_vec_ = ola::utility::Build::ConfigurationVectorT{
         {
             {
                 "windows32bit",
-                "${NAME}",//directory
+                "${name}",//directory
                 ola::utility::Build::Configuration::compute_flags({"HiddenDirectory"}),
                 {"Windows10x86_32", "Windows10x86_64"},
                 {{"bin", "bin32"}, {"lib", "lib32"}},
@@ -1443,33 +1436,35 @@ void handle_generate_buid(istream& _ris, Engine &_reng){
                     {
                         "Bubbles",
                         "bin/bubbles.exe",
+                        "--about",
                         "bin",
-                        "bubbles_icon"
+                        "bubbles.ico"
                     }
                 },
                 {
-                    {"name", "${NAME}"},
-                    {"description", "${DESCRIPTION}"}
+                    {"name", "${name}"},
+                    {"description", "${description}"}
                 }//properties
             },
             {
                 "windows64bit",
-                "${NAME}",//directory
+                "${name}",//directory
                 ola::utility::Build::Configuration::compute_flags({}),
                 {"Windows10x86_64"},
                 {{"bin", "bin64"}, {"lib", "lib64"}},
                 {"bin/bubbles.exe"},
                 {
                     {
-                        "${NAME}",
+                        "${name}",
                         "bin/bubbles.exe",
+                        "--help",
                         "bin",
-                        "bubbles_icon"
+                        "bubbles.ico"
                     }
                 },
                 {
-                    {"name", "${NAME}"},
-                    {"description", "${DESCRIPTION}"}
+                    {"name", "${name}"},
+                    {"description", "${description}"}
                 }//properties
             }
         }
@@ -1549,7 +1544,49 @@ void handle_generate(istream& _ris, Engine &_reng){
         handle_generate_media(_ris, _reng);
     }
 }
+//-----------------------------------------------------------------------------
+//  Parse
+//-----------------------------------------------------------------------------
 
+void handle_parse_buid(istream& _ris, Engine& _reng) {
+    string config_path;
+    _ris >> std::quoted(config_path);
+
+    ola::utility::Build cfg;
+    if (load_build_config(cfg, path(config_path))){
+        cout << endl;
+        cout << cfg << endl;
+    }
+}
+
+void handle_parse_media(istream& _ris, Engine& _reng) {
+    string config_path;
+    _ris >> std::quoted(config_path);
+
+    ola::utility::Media cfg;
+    if (load_media_config(cfg, path(config_path))) {
+        cout << endl;
+        cout << cfg << endl;
+    }
+}
+
+void handle_parse(istream& _ris, Engine& _reng) {
+    string what;
+    _ris >> std::quoted(what);
+
+#ifdef APP_CONFIG
+    if (what == "app") {
+        handle_generate_app(_ris, _reng);
+    }
+    else
+#endif
+        if (what == "build") {
+            handle_parse_buid(_ris, _reng);
+        }
+        else if (what == "media") {
+            handle_parse_media(_ris, _reng);
+        }
+}
 
 //-----------------------------------------------------------------------------
 //  Acquire
@@ -1692,10 +1729,10 @@ string env_config_path_prefix()
     }
 
     string r = v;
-    r += "\\OLA";
+    r += "\\MyApps.space";
     return r;
 #else
-    return get_home_env() + "/.ola";
+    return get_home_env() + "/.myapps.space";
 #endif
 }
 
@@ -1731,7 +1768,7 @@ string envConfigPathPrefix()
     }
 
     string r = v;
-    r += "\\OLA";
+    r += "\\MyApps.space";
     return r;
 }
 
@@ -1855,375 +1892,453 @@ bool store_app_config(const ola::utility::Application &_rcfg, const string &_pat
 #endif
 
 //-----------------------------------------------------------------------------
+bool load_build_config(ola::utility::Build& _rcfg, const string& _path) {
+    using namespace YAML;
+    Node config;
+    try {
+        config = LoadFile(_path);
+    }
+    catch (std::runtime_error& err) {
+        cout << "Error loading " << _path << ": " << err.what() << endl;
+        return false;
+    }
+    
+    if (config["name"]) {
+        _rcfg.name_ = config["name"].as<string>();
+    }
+    else {
+        cout << "Error: build name not found" << endl;
+        return false;
+    }
 
-bool load_build_config(ola::utility::Build &_rcfg, const string &_path){
-    using namespace libconfig;
-    Config cfg;
-    cfg.setOptions(Config::OptionFsync
-                 | Config::OptionSemicolonSeparators
-                 | Config::OptionColonAssignmentForGroups
-                 | Config::OptionOpenBraceOnSeparateLine);
-    try
+    if (config["tag"]) {
+        _rcfg.tag_ = config["tag"].as<string>();
+    }
+    else {
+        cout << "Error: build tag not found" << endl;
+        return false;
+    }
     {
-        cfg.readFile(_path.c_str());
-    }
-    catch(const FileIOException &fioex)
-    {
-        std::cerr << "I/O error while reading file." << std::endl;
-        return false;
-    }
-    catch(const ParseException &pex)
-    {
-        std::cerr << "Parse error at " << pex.getFile() << ":" << pex.getLine()
-                << " - " << pex.getError() << std::endl;
-        return false;
-    }
-    
-    Setting &root = cfg.getRoot();
-    
-    if(!root.lookupValue("name", _rcfg.name_)){
-        cout<<"Error: build name not found in configuration"<<endl;
-        return false;
-    }
-    
-    if(!root.lookupValue("tag", _rcfg.tag_)){
-        cout<<"Error: build name not found in configuration"<<endl;
-        return false;
-    }
-    
-    if(root.exists("dictionary")){
-        Setting &names = root.lookup("dictionary");
-        
-        for(auto dicit = names.begin(); dicit != names.end(); ++dicit){
-            _rcfg.dictionary_dq_.emplace_back("", dicit->getName());
-            
-            for(auto it = dicit->begin(); it != dicit->end(); ++it){
-                _rcfg.dictionary_dq_.emplace_back(it->getName(), *it);
+        Node dictionary = config["dictionary"];
+        if (dictionary) {
+            if (dictionary.Type() == NodeType::Sequence) {
+                for (const_iterator it = dictionary.begin(); it != dictionary.end(); ++it) {
+                    Node language = (*it)["language"];
+                    if (language) {
+                        _rcfg.dictionary_dq_.emplace_back("", language.as<string>());
+                    }
+                    else {
+                        cout << "Error: dictionary item must contain language" << endl;
+                        return false;
+                    }
+
+                    for (const_iterator it2 = it->begin(); it2 != it->end(); ++it2) {
+                        if (it2->first.as<string>() != "language") {
+                            _rcfg.dictionary_dq_.emplace_back(it2->first.as<string>(), it2->second.as<string>());
+                        }
+                    }
+                }
+            }
+            else {
+                cout << "Error: dictionary should be a sequence" << endl;
+                return false;
             }
         }
     }
-    
-    if(root.exists("properties")){
-        Setting &names = root.lookup("properties");
-        
-        for(auto it = names.begin(); it != names.end(); ++it){
-            _rcfg.property_vec_.emplace_back(it->getName(), *it);
+
+    {
+        Node properties = config["properties"];
+        if (properties) {
+            if (properties.Type() == NodeType::Map) {
+                for (const_iterator it = properties.begin(); it != properties.end(); ++it) {
+                    _rcfg.property_vec_.emplace_back(it->first.as<string>(), it->second.as<string>());
+                }
+            }
+            else {
+                cout << "Error: properties entry should be a map" << endl;
+                return false;
+            }
+
         }
     }
-    
-    if(root.exists("configurations")){
-        Setting &components = root.lookup("configurations");
-        for(auto it = components.begin(); it != components.end(); ++it){
-            ola::utility::Build::Configuration c;
-            
-            if(!it->lookupValue("name", c.name_)){
-                cout<<"Error: component name not found in configuration"<<endl;
+
+    {
+        Node configurations = config["configurations"];
+        if (configurations) {
+            if (configurations.Type() == NodeType::Sequence) {
+                for (const_iterator it = configurations.begin(); it != configurations.end(); ++it) {
+                    ola::utility::Build::Configuration c;
+                    if (it->Type() == NodeType::Map) {
+                        if ((*it)["name"]) {
+                            c.name_ = (*it)["name"].as<string>();
+                        }
+                        else {
+                            cout << "Error: configuration must have a name" << endl;
+                            return false;
+                        }
+
+                        if ((*it)["directory"]) {
+                            c.directory_ = (*it)["directory"].as<string>();
+                        }
+                        else {
+                            cout << "Error: configuration must have a directory" << endl;
+                            return false;
+                        }
+
+                        if ((*it)["oses"] && (*it)["oses"].Type() == NodeType::Sequence) {
+                            Node oses = (*it)["oses"];
+                            for (const_iterator it = oses.begin(); it != oses.end(); ++it) {
+                                c.os_vec_.emplace_back(it->as<string>());
+                            }
+                        }
+                        else {
+                            cout << "Error: configuration must have an oses sequence field" << endl;
+                            return false;
+                        }
+
+                        if ((*it)["flags"] && (*it)["flags"].Type() == NodeType::Sequence) {
+                            Node flags = (*it)["flags"];
+                            for (const_iterator it = flags.begin(); it != flags.end(); ++it) {
+                                c.flags_ |= ola::utility::Build::Configuration::flag(it->as<string>().c_str());
+                            }
+                        }
+
+                        if ((*it)["exes"] && (*it)["exes"].Type() == NodeType::Sequence) {
+                            Node exes = (*it)["exes"];
+                            for (const_iterator it = exes.begin(); it != exes.end(); ++it) {
+                                c.exe_vec_.emplace_back(it->as<string>());
+                            }
+                        }
+                        else {
+                            cout << "Error: configuration must have an exes sequence field" << endl;
+                            return false;
+                        }
+
+                        if ((*it)["mount-points"] && (*it)["mount-points"].Type() == NodeType::Sequence) {
+                            Node mounts = (*it)["mount-points"];
+                            for (const_iterator it = mounts.begin(); it != mounts.end(); ++it) {
+                                string local;
+                                string remote;
+                                if ((*it)["local"]) {
+                                    local = (*it)["local"].as<string>();
+                                }
+                                else {
+                                    cout << "Error: mount must contain local field" << endl;
+                                    return false;
+                                }
+
+                                if ((*it)["remote"]) {
+                                    remote = (*it)["remote"].as<string>();
+                                }
+                                else {
+                                    cout << "Error: mount must contain remote field" << endl;
+                                    return false;
+                                }
+                                c.mount_vec_.emplace_back(local, remote);
+                            }
+                        }
+                        else {
+                            cout << "Error: configuration must have an mount-points sequence field" << endl;
+                            return false;
+                        }
+
+                        if ((*it)["properties"] && (*it)["properties"].Type() == NodeType::Map) {
+                            Node properties = (*it)["properties"];
+                            for (const_iterator it = properties.begin(); it != properties.end(); ++it) {
+                                c.property_vec_.emplace_back(it->first.as<string>(), it->second.as<string>());
+                            }
+                        }
+
+                        if ((*it)["shortcuts"] && (*it)["shortcuts"].Type() == NodeType::Sequence) {
+                            Node shortcuts = (*it)["shortcuts"];
+                            for (const_iterator it = shortcuts.begin(); it != shortcuts.end(); ++it) {
+                                ola::utility::Build::Shortcut s;
+
+                                s.name_ = (*it)["name"].as<string>();
+                                s.command_ = (*it)["command"].as<string>();
+                                s.arguments_ = (*it)["arguments"].as<string>();
+                                s.run_folder_ = (*it)["run_folder"].as<string>();
+                                s.icon_ = (*it)["icon"].as<string>();
+
+                                c.shortcut_vec_.emplace_back(std::move(s));
+                            }
+                        }
+                        else {
+                            cout << "Error: configuration must have an shortcuts sequence field" << endl;
+                            return false;
+                        }
+
+                        _rcfg.configuration_vec_.emplace_back(std::move(c));
+                    }
+                    else {
+                        cout << "Error: configurations not a map" << endl;
+                        return false;
+                    }
+                }
+            }
+            else {
+                cout << "Error: configurations entry should be a sequence" << endl;
                 return false;
             }
-            
-             if(!it->lookupValue("directory", c.directory_)){
-                cout<<"Error: configuration directory not found in configuration"<<endl;
-                return false;
-            }
-            
-            if(it->exists("oses")){
-                Setting &oses = it->lookup("oses");
-                for(auto it = oses.begin(); it != oses.end(); ++it){
-                    c.os_vec_.emplace_back(static_cast<const string&>(*it));
-                }
-            }else{
-                cout<<"Error: component oses not fount in configuration"<<endl;
-                return false;
-            }
-            
-            
-            if(it->exists("flags")){
-                Setting &flags = it->lookup("flags");
-                for(auto it = flags.begin(); it != flags.end(); ++it){
-                    c.flags_ |= ola::utility::Build::Configuration::flag(static_cast<const string&>(*it).c_str());
-                }
-            }
-            
-            if(it->exists("exes")){
-                Setting &exes = it->lookup("exes");
-                for(auto it = exes.begin(); it != exes.end(); ++it){
-                    c.exe_vec_.emplace_back(static_cast<const string&>(*it));
-                }
-            }else{
-                cout<<"Error: component exes not fount in configuration"<<endl;
-                return false;
-            }
-            
-            if(it->exists("mounts")){
-                Setting &mounts = it->lookup("mounts");
-                
-                for(auto it = mounts.begin(); it != mounts.end(); ++it){
-                    string local;
-                    string remote;
-                    it->lookupValue("local", local);
-                    it->lookupValue("remote", remote);
-                    
-                    c.mount_vec_.emplace_back(local, remote);
-                }
-            }else{
-                cout<<"Error: component mounts not fount in configuration"<<endl;
-                return false;
-            }
-            
-            if(it->exists("properties")){
-                Setting &names = it->lookup("properties");
-                
-                for(auto itp = names.begin(); itp != names.end(); ++itp){
-                    c.property_vec_.emplace_back(itp->getName(), *itp);
-                }
-            }
-            
-            if(it->exists("shortcuts")){
-                Setting &shortcuts = it->lookup("shortcuts");
-                
-                for(auto it = shortcuts.begin(); it != shortcuts.end(); ++it){
-                    ola::utility::Build::Shortcut s;
-                    
-                    it->lookupValue("name", s.name_);
-                    it->lookupValue("command", s.command_);
-                    it->lookupValue("arguments", s.arguments_);
-                    it->lookupValue("run_folder", s.run_folder_);
-                    it->lookupValue("icon", s.icon_);
-                    
-                    c.shortcut_vec_.emplace_back(std::move(s));
-                }
-            }else{
-                cout<<"Error: component mounts not fount in configuration"<<endl;
-                return false;
-            }
-            
-            _rcfg.configuration_vec_.emplace_back(std::move(c));
+
         }
-    }else{
-        cout<<"Error: no component found"<<endl;
-        return false;
+        else {
+            cout << "Error: configurations entry should exist" << endl;
+            return false;
+        }
     }
     return true;
 }
 
 //-----------------------------------------------------------------------------
+bool store_build_config(const ola::utility::Build& _rcfg, const string& _path) {
+    using namespace YAML;
 
-bool store_build_config(const ola::utility::Build &_rcfg, const string &_path){
-    using namespace libconfig;
-    Config cfg;
-    
-    cfg.setOptions(Config::OptionFsync
-                 | Config::OptionSemicolonSeparators
-                 | Config::OptionColonAssignmentForGroups
-                 | Config::OptionOpenBraceOnSeparateLine);
-    
-    Setting &root = cfg.getRoot();
-    
-    root.add("name", Setting::TypeString) = _rcfg.name_;
-    root.add("tag", Setting::TypeString) = _rcfg.tag_;
-    
+    Node config;
+
+    config["name"] = _rcfg.name_;
+    config["tag"] = _rcfg.tag_;
+
     {
-        Setting &dic = root.add("dictionary", Setting::TypeGroup);
-        Setting *plang = nullptr;
-        for(auto v: _rcfg.dictionary_dq_){
-            
-            if(v.first.empty()){
-                plang = &dic.add(v.second, Setting::TypeGroup);
+        Node dictionary;
+        Node item;
+        for (auto v : _rcfg.dictionary_dq_) {
+
+            if (v.first.empty()) {
+                if (!item.IsNull()) {
+                    dictionary.push_back(item);
+                }
+                item.reset();
+                item["language"] = v.second;
                 continue;
             }
-            if(plang == nullptr) plang = &dic.add("", Setting::TypeGroup);
-            
-            plang->add(v.first, Setting::TypeString) = v.second;
+            else {
+                item[v.first] = v.second;
+            }
         }
+        if (item.IsDefined()) {
+            dictionary.push_back(item);
+        }
+        config["dictionary"] = dictionary;
     }
-    
+
     {
-        Setting &props = root.add("properties", Setting::TypeGroup);
-        
-        for(auto v: _rcfg.property_vec_){
-            props.add(v.first, Setting::TypeString) = v.second;
+        Node properties;
+        for (auto v : _rcfg.property_vec_) {
+            properties[v.first] = v.second;
         }
+        config["properties"] = properties;
     }
-    
-    Setting &os_specific = root.add("configurations", Setting::TypeList);
-    
-    for(const auto &component: _rcfg.configuration_vec_){
-        Setting &cmp_g = os_specific.add(Setting::TypeGroup);
-        {
-            cmp_g.add("name", Setting::TypeString) = component.name_;
-            cmp_g.add("directory", Setting::TypeString) = component.directory_;
-            if(component.flags_){
-                Setting &flags = cmp_g.add("flags", Setting::TypeArray);
+
+    {
+        Node configurations;
+        for (const auto& component : _rcfg.configuration_vec_) {
+            Node item;
+            item["name"] = component.name_;
+            item["directory"] = component.directory_;
+            
+            {
+                Node flags;
+
                 ola::utility::Build::Configuration::for_each_flag(
                     component.flags_,
-                    [&flags](const char *_name){
-                        flags.add(Setting::TypeString) = std::string(_name);
+                    [&flags](const char* _name) {
+                        flags.push_back(std::string(_name));
                     });
-            }
-            
-            Setting &oses = cmp_g.add("oses", Setting::TypeArray);
-            for(auto &v: component.os_vec_){
-                oses.add(Setting::TypeString) = v;
-            }
-            Setting &mount = cmp_g.add("mounts", Setting::TypeList);
-            for(auto& v: component.mount_vec_){
-                Setting &g  = mount.add(Setting::TypeGroup);
-                g.add("local", Setting::TypeString) = v.first;
-                g.add("remote", Setting::TypeString) = v.second;
-            }
-            Setting &exe = cmp_g.add("exes", Setting::TypeArray);
-            for(auto &v: component.exe_vec_){
-                exe.add(Setting::TypeString) = v;
+
+                item["flags"] = flags;
             }
             
             {
-                Setting &props = cmp_g.add("properties", Setting::TypeGroup);
-                
-                for(auto v: component.property_vec_){
-                    props.add(v.first, Setting::TypeString) = v.second;
+                Node oses;
+                for (auto& v : component.os_vec_) {
+                    oses.push_back(v);
                 }
+                item["oses"] = oses;
             }
-            
-            Setting &shortcut_list = cmp_g.add("shortcuts", Setting::TypeList);
-            for(auto &v: component.shortcut_vec_){
-                Setting &g  = shortcut_list.add(Setting::TypeGroup);
-                g.add("name", Setting::TypeString) = v.name_;
-                g.add("command", Setting::TypeString) = v.command_;
-                g.add("arguments", Setting::TypeString) = v.arguments_;
-                g.add("icon", Setting::TypeString) = v.icon_;
-                g.add("run_folder", Setting::TypeString) = v.run_folder_;
-            }
-        }
 
+            {
+                Node exes;
+                for (auto& v : component.exe_vec_) {
+                    exes.push_back(v);
+                }
+                item["exes"] = exes;
+            }
+            {
+                Node mounts;
+                for (auto& v : component.mount_vec_) {
+                    Node mount;
+                    mount["local"] = v.first;
+                    mount["remote"] = v.second;
+
+                    mounts.push_back(mount);
+                }
+                item["mount-points"] = mounts;
+            }
+
+            {
+                Node properties;
+                for (auto v : component.property_vec_) {
+                    properties[v.first] = v.second;
+                }
+
+                item["properties"] = properties;
+            }
+            {
+                Node shortcuts;
+                for (auto& v : component.shortcut_vec_) {
+                    Node item;
+                    item["name"] = v.name_;
+                    item["command"] = v.command_;
+                    item["arguments"] = v.arguments_;
+                    item["icon"] = v.icon_;
+                    item["run_folder"] = v.run_folder_;
+
+                    shortcuts.push_back(item);
+                }
+
+                item["shortcuts"] = shortcuts;
+            }
+            configurations.push_back(item);
+        }
+        config["configurations"] = configurations;
     }
-    
-    try
-    {
-        cfg.writeFile(_path.c_str());
-        cerr << "Updated configuration successfully written to: " << _path << endl;
+
+    std::ofstream fout(_path);
+    try {
+        fout << config;
     }
-    catch(const FileIOException &fioex)
-    {
-        cerr << "I/O error while writing file: " << _path << endl;
+    catch (runtime_error& err) {
+        cout << "Failed generating yml file: " << err.what() << endl;
         return false;
     }
     return true;
 }
 
 //-----------------------------------------------------------------------------
+bool load_media_config(ola::utility::Media& _rcfg, const string& _path) {
+    using namespace YAML;
+    Node config;
+    try {
+        config = LoadFile(_path);
+    }
+    catch (std::runtime_error& err) {
+        cout << "Error loading " << _path << ": " << err.what() << endl;
+        return false;
+    }
+    {
+        Node configurations = config["configurations"];
+        if (configurations) {
+            if (configurations.Type() == NodeType::Sequence) {
+                for (const_iterator it = configurations.begin(); it != configurations.end(); ++it) {
+                    ola::utility::Media::Configuration c;
+                    if (it->Type() == NodeType::Map) {
+                        
+                        if ((*it)["oses"] && (*it)["oses"].Type() == NodeType::Sequence) {
+                            Node oses = (*it)["oses"];
+                            for (const_iterator it = oses.begin(); it != oses.end(); ++it) {
+                                c.os_vec_.emplace_back(it->as<string>());
+                            }
+                        }
+                        else {
+                            cout << "Error: configuration must have an oses sequence field" << endl;
+                            return false;
+                        }
 
-bool load_media_config(ola::utility::Media &_rcfg, const string &_path){
-    using namespace libconfig;
-    Config cfg;
-    cfg.setOptions(Config::OptionFsync
-                 | Config::OptionSemicolonSeparators
-                 | Config::OptionColonAssignmentForGroups
-                 | Config::OptionOpenBraceOnSeparateLine);
-    try
-    {
-        cfg.readFile(_path.c_str());
-    }
-    catch(const FileIOException &fioex)
-    {
-        std::cerr << "I/O error while reading file." << std::endl;
-        return false;
-    }
-    catch(const ParseException &pex)
-    {
-        std::cerr << "Parse error at " << pex.getFile() << ":" << pex.getLine()
-                << " - " << pex.getError() << std::endl;
-        return false;
-    }
-    
-    Setting &root = cfg.getRoot();
-    
-    if(root.exists("configurations")){
-        Setting &components = root.lookup("configurations");
-        for(auto it = components.begin(); it != components.end(); ++it){
-            ola::utility::Media::Configuration c;
-            
-            if(it->exists("oses")){
-                Setting &oses = it->lookup("oses");
-                for(auto it = oses.begin(); it != oses.end(); ++it){
-                    c.os_vec_.emplace_back(static_cast<const string&>(*it));
+                        if ((*it)["entries"] && (*it)["entries"].Type() == NodeType::Sequence) {
+                            Node entries = (*it)["entries"];
+                            for (const_iterator it = entries.begin(); it != entries.end(); ++it) {
+                                string thumb;
+                                string media;
+                                if ((*it)["thumbnail"]) {
+                                    thumb = (*it)["thumbnail"].as<string>();
+                                }
+                                else {
+                                    cout << "Error: entry must contain thumbnail field" << endl;
+                                    return false;
+                                }
+
+                                if ((*it)["media"]) {
+                                    media = (*it)["media"].as<string>();
+                                }
+                                else {
+                                    cout << "Error: entry must contain media field" << endl;
+                                    return false;
+                                }
+                                c.entry_vec_.emplace_back(thumb, media);
+                            }
+                        }
+                        else {
+                            cout << "Error: configuration must have an entries sequence field" << endl;
+                            return false;
+                        }
+                        _rcfg.configuration_vec_.emplace_back(std::move(c));
+                    }
+                    else {
+                        cout << "Error: configurations not a map" << endl;
+                        return false;
+                    }
                 }
-            }else{
-                cout<<"Error: component oses not fount in configuration"<<endl;
+            }
+            else {
+                cout << "Error: configurations entry should be a sequence" << endl;
                 return false;
             }
-            
-            if(it->exists("entries")){
-                Setting &entries = it->lookup("entries");
-                
-                for(auto it = entries.begin(); it != entries.end(); ++it){
-                    string thumbnail;
-                    string media;
-                    it->lookupValue("thumbnail", thumbnail);
-                    it->lookupValue("media", media);
-                    
-                    c.entry_vec_.emplace_back(thumbnail, media);
-                }
-            }else{
-                cout<<"Error: component entries not fount in configuration"<<endl;
-                return false;
-            }
-            
-            _rcfg.configuration_vec_.emplace_back(std::move(c));
+
         }
-    }else{
-        cout<<"Error: no component found"<<endl;
-        return false;
+        else {
+            cout << "Error: configurations entry should exist" << endl;
+            return false;
+        }
     }
     return true;
 }
 
 //-----------------------------------------------------------------------------
+bool store_media_config(const ola::utility::Media& _rcfg, const string& _path) {
+    using namespace YAML;
+    Node config;
 
-bool store_media_config(const ola::utility::Media &_rcfg, const string &_path){
-    using namespace libconfig;
-    Config cfg;
-    
-    cfg.setOptions(Config::OptionFsync
-                 | Config::OptionSemicolonSeparators
-                 | Config::OptionColonAssignmentForGroups
-                 | Config::OptionOpenBraceOnSeparateLine);
-    
-    Setting &root = cfg.getRoot();
-    
-    
-    Setting &os_specific = root.add("configurations", Setting::TypeList);
-    
-    for(const auto &component: _rcfg.configuration_vec_){
-        Setting &cmp_g = os_specific.add(Setting::TypeGroup);
-        {
-            Setting &oses = cmp_g.add("oses", Setting::TypeArray);
-            for(auto &v: component.os_vec_){
-                oses.add(Setting::TypeString) = v;
-            }
+    {
+        Node configurations;
+        for (const auto& component : _rcfg.configuration_vec_) {
+            Node item;
             
-            Setting &entries = cmp_g.add("entries", Setting::TypeList);
-            for(auto& v: component.entry_vec_){
-                Setting &g  = entries.add(Setting::TypeGroup);
-                g.add("thumbnail", Setting::TypeString) = v.thumbnail_path_;
-                g.add("media", Setting::TypeString) = v.path_;
+            {
+                Node oses;
+                for (auto& v : component.os_vec_) {
+                    oses.push_back(v);
+                }
+                item["oses"] = oses;
             }
-        }
 
+            {
+                Node entries;
+                for (auto& v : component.entry_vec_) {
+                    Node entry;
+                    entry["thumbnail"] = v.thumbnail_path_;
+                    entry["media"] = v.path_;
+
+                    entries.push_back(entry);
+                }
+                item["entries"] = entries;
+            }
+
+            configurations.push_back(item);
+        }
+        config["configurations"] = configurations;
     }
-    
-    try
-    {
-        cfg.writeFile(_path.c_str());
-        cerr << "Updated configuration successfully written to: " << _path << endl;
+
+    std::ofstream fout(_path);
+    try {
+        fout << config;
     }
-    catch(const FileIOException &fioex)
-    {
-        cerr << "I/O error while writing file: " << _path << endl;
+    catch (runtime_error& err) {
+        cout << "Failed generating yml file: " << err.what() << endl;
         return false;
     }
     return true;
 }
-
 //-----------------------------------------------------------------------------
 
 string path(const std::string &_path){

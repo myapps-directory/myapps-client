@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.10 FATAL_ERROR)
 
-project(OlaClient VERSION 1.1)
+project(OlaClient VERSION 1.2)
 
 set(EXTERNAL_DIR "" CACHE PATH "External dependencies folder")
 
@@ -78,7 +78,7 @@ include(cmake/build-cereal.cmake)
 
 include(cmake/build-snappy.cmake)
 
-include(cmake/build-config.cmake)
+include(cmake/build-yaml.cmake)
 
 include(cmake/build-libzip.cmake)
 
@@ -174,7 +174,7 @@ message(STATUS "Generating ${CPACK_GENERATOR}  package")
 string(TIMESTAMP OLA_YMDHM "%y%m%d%H%M")
 string(TIMESTAMP OLA_YEAR "%Y")
 
-set(CPACK_PACKAGE_VENDOR                "AphorSoft SRL")
+set(CPACK_PACKAGE_VENDOR                "MyApps.space")
 set(CPACK_PACKAGE_VERSION               "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}")
 set(CPACK_PACKAGE_VERSION_MAJOR         "${PROJECT_VERSION_MAJOR}")
 set(CPACK_PACKAGE_VERSION_MINOR         "${PROJECT_VERSION_MINOR}")
@@ -185,7 +185,7 @@ set(CPACK_PACKAGE_EXECUTABLES           "ola_client_cli" "MyApps.space CLI" "ola
 set(CPACK_PACKAGE_FILE_NAME             "${CPACK_PACKAGE_NAME}-${CMAKE_BUILD_TYPE}-${CPACK_PACKAGE_VERSION}-${CMAKE_SYSTEM_PROCESSOR}")
 set(CPACK_PACKAGE_CONTACT               "office@myapps.space")
 set(CPACK_PACKAGING_INSTALL_PREFIX      ${PACKAGING_INSTALL_PREFIX})
-SET(CPACK_PACKAGE_INSTALL_DIRECTORY     "OLA")
+SET(CPACK_PACKAGE_INSTALL_DIRECTORY     "MyApps.space")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY   "MyApps.space - On Line Application Service")
 
 set(CPACK_WIX_TEMPLATE                  "${CMAKE_CURRENT_SOURCE_DIR}/cpack/wix/ola.wxs")

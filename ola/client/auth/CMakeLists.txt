@@ -52,6 +52,23 @@ if(${Qt5Widgets_FOUND})
             ${SRCS}
             auth_main.rc
         )
+        if(TARGET Qt5::windeployqt)
+            if(CMAKE_BUILD_TYPE MATCHES "debug")
+                set(BUILD_TYPE "--debug")
+            else()
+                set(BUILD_TYPE "--release")
+            endif()
+            # execute windeployqt in a tmp directory after build
+            add_custom_command(TARGET ola_client_auth
+                POST_BUILD
+                #COMMAND ${CMAKE_COMMAND} -E remove_directory $<TARGET_FILE_DIR:ola_client_store>/windeployqt
+                COMMAND set PATH=%PATH%$<SEMICOLON>${qt5_install_prefix}/bin
+                COMMAND Qt5::windeployqt ${BUILD_TYPE} "$<TARGET_FILE_DIR:ola_client_auth>/$<TARGET_FILE_NAME:ola_client_auth>"
+            )
+
+            # copy deployment directory during installation
+            install(DIRECTORY $<TARGET_FILE_DIR:ola_client_auth>//windeployqt/ DESTINATION bin PATTERN "windeployqt/*")
+        endif()
         set_source_files_properties(auth_main.cpp PROPERTIES COMPILE_FLAGS "-DOLA_FRONT_URL=\\\"${OLA_FRONT_URL}\\\" -bigobj")
     elseif(APPLE)
         add_executable(
@@ -67,6 +84,9 @@ if(${Qt5Widgets_FOUND})
     endif()
 
     add_dependencies(ola_client_auth build-snappy build-cereal)
+    set_target_properties(
+        ola_client_auth PROPERTIES
+        VS_DEBUGGER_WORKING_DIRECTORY $<TARGET_FILE_DIR:ola_client_auth>)
 
     target_link_libraries(
         ola_client_auth
