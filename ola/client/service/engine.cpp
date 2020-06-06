@@ -2167,7 +2167,7 @@ void Engine::Implementation::insertApplicationEntry(std::shared_ptr<front::Fetch
         root_entry_ptr_, _rrecv_msg_ptr->configuration_.directory_,
         EntryTypeE::Application);
 
-    entry_ptr->remote_   = _rrecv_msg_ptr->storage_id_;
+    entry_ptr->remote_   = _rrecv_msg_ptr->build_storage_id_;
     entry_ptr->data_any_ = ApplicationData(_rrecv_msg_ptr->app_unique_, _rrecv_msg_ptr->build_unique_);
     entry_ptr->pmaster_  = entry_ptr.get();
 

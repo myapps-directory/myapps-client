@@ -125,28 +125,6 @@ struct Engine {
         ola::client::utility::auth_read(path, auth_endpoint_, auth_user_, auth_token_);
 
         solid_check(!auth_token_.empty(), "Please authenticate using ola_client_auth application");
-
-#if 0
-        ifstream   ifs(path.generic_string());
-
-        if (ifs) {
-            getline(ifs, auth_endpoint_);
-            getline(ifs, auth_user_);
-            getline(ifs, auth_token_);
-            try {
-                auth_token_ = ola::utility::base64_decode(auth_token_);
-                solid_check(!auth_token_.empty() && auth_endpoint_ == rparams_.front_endpoint);
-            } catch (std::exception& e) {
-                auth_user_.clear();
-                auth_token_.clear();
-                auth_endpoint_ = rparams_.front_endpoint;
-            }
-        } else {
-            auth_user_.clear();
-            auth_token_.clear();
-            auth_endpoint_ = rparams_.front_endpoint;
-        }
-#endif
     }
 
     frame::mprpc::ServiceT& rpcService() const
@@ -485,20 +463,15 @@ void handle_help(istream& _ris, Engine &_reng){
     cout<<"> fetch app APP_ID\n\n";
     cout<<"> fetch build APP_ID BUILD_ID\n\n";
     cout<<"> fetch config APP_ID LANGUAGE_ID OS_ID\n\n"; 
-#ifdef APP_CONFIG
-    cout<<"> generate app ~/path/to/app.cfg\n\n";
-#endif
     cout<<"> generate build ~/path/to/build.yml\n\n";
-    cout<<"> generate media ~/path/to/media.yml\n\n";
     cout << "> parse build ~/path/to/build.yml\n\n";
-    cout << "> parse media ~/path/to/media.yml\n\n";
     cout<<"> create app\n\n";
     cout<<"> create build APP_ID BUILD_TAG ~/path/to/build.yml ~/path/to/build_folder ~/path/to/build_icon.png\n";
     cout<<"> fetch updates LANGUAGE_ID OS_ID APP_ID [APP_ID]\n";
     cout<<"\nExamples:\n";
     cout<<"> create app bubbles.app\n";
     cout<<"> create build l/AQPpeZWqoR1Fcngt3t2w== first bubbles.build.yml ~/tmp/bubbles_client ~/tmp/bubbles.png\n";
-    cout<<"> create media l/AQPpeZWqoR1Fcngt3t2w== first bubbles.media.yml ~/tmp/bubbles_media\n";
+    cout<<"> create media l/AQPpeZWqoR1Fcngt3t2w== first ~/tmp/bubbles_media\n";
     cout<<"> fetch config l/AQPpeZWqoR1Fcngt3t2w== en-US Windows10x86_64 desc\n";
     cout<<"> fetch config uv0oHriZYsfwec566VTXew== US_en Windows10x86_64\n";
     cout<<"> fetch media uv0oHriZYsfwec566VTXew== US_en Windows10x86_64\n";
@@ -715,20 +688,15 @@ ostream& operator<<(ostream &_ros, const utility::Build::Configuration &c){
     for(const auto& p: c.property_vec_){
         _ros<<"{["<<p.first<<"]["<<p.second<<"]} ";
     }
-    _ros<<"}";
-    return _ros;
-}
-
-ostream& operator<<(ostream &_ros, const utility::Media::Configuration &c){
-    for(const auto &o: c.os_vec_){
-        _ros<<o<<' ';
+    _ros<<"}\n";
+    
+    _ros << "media:{"<<endl;
+    _ros << "name: " << c.media_.name_ << endl;
+    _ros << "entries:{\n";
+    for (const auto& e : c.media_.entry_vec_) {
+        _ros << "\t{[" << e.thumbnail_path_ << "][" << e.path_ << "]}\n";
     }
-    _ros<<endl;
-    _ros<<"Entries: ";
-    for(const auto &m: c.entry_vec_){
-        _ros<<'['<<m.thumbnail_path_<<" | "<<m.path_<<']';
-    }
-    _ros<<endl;
+    _ros << "}\n";
     return _ros;
 }
 
@@ -752,15 +720,6 @@ ostream& operator<<(ostream &_ros, const utility::Build &_cfg){
         _ros<<c<<"\n\n";
     }
     _ros<<'}'<<endl;
-    return _ros;
-}
-
-ostream& operator<<(ostream& _ros, const utility::Media& _cfg) {
-    _ros << "Configurations: {\n";
-    for (const auto& c : _cfg.configuration_vec_) {
-        _ros << c << "\n\n";
-    }
-    _ros << '}' << endl;
     return _ros;
 }
 
@@ -827,7 +786,8 @@ void handle_fetch_config(istream& _ris, Engine &_reng){
     ){
         if(_rrecv_msg_ptr && _rrecv_msg_ptr->error_ == 0){
             cout<<"{\n";
-            cout<<"Remote Root: "<<utility::base64_encode(_rrecv_msg_ptr->storage_id_)<<endl;
+            cout << "Build Remote Root: "<<utility::base64_encode(_rrecv_msg_ptr->build_storage_id_)<<endl;
+            cout << "Media Remote Root: " << utility::base64_encode(_rrecv_msg_ptr->media_storage_id_) << endl;
             cout<<"Application unique: "<<_rrecv_msg_ptr->app_unique_<<endl;
             cout<<"Build unique: "<<_rrecv_msg_ptr->build_unique_<<endl;
             cout<<_rrecv_msg_ptr->configuration_;
@@ -844,48 +804,6 @@ void handle_fetch_config(istream& _ris, Engine &_reng){
     
     solid_check(prom.get_future().wait_for(chrono::seconds(100)) == future_status::ready, "Taking too long - waited 100 secs");
 }
-
-void handle_fetch_media(istream& _ris, Engine &_reng){
-    auto req_ptr = make_shared<FetchMediaConfigurationRequest>();
-    
-    _ris>>std::quoted(req_ptr->app_id_);
-    _ris>>std::quoted(req_ptr->lang_);
-    _ris>>std::quoted(req_ptr->os_id_);
-    
-    req_ptr->app_id_ = utility::base64_decode(req_ptr->app_id_);    
-    promise<void> prom;
-    
-    auto lambda = [&prom](
-        frame::mprpc::ConnectionContext&        _rctx,
-        std::shared_ptr<FetchMediaConfigurationRequest>&  _rsent_msg_ptr,
-        std::shared_ptr<FetchMediaConfigurationResponse>& _rrecv_msg_ptr,
-        ErrorConditionT const&                  _rerror
-    ){
-        if(_rrecv_msg_ptr && _rrecv_msg_ptr->error_ == 0){
-            string encd = utility::hex_encode(_rrecv_msg_ptr->storage_id_);
-            {
-                //TODO: remove block
-                string decd = utility::hex_decode(encd);
-                solid_check(decd == _rrecv_msg_ptr->storage_id_);
-            }
-            cout<<"{\n";
-            cout<<"Remote Root: "<<encd<<endl;
-            cout<<"Media unique: "<<_rrecv_msg_ptr->unique_<<endl;
-            cout<<_rrecv_msg_ptr->configuration_;
-            cout<<endl;
-            cout<<"}"<<endl;
-        }else if(!_rrecv_msg_ptr){
-            cout<<"Error - no response: "<<_rerror.message()<<endl;
-        }else{
-            cout<<"Error received from server: "<<_rrecv_msg_ptr->error_ <<endl;
-        }
-        prom.set_value();
-    };
-    _reng.rpcService().sendRequest(_reng.serverEndpoint().c_str(), req_ptr, lambda);
-    
-    solid_check(prom.get_future().wait_for(chrono::seconds(100)) == future_status::ready, "Taking too long - waited 100 secs");
-}
-
 
 uint64_t stream_copy(std::ostream &_ros, std::istream &_ris){
     constexpr size_t buffer_size = 1024 * 32;
@@ -1028,9 +946,8 @@ void handle_fetch(istream& _ris, Engine& _reng){
         handle_fetch_config(_ris, _reng);
     }else if(what == "store"){
         handle_fetch_store(_ris, _reng);
-    }else if(what == "media"){
-        handle_fetch_media(_ris, _reng);
-    }else if(what == "updates"){
+    }
+    else if(what == "updates"){
         handle_fetch_updates(_ris, _reng);
     }
 }
@@ -1089,9 +1006,6 @@ void handle_create_app ( istream& _ris, Engine &_reng){
 
 bool load_build_config(ola::utility::Build &_rbuild_cfg, const string &_path);
 bool store_build_config(const ola::utility::Build &_rbuild_cfg, const string &_path);
-
-bool load_media_config(ola::utility::Media &_rmedia_cfg, const string &_path);
-bool store_media_config(const ola::utility::Media &_rmedia_cfg, const string &_path);
 
 bool zip_create(const string &_zip_path, string _root, uint64_t &_rsize);
 
@@ -1287,15 +1201,13 @@ void handle_create_build(istream& _ris, Engine &_reng){
 void handle_create_media(istream& _ris, Engine &_reng){
     auto req_ptr = make_shared<CreateMediaRequest>();
     
-    string config_path, media_path;
+    string media_path;
     _ris>>std::quoted(req_ptr->app_id_)>>std::quoted(req_ptr->unique_);
-    _ris>>std::quoted(config_path)>>std::quoted(media_path);
+
+    _ris>>std::quoted(media_path);
+
     
     req_ptr->app_id_ = ola::utility::base64_decode(req_ptr->app_id_);
-    
-    if(!load_media_config(req_ptr->media_, path(config_path))){
-        return;
-    }
     
     //create archive from build_path/*
     
@@ -1479,69 +1391,14 @@ void handle_generate_buid(istream& _ris, Engine &_reng){
 }
 
 //-----------------------------------------------------------------------------
-
-void handle_generate_media(istream& _ris, Engine &_reng){
-    string config_path;
-    _ris>>std::quoted(config_path);
-    
-    ola::utility::Media cfg;
-    
-    cfg.configuration_vec_ = ola::utility::Media::ConfigurationVectorT{
-        {
-            {"Windows10x86_32", "Windows10x86_64"},
-            {
-                {"windows/screen_shot_1_thumb.jpg", "windows/screen_shot_1.jpg"},
-                {"windows/screen_shot_2_thumb.jpg", "windows/screen_shot_2.jpg"},
-                {"windows/screen_shot_3_thumb.jpg", "windows/screen_shot_3.jpg"},
-                {"windows/screen_shot_4_thumb.jpg", "windows/screen_shot_4.jpg"},
-                {"windows/video_1_thumb.jpg", "windows/video_1.mp4"},
-            }
-        },
-        {
-            {"linux5x86_32", "linux5x86_64"},
-            {
-                {"linux/screen_shot_1_thumb.jpg", "linux/screen_shot_1.jpg"},
-                {"linux/screen_shot_2_thumb.jpg", "linux/screen_shot_2.jpg"},
-                {"linux/screen_shot_3_thumb.jpg", "linux/screen_shot_3.jpg"},
-                {"linux/screen_shot_4_thumb.jpg", "linux/screen_shot_4.jpg"},
-                {"linux/video_1_thumb.jpg", "linux/video_1.mp4"},
-            }
-        },
-        {
-            {"macos5x86_32", "macos5x86_64"},
-            {
-                {"macos/screen_shot_1_thumb.jpg", "macos/screen_shot_1.jpg"},
-                {"macos/screen_shot_2_thumb.jpg", "macos/screen_shot_2.jpg"},
-                {"macos/screen_shot_3_thumb.jpg", "macos/screen_shot_3.jpg"},
-                {"macos/screen_shot_4_thumb.jpg", "macos/screen_shot_4.jpg"},
-                {"macos/video_1_thumb.jpg", "macos/video_1.mp4"},
-            }
-        }
-    };
-    
-    store_media_config(cfg, path(config_path));
-    {
-        ola::utility::Media cfg_check;
-        load_media_config(cfg_check, path(config_path));
-        solid_check(cfg == cfg_check);
-    }
-}
-
 //-----------------------------------------------------------------------------
 
 void handle_generate(istream& _ris, Engine &_reng){
     string what;
     _ris>>std::quoted(what);
 
-#ifdef APP_CONFIG
-    if(what == "app"){
-        handle_generate_app(_ris, _reng);
-    }else
-#endif
     if(what == "build"){
         handle_generate_buid(_ris, _reng);
-    }else if(what == "media"){
-        handle_generate_media(_ris, _reng);
     }
 }
 //-----------------------------------------------------------------------------
@@ -1559,33 +1416,13 @@ void handle_parse_buid(istream& _ris, Engine& _reng) {
     }
 }
 
-void handle_parse_media(istream& _ris, Engine& _reng) {
-    string config_path;
-    _ris >> std::quoted(config_path);
-
-    ola::utility::Media cfg;
-    if (load_media_config(cfg, path(config_path))) {
-        cout << endl;
-        cout << cfg << endl;
-    }
-}
-
 void handle_parse(istream& _ris, Engine& _reng) {
     string what;
     _ris >> std::quoted(what);
 
-#ifdef APP_CONFIG
-    if (what == "app") {
-        handle_generate_app(_ris, _reng);
+    if (what == "build") {
+        handle_parse_buid(_ris, _reng);
     }
-    else
-#endif
-        if (what == "build") {
-            handle_parse_buid(_ris, _reng);
-        }
-        else if (what == "media") {
-            handle_parse_media(_ris, _reng);
-        }
 }
 
 //-----------------------------------------------------------------------------
@@ -1918,174 +1755,205 @@ bool load_build_config(ola::utility::Build& _rcfg, const string& _path) {
         cout << "Error: build tag not found" << endl;
         return false;
     }
-    {
-        Node dictionary = config["dictionary"];
-        if (dictionary) {
-            if (dictionary.Type() == NodeType::Sequence) {
-                for (const_iterator it = dictionary.begin(); it != dictionary.end(); ++it) {
-                    Node language = (*it)["language"];
-                    if (language) {
-                        _rcfg.dictionary_dq_.emplace_back("", language.as<string>());
-                    }
-                    else {
-                        cout << "Error: dictionary item must contain language" << endl;
-                        return false;
-                    }
+    try {
+        {
+            Node dictionary = config["dictionary"];
+            if (dictionary) {
+                if (dictionary.Type() == NodeType::Sequence) {
+                    for (const_iterator it = dictionary.begin(); it != dictionary.end(); ++it) {
+                        Node language = (*it)["language"];
+                        if (language) {
+                            _rcfg.dictionary_dq_.emplace_back("", language.as<string>());
+                        }
+                        else {
+                            cout << "Error: dictionary item must contain language" << endl;
+                            return false;
+                        }
 
-                    for (const_iterator it2 = it->begin(); it2 != it->end(); ++it2) {
-                        if (it2->first.as<string>() != "language") {
-                            _rcfg.dictionary_dq_.emplace_back(it2->first.as<string>(), it2->second.as<string>());
+                        for (const_iterator it2 = it->begin(); it2 != it->end(); ++it2) {
+                            if (it2->first.as<string>() != "language") {
+                                _rcfg.dictionary_dq_.emplace_back(it2->first.as<string>(), it2->second.as<string>());
+                            }
                         }
                     }
                 }
+                else {
+                    cout << "Error: dictionary should be a sequence" << endl;
+                    return false;
+                }
+            }
+        }
+
+        {
+            Node properties = config["properties"];
+            if (properties) {
+                if (properties.Type() == NodeType::Map) {
+                    for (const_iterator it = properties.begin(); it != properties.end(); ++it) {
+                        _rcfg.property_vec_.emplace_back(it->first.as<string>(), it->second.as<string>());
+                    }
+                }
+                else {
+                    cout << "Error: properties entry should be a map" << endl;
+                    return false;
+                }
+
+            }
+        }
+
+        {
+            Node configurations = config["configurations"];
+            if (configurations) {
+                if (configurations.Type() == NodeType::Sequence) {
+                    for (const_iterator it = configurations.begin(); it != configurations.end(); ++it) {
+                        ola::utility::Build::Configuration c;
+                        if (it->Type() == NodeType::Map) {
+                            if ((*it)["name"]) {
+                                c.name_ = (*it)["name"].as<string>();
+                            }
+                            else {
+                                cout << "Error: configuration must have a name" << endl;
+                                return false;
+                            }
+
+                            if ((*it)["directory"]) {
+                                c.directory_ = (*it)["directory"].as<string>();
+                            }
+                            else {
+                                cout << "Error: configuration must have a directory" << endl;
+                                return false;
+                            }
+
+                            if ((*it)["oses"] && (*it)["oses"].Type() == NodeType::Sequence) {
+                                Node oses = (*it)["oses"];
+                                for (const_iterator it = oses.begin(); it != oses.end(); ++it) {
+                                    c.os_vec_.emplace_back(it->as<string>());
+                                }
+                            }
+                            else {
+                                cout << "Error: configuration must have an oses sequence field" << endl;
+                                return false;
+                            }
+
+                            if ((*it)["flags"] && (*it)["flags"].Type() == NodeType::Sequence) {
+                                Node flags = (*it)["flags"];
+                                for (const_iterator it = flags.begin(); it != flags.end(); ++it) {
+                                    c.flags_ |= ola::utility::Build::Configuration::flag(it->as<string>().c_str());
+                                }
+                            }
+
+                            if ((*it)["exes"] && (*it)["exes"].Type() == NodeType::Sequence) {
+                                Node exes = (*it)["exes"];
+                                for (const_iterator it = exes.begin(); it != exes.end(); ++it) {
+                                    c.exe_vec_.emplace_back(it->as<string>());
+                                }
+                            }
+                            else {
+                                cout << "Error: configuration must have an exes sequence field" << endl;
+                                return false;
+                            }
+
+                            if ((*it)["mount-points"] && (*it)["mount-points"].Type() == NodeType::Sequence) {
+                                Node mounts = (*it)["mount-points"];
+                                for (const_iterator it = mounts.begin(); it != mounts.end(); ++it) {
+                                    string local;
+                                    string remote;
+                                    if ((*it)["local"]) {
+                                        local = (*it)["local"].as<string>();
+                                    }
+                                    else {
+                                        cout << "Error: mount must contain local field" << endl;
+                                        return false;
+                                    }
+
+                                    if ((*it)["remote"]) {
+                                        remote = (*it)["remote"].as<string>();
+                                    }
+                                    else {
+                                        cout << "Error: mount must contain remote field" << endl;
+                                        return false;
+                                    }
+                                    c.mount_vec_.emplace_back(local, remote);
+                                }
+                            }
+                            else {
+                                cout << "Error: configuration must have an mount-points sequence field" << endl;
+                                return false;
+                            }
+
+                            if ((*it)["properties"] && (*it)["properties"].Type() == NodeType::Map) {
+                                Node properties = (*it)["properties"];
+                                for (const_iterator it = properties.begin(); it != properties.end(); ++it) {
+                                    c.property_vec_.emplace_back(it->first.as<string>(), it->second.as<string>());
+                                }
+                            }
+
+                            if ((*it)["shortcuts"] && (*it)["shortcuts"].Type() == NodeType::Sequence) {
+                                Node shortcuts = (*it)["shortcuts"];
+                                for (const_iterator it = shortcuts.begin(); it != shortcuts.end(); ++it) {
+                                    ola::utility::Build::Shortcut s;
+
+                                    s.name_ = (*it)["name"].as<string>();
+                                    s.command_ = (*it)["command"].as<string>();
+                                    s.arguments_ = (*it)["arguments"].as<string>();
+                                    s.run_folder_ = (*it)["run_folder"].as<string>();
+                                    s.icon_ = (*it)["icon"].as<string>();
+
+                                    c.shortcut_vec_.emplace_back(std::move(s));
+                                }
+                            }
+                            else {
+                                cout << "Error: configuration must have an shortcuts sequence field" << endl;
+                                return false;
+                            }
+
+                            if ((*it)["media"] && (*it)["media"].Type() == NodeType::Map) {
+                                Node media = (*it)["media"];
+                                c.media_.name_ = media["name"].as<string>();
+
+                                if (media["entries"] && media["entries"].Type() == NodeType::Sequence) {
+                                    Node entries = media["entries"];
+                                    for (const_iterator it = entries.begin(); it != entries.end(); ++it) {
+                                        ola::utility::Build::Media::Entry e;
+
+                                        e.thumbnail_path_ = (*it)["thumbnail"].as<string>();
+                                        e.path_ = (*it)["file"].as<string>();
+
+                                        c.media_.entry_vec_.emplace_back(std::move(e));
+                                    }
+                                }
+                                else {
+                                    cout << "Error: configuration.media must have an entry sequence field" << endl;
+                                    return false;
+                                }
+                            }
+                            else {
+                                cout << "Error: configuration must have a media map field" << endl;
+                                return false;
+                            }
+
+                            _rcfg.configuration_vec_.emplace_back(std::move(c));
+                        }
+                        else {
+                            cout << "Error: configurations not a map" << endl;
+                            return false;
+                        }
+                    }
+                }
+                else {
+                    cout << "Error: configurations entry should be a sequence" << endl;
+                    return false;
+                }
+
             }
             else {
-                cout << "Error: dictionary should be a sequence" << endl;
+                cout << "Error: configurations entry should exist" << endl;
                 return false;
             }
         }
     }
-
-    {
-        Node properties = config["properties"];
-        if (properties) {
-            if (properties.Type() == NodeType::Map) {
-                for (const_iterator it = properties.begin(); it != properties.end(); ++it) {
-                    _rcfg.property_vec_.emplace_back(it->first.as<string>(), it->second.as<string>());
-                }
-            }
-            else {
-                cout << "Error: properties entry should be a map" << endl;
-                return false;
-            }
-
-        }
-    }
-
-    {
-        Node configurations = config["configurations"];
-        if (configurations) {
-            if (configurations.Type() == NodeType::Sequence) {
-                for (const_iterator it = configurations.begin(); it != configurations.end(); ++it) {
-                    ola::utility::Build::Configuration c;
-                    if (it->Type() == NodeType::Map) {
-                        if ((*it)["name"]) {
-                            c.name_ = (*it)["name"].as<string>();
-                        }
-                        else {
-                            cout << "Error: configuration must have a name" << endl;
-                            return false;
-                        }
-
-                        if ((*it)["directory"]) {
-                            c.directory_ = (*it)["directory"].as<string>();
-                        }
-                        else {
-                            cout << "Error: configuration must have a directory" << endl;
-                            return false;
-                        }
-
-                        if ((*it)["oses"] && (*it)["oses"].Type() == NodeType::Sequence) {
-                            Node oses = (*it)["oses"];
-                            for (const_iterator it = oses.begin(); it != oses.end(); ++it) {
-                                c.os_vec_.emplace_back(it->as<string>());
-                            }
-                        }
-                        else {
-                            cout << "Error: configuration must have an oses sequence field" << endl;
-                            return false;
-                        }
-
-                        if ((*it)["flags"] && (*it)["flags"].Type() == NodeType::Sequence) {
-                            Node flags = (*it)["flags"];
-                            for (const_iterator it = flags.begin(); it != flags.end(); ++it) {
-                                c.flags_ |= ola::utility::Build::Configuration::flag(it->as<string>().c_str());
-                            }
-                        }
-
-                        if ((*it)["exes"] && (*it)["exes"].Type() == NodeType::Sequence) {
-                            Node exes = (*it)["exes"];
-                            for (const_iterator it = exes.begin(); it != exes.end(); ++it) {
-                                c.exe_vec_.emplace_back(it->as<string>());
-                            }
-                        }
-                        else {
-                            cout << "Error: configuration must have an exes sequence field" << endl;
-                            return false;
-                        }
-
-                        if ((*it)["mount-points"] && (*it)["mount-points"].Type() == NodeType::Sequence) {
-                            Node mounts = (*it)["mount-points"];
-                            for (const_iterator it = mounts.begin(); it != mounts.end(); ++it) {
-                                string local;
-                                string remote;
-                                if ((*it)["local"]) {
-                                    local = (*it)["local"].as<string>();
-                                }
-                                else {
-                                    cout << "Error: mount must contain local field" << endl;
-                                    return false;
-                                }
-
-                                if ((*it)["remote"]) {
-                                    remote = (*it)["remote"].as<string>();
-                                }
-                                else {
-                                    cout << "Error: mount must contain remote field" << endl;
-                                    return false;
-                                }
-                                c.mount_vec_.emplace_back(local, remote);
-                            }
-                        }
-                        else {
-                            cout << "Error: configuration must have an mount-points sequence field" << endl;
-                            return false;
-                        }
-
-                        if ((*it)["properties"] && (*it)["properties"].Type() == NodeType::Map) {
-                            Node properties = (*it)["properties"];
-                            for (const_iterator it = properties.begin(); it != properties.end(); ++it) {
-                                c.property_vec_.emplace_back(it->first.as<string>(), it->second.as<string>());
-                            }
-                        }
-
-                        if ((*it)["shortcuts"] && (*it)["shortcuts"].Type() == NodeType::Sequence) {
-                            Node shortcuts = (*it)["shortcuts"];
-                            for (const_iterator it = shortcuts.begin(); it != shortcuts.end(); ++it) {
-                                ola::utility::Build::Shortcut s;
-
-                                s.name_ = (*it)["name"].as<string>();
-                                s.command_ = (*it)["command"].as<string>();
-                                s.arguments_ = (*it)["arguments"].as<string>();
-                                s.run_folder_ = (*it)["run_folder"].as<string>();
-                                s.icon_ = (*it)["icon"].as<string>();
-
-                                c.shortcut_vec_.emplace_back(std::move(s));
-                            }
-                        }
-                        else {
-                            cout << "Error: configuration must have an shortcuts sequence field" << endl;
-                            return false;
-                        }
-
-                        _rcfg.configuration_vec_.emplace_back(std::move(c));
-                    }
-                    else {
-                        cout << "Error: configurations not a map" << endl;
-                        return false;
-                    }
-                }
-            }
-            else {
-                cout << "Error: configurations entry should be a sequence" << endl;
-                return false;
-            }
-
-        }
-        else {
-            cout << "Error: configurations entry should exist" << endl;
-            return false;
-        }
+    catch (std::runtime_error& err) {
+        cout << "Error interpreting " << _path << ": " << err.what() << endl;
+        return false;
     }
     return true;
 }
@@ -2199,131 +2067,19 @@ bool store_build_config(const ola::utility::Build& _rcfg, const string& _path) {
 
                 item["shortcuts"] = shortcuts;
             }
-            configurations.push_back(item);
-        }
-        config["configurations"] = configurations;
-    }
-
-    std::ofstream fout(_path);
-    try {
-        fout << config;
-    }
-    catch (runtime_error& err) {
-        cout << "Failed generating yml file: " << err.what() << endl;
-        return false;
-    }
-    return true;
-}
-
-//-----------------------------------------------------------------------------
-bool load_media_config(ola::utility::Media& _rcfg, const string& _path) {
-    using namespace YAML;
-    Node config;
-    try {
-        config = LoadFile(_path);
-    }
-    catch (std::runtime_error& err) {
-        cout << "Error loading " << _path << ": " << err.what() << endl;
-        return false;
-    }
-    {
-        Node configurations = config["configurations"];
-        if (configurations) {
-            if (configurations.Type() == NodeType::Sequence) {
-                for (const_iterator it = configurations.begin(); it != configurations.end(); ++it) {
-                    ola::utility::Media::Configuration c;
-                    if (it->Type() == NodeType::Map) {
-                        
-                        if ((*it)["oses"] && (*it)["oses"].Type() == NodeType::Sequence) {
-                            Node oses = (*it)["oses"];
-                            for (const_iterator it = oses.begin(); it != oses.end(); ++it) {
-                                c.os_vec_.emplace_back(it->as<string>());
-                            }
-                        }
-                        else {
-                            cout << "Error: configuration must have an oses sequence field" << endl;
-                            return false;
-                        }
-
-                        if ((*it)["entries"] && (*it)["entries"].Type() == NodeType::Sequence) {
-                            Node entries = (*it)["entries"];
-                            for (const_iterator it = entries.begin(); it != entries.end(); ++it) {
-                                string thumb;
-                                string media;
-                                if ((*it)["thumbnail"]) {
-                                    thumb = (*it)["thumbnail"].as<string>();
-                                }
-                                else {
-                                    cout << "Error: entry must contain thumbnail field" << endl;
-                                    return false;
-                                }
-
-                                if ((*it)["media"]) {
-                                    media = (*it)["media"].as<string>();
-                                }
-                                else {
-                                    cout << "Error: entry must contain media field" << endl;
-                                    return false;
-                                }
-                                c.entry_vec_.emplace_back(thumb, media);
-                            }
-                        }
-                        else {
-                            cout << "Error: configuration must have an entries sequence field" << endl;
-                            return false;
-                        }
-                        _rcfg.configuration_vec_.emplace_back(std::move(c));
-                    }
-                    else {
-                        cout << "Error: configurations not a map" << endl;
-                        return false;
-                    }
-                }
-            }
-            else {
-                cout << "Error: configurations entry should be a sequence" << endl;
-                return false;
-            }
-
-        }
-        else {
-            cout << "Error: configurations entry should exist" << endl;
-            return false;
-        }
-    }
-    return true;
-}
-
-//-----------------------------------------------------------------------------
-bool store_media_config(const ola::utility::Media& _rcfg, const string& _path) {
-    using namespace YAML;
-    Node config;
-
-    {
-        Node configurations;
-        for (const auto& component : _rcfg.configuration_vec_) {
-            Node item;
-            
             {
-                Node oses;
-                for (auto& v : component.os_vec_) {
-                    oses.push_back(v);
-                }
-                item["oses"] = oses;
-            }
-
-            {
-                Node entries;
-                for (auto& v : component.entry_vec_) {
+                Node media;
+                media["name"] = component.media_.name_;
+                Node media_entries;
+                for (auto& e : component.media_.entry_vec_) {
                     Node entry;
-                    entry["thumbnail"] = v.thumbnail_path_;
-                    entry["media"] = v.path_;
+                    entry["thumbnail"] = e.thumbnail_path_;
+                    entry["file"] = e.path_;
 
-                    entries.push_back(entry);
+                    media_entries.push_back(entry);
                 }
-                item["entries"] = entries;
+                media["entries"] = media_entries;
             }
-
             configurations.push_back(item);
         }
         config["configurations"] = configurations;
@@ -2339,6 +2095,7 @@ bool store_media_config(const ola::utility::Media& _rcfg, const string& _path) {
     }
     return true;
 }
+
 //-----------------------------------------------------------------------------
 
 string path(const std::string &_path){
