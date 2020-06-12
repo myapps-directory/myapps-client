@@ -619,7 +619,7 @@ void handle_fetch_app(istream& _ris, Engine &_reng){
      auto req_ptr = make_shared<FetchAppRequest>();
     
     _ris>>std::quoted(req_ptr->app_id_);
-    _ris>>std::quoted(req_ptr->lang_);
+    _ris>>std::quoted(req_ptr->os_id_);
     
     req_ptr->app_id_ = utility::base64_decode(req_ptr->app_id_);
     
@@ -634,9 +634,9 @@ void handle_fetch_app(istream& _ris, Engine &_reng){
         if(_rrecv_msg_ptr && _rrecv_msg_ptr->error_ == 0){
             cout<<"{\n";
             cout<<"Builds: ";
-            for(const auto& build_id: _rrecv_msg_ptr->build_id_vec_){
+            for(const auto& build_id: _rrecv_msg_ptr->build_vec_){
                 //cout<<utility::base64_encode(build_id)<<endl;
-                cout<<build_id<<endl;
+                cout<<build_id.name_<<endl;
             }
             cout<<endl;
             cout<<_rrecv_msg_ptr->application_;
@@ -893,11 +893,11 @@ void handle_fetch_updates(istream& _ris, Engine &_reng){
     
     while(!_ris.eof()){
         req_ptr->app_id_vec_.emplace_back();
-        _ris>>std::quoted(req_ptr->app_id_vec_.back());
-        req_ptr->app_id_vec_.back() = utility::base64_decode(req_ptr->app_id_vec_.back());
+        _ris>>std::quoted(req_ptr->app_id_vec_.back().first);
+        req_ptr->app_id_vec_.back().first = utility::base64_decode(req_ptr->app_id_vec_.back().first);
     }
     
-    if(!req_ptr->app_id_vec_.empty() && req_ptr->app_id_vec_.back().empty()){
+    if(!req_ptr->app_id_vec_.empty() && req_ptr->app_id_vec_.back().first.empty()){
         req_ptr->app_id_vec_.pop_back();
     }
     
@@ -915,7 +915,7 @@ void handle_fetch_updates(istream& _ris, Engine &_reng){
     ){
         if(_rrecv_msg_ptr && _rrecv_msg_ptr->error_ == 0){
             for(size_t i = 0; i < _rrecv_msg_ptr->app_vec_.size(); ++i){
-                const string app_id = utility::base64_encode(_rsent_msg_ptr->app_id_vec_[i]);
+                const string app_id = utility::base64_encode(_rsent_msg_ptr->app_id_vec_[i].first);
                 const string& app_unique = _rrecv_msg_ptr->app_vec_[i].first;
                 const string& build_unique = _rrecv_msg_ptr->app_vec_[i].second;
                 cout<<app_id<<" -> [app_unique: "<<app_unique<<" build_unique: "<<build_unique<<']'<<endl;
