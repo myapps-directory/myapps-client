@@ -1922,7 +1922,7 @@ void Engine::Implementation::update()
             req_ptr->app_id_vec_.reserve(_rrecv_msg_ptr->app_vec_.size());
             for (auto&& a : _rrecv_msg_ptr->app_vec_) {
                 auto build_req = app_list_.find(a.unique_).name_;
-                if (build_req != ola::utility::build_invalid) {
+                if (build_req != ola::utility::app_item_invalid) {
                     req_ptr->app_id_vec_.emplace_back(std::move(a.id_), app_list_.find(a.unique_).name_);
                 }
             }

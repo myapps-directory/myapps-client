@@ -633,10 +633,10 @@ void handle_fetch_app(istream& _ris, Engine &_reng){
     ){
         if(_rrecv_msg_ptr && _rrecv_msg_ptr->error_ == 0){
             cout<<"{\n";
-            cout<<"Builds: ";
-            for(const auto& build_id: _rrecv_msg_ptr->build_vec_){
+            cout<<"Item: ";
+            for(const auto& item: _rrecv_msg_ptr->item_vec_){
                 //cout<<utility::base64_encode(build_id)<<endl;
-                cout<<build_id.name_<<endl;
+                cout<<item.name_<<" "<<static_cast<int>(item.type())<<" "<< ola::utility::app_item_state_name(item.state()) <<endl;
             }
             cout<<endl;
             cout<<_rrecv_msg_ptr->application_;
