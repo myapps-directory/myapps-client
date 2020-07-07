@@ -169,6 +169,23 @@ void handle_generate(istream& _ris, Engine& _reng);
 void handle_acquire(istream& _ris, Engine& _reng);
 void handle_parse(istream& _ris, Engine& _reng);
 
+void uninstall_cleanup();
+
+string env_log_path_prefix()
+{
+    const char* v = getenv("LOCALAPPDATA");
+    if (v == nullptr) {
+        v = getenv("APPDATA");
+        if (v == nullptr) {
+            v = "c:";
+        }
+    }
+
+    string r = v;
+    r += "\\MyApps.space\\client";
+    return r;
+}
+
 } //namespace
 
 int main(int argc, char* argv[])
@@ -201,7 +218,7 @@ int main(int argc, char* argv[])
         solid::log_start(std::cerr, params.dbg_modules);
     } else {
         solid::log_start(
-            *argv[0] == '.' ? argv[0] + 2 : argv[0],
+            (env_log_path_prefix() + "\\log\\cli").c_str(),
             params.dbg_modules,
             params.dbg_buffered,
             3,
@@ -366,6 +383,7 @@ bool parse_arguments(Parameters& _par, int argc, char* argv[])
             ("compress", value<bool>(&_par.compress)->implicit_value(true)->default_value(false), "Use Snappy to compress communication")
             ("front", value<std::string>(&_par.front_endpoint)->default_value(string(OLA_FRONT_URL)), "MyApps.space Front Endpoint")
             ("secure-prefix", value<std::string>(&_par.secure_prefix)->default_value("certs"), "Secure Path prefix")
+            ("uninstall-cleanup", "Uninstall cleanup")
         ;
         // clang-format off
         variables_map vm;
@@ -375,6 +393,12 @@ bool parse_arguments(Parameters& _par, int argc, char* argv[])
             cout << desc << "\n";
             return true;
         }
+
+        if (vm.count("uninstall-cleanup")) {
+            uninstall_cleanup();
+            return true;
+        }
+
         return false;
     } catch (exception& e) {
         cout << e.what() << "\n";
@@ -2268,6 +2292,13 @@ bool zip_create(const string &_zip_path, string _root, uint64_t &_rsize){
     return true;
 }
 //-----------------------------------------------------------------------------
+void uninstall_cleanup(){
+    boost::system::error_code err;
 
+    boost::filesystem::remove_all(env_config_path_prefix(), err);
+    boost::filesystem::remove_all(boost::filesystem::path(env_log_path_prefix()).parent_path(), err);
+    cout << "Deleted: " << env_config_path_prefix() << " and " << boost::filesystem::path(env_log_path_prefix()).parent_path().generic_string() << endl;
+    cin.ignore();
+}
 }//namespace
 

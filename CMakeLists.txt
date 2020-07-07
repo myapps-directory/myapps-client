@@ -1,5 +1,5 @@
-cmake_minimum_required(VERSION 3.10 FATAL_ERROR)
-
+cmake_minimum_required(VERSION 3.15 FATAL_ERROR)
+cmake_policy(SET CMP0091 NEW)
 project(OlaClient VERSION 1.2)
 
 set(EXTERNAL_DIR "" CACHE PATH "External dependencies folder")
@@ -152,7 +152,7 @@ include(CTest)
 ###############################################################################
 add_subdirectory(ola)
 add_subdirectory(example)
-
+add_subdirectory(cpack/wix)
 ###############################################################################
 include(cmake/source-format.cmake)
 ###############################################################################
@@ -198,20 +198,24 @@ SET(CPACK_WIX_UI_DIALOG                 "${CMAKE_CURRENT_SOURCE_DIR}/cpack/wix/b
 set(CPACK_WIX_PATCH_FILE                "${CMAKE_CURRENT_SOURCE_DIR}/cpack/wix/service.patch")
 set(CPACK_WIX_EXTENSIONS                WixUIExtension WixUtilExtension WixBalExtension)
 set(CPACK_WIX_EXTRA_FLAGS sw)
+set(CPACK_WIX_PROPERTY_ARPURLINFOABOUT "https://myapps.space")
+set(CPACK_WIX_PROPERTY_ARPCONTACT       ${CPACK_PACKAGE_CONTACT})
+set(CPACK_WIX_PROPERTY_ARPCOMMENTS      "CMake is a cross-platform, open-source build system.")
+set(CPACK_WIX_EXTRA_SOURCES             "${CMAKE_BINARY_DIR}/cpack/wix/custom_action_dll.wxs")
+
 #set(CPACK_WIX_EXTRA_SOURCES             "${CMAKE_CURRENT_SOURCE_DIR}/cpack/wix/ola_dirs.wxs")
 #set(CPACK_WIX_SKIP_PROGRAM_FOLDER       TRUE)
 #set(CPACK_WIX_PROGRAM_MENU_FOLDER       "")
 if(CMAKE_BUILD_TYPE MATCHES "debug")
-    set(CMAKE_INSTALL_DEBUG_LIBRARIES TRUE)
     if (MSVC)
         #string(REGEX REPLACE "Visual Studio ([0-9]+).*" "\\1" MSVC_VERSION "${CMAKE_GENERATOR}")
-        set(OLA_MSVC_VERSION 14)
+        set(OLA_MSVC_VERSION 140)
         # Starting with Visual Studio 2015 (MSVC_VERSION==14) the msvcr dll has been renamed to vcruntime.
-        find_file(OLA_VCRUNTIME_DLL "vcruntime${OLA_MSVC_VERSION}0.dll" PATHS "$ENV{SYSTEMROOT}\\System32")
+        find_file(OLA_VCRUNTIME_DLL "vcruntime${OLA_MSVC_VERSION}_1.dll" PATHS "$ENV{SYSTEMROOT}\\System32")
         install(FILES  ${OLA_VCRUNTIME_DLL} DESTINATION "bin")
-        find_file(OLA_VCRUNTIMED_DLL "vcruntime${OLA_MSVC_VERSION}0d.dll" PATHS "$ENV{SYSTEMROOT}\\System32")
+        find_file(OLA_VCRUNTIMED_DLL "vcruntime${OLA_MSVC_VERSION}_1d.dll" PATHS "$ENV{SYSTEMROOT}\\System32")
         install(FILES  ${OLA_VCRUNTIMED_DLL} DESTINATION "bin")
-        find_file(OLA_VCP_DLL "msvcp${OLA_MSVC_VERSION}0d.dll" PATHS "$ENV{SYSTEMROOT}\\System32")
+        find_file(OLA_VCP_DLL "msvcp${OLA_MSVC_VERSION}_1d.dll" PATHS "$ENV{SYSTEMROOT}\\System32")
         install(FILES  ${OLA_VCP_DLL} DESTINATION "bin")
     endif()
 endif()

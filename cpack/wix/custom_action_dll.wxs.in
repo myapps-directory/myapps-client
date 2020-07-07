@@ -1,0 +1,6 @@
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+	<Fragment>
+		<Binary Id="ola_wix_custom_action_dll"
+			SourceFile="$<TARGET_FILE:ola_wix_custom_action>"/>
+	</Fragment>
+</Wix>
