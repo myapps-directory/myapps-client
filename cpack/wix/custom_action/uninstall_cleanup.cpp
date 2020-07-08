@@ -6,7 +6,6 @@
 
 #include <msi.h>
 #include <msiquery.h>
-#include "boost/filesystem.hpp"
 
 using namespace std;
 namespace{
@@ -64,19 +63,35 @@ string env_path_prefix()
     return r;
 }
 
+int silently_remove_directory(LPCTSTR dir) // Fully qualified name of the directory being   deleted,   without trailing backslash
+{
+    int len = strlen(dir) + 2; // required to set 2 nulls at end of argument to SHFileOperation.
+    char* tempdir = (char*)malloc(len);
+    memset(tempdir, 0, len);
+    strcpy(tempdir, dir);
+
+    SHFILEOPSTRUCT file_op = {
+      NULL,
+      FO_DELETE,
+      tempdir,
+      NULL,
+      FOF_NOCONFIRMATION |
+      FOF_NOERRORUI |
+      FOF_SILENT,
+      false,
+      0,
+      "" };
+    int ret = SHFileOperation(&file_op);
+    free(tempdir);
+    return ret; // returns 0 on success, non zero on failure.
+}
 
 }
 extern "C" UINT __stdcall UninstallCleanup(MSIHANDLE msi_handle)
 {
-#if 1
-    boost::system::error_code err;
+    
+    silently_remove_directory(env_config_path_prefix().c_str());
+    silently_remove_directory(env_path_prefix().c_str());
 
-    boost::filesystem::remove_all(env_config_path_prefix(), err);
-    boost::filesystem::remove_all(env_path_prefix(), err);
-#endif
-    ofstream ofs(env_path_prefix() + "\\myapps.space.uninstall.txt");
-    if(ofs){
-        ofs << "Deleted: " << env_config_path_prefix() << " and " << env_path_prefix()<< endl;
-    }
     return ERROR_SUCCESS;
 }
