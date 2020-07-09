@@ -203,6 +203,48 @@ set(CPACK_WIX_PROPERTY_ARPCONTACT       ${CPACK_PACKAGE_CONTACT})
 set(CPACK_WIX_PROPERTY_ARPCOMMENTS      "CMake is a cross-platform, open-source build system.")
 set(CPACK_WIX_EXTRA_SOURCES             "${CMAKE_BINARY_DIR}/cpack/wix/custom_action_dll.wxs")
 
+
+
+if(WIN32)
+    set(WIX_BUNDLE_ICON "${CMAKE_SOURCE_DIR}/ola/client/auth/auth.ico")
+    set(WIX_BUNDLE_WINFSP_MSI src/winfsp-1.7.20172.msi)
+    set(WIX_BUNDLE_WINFSP_URL https://github.com/billziss-gh/winfsp/releases/download/v1.7/winfsp-1.7.20172.msi)
+
+    ExternalProject_Add(
+        WinFSP_Download
+        PREFIX "${CMAKE_BINARY_DIR}"
+        URL ${WIX_BUNDLE_WINFSP_URL}
+        DOWNLOAD_NO_EXTRACT true
+        CONFIGURE_COMMAND ""
+        BUILD_COMMAND ""
+        INSTALL_COMMAND ""
+    )
+
+    file(TO_CMAKE_PATH "$ENV{WIX}" CPACK_WIX_ROOT)
+    find_program(WIX_TOOL_CANDLE NAMES candle.exe PATHS  ${CPACK_WIX_ROOT}/bin)
+    find_program(WIX_TOOL_LIGHT NAMES light.exe PATHS  ${CPACK_WIX_ROOT}/bin)
+    if(NOT WIX_TOOL_CANDLE AND NOT WIX_TOOL_LIGHT)
+        message(STATUS "CMake_RUN_CLANG_TIDY is ON but clang-tidy is not found!")
+    else()
+        configure_file(${CMAKE_CURRENT_SOURCE_DIR}/cpack/wix/bundle.wxs.in ${CMAKE_BINARY_DIR}/bundle.wxs) 
+
+        add_custom_command(
+            OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/Bundle-${CPACK_PACKAGE_FILE_NAME}
+            COMMAND ${WIX_TOOL_CANDLE} ${CMAKE_CURRENT_BINARY_DIR}/bundle.wxs -ext WixBalExtension
+            COMMAND ${WIX_TOOL_LIGHT} ${CMAKE_CURRENT_BINARY_DIR}/bundle.wixobj -ext WixBalExtension -out "Bundle-${CPACK_PACKAGE_FILE_NAME}.exe"
+            DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/bundle.wxs
+        )
+
+        add_custom_target(BUNDLE
+            DEPENDS
+            ${CMAKE_CURRENT_BINARY_DIR}/Bundle-${CPACK_PACKAGE_FILE_NAME}
+        )
+        add_dependencies(BUNDLE WinFSP_Download)
+    endif()
+
+    
+endif()
+
 #set(CPACK_WIX_EXTRA_SOURCES             "${CMAKE_CURRENT_SOURCE_DIR}/cpack/wix/ola_dirs.wxs")
 #set(CPACK_WIX_SKIP_PROGRAM_FOLDER       TRUE)
 #set(CPACK_WIX_PROGRAM_MENU_FOLDER       "")
@@ -227,3 +269,5 @@ set(CMAKE_INSTALL_DEBUG_LIBRARIES TRUE)
 include(InstallRequiredSystemLibraries)
 
 include(CPack)
+
+

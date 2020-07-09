@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+    <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi"
+            xmlns:bal="http://schemas.microsoft.com/wix/BalExtension">
+      <Bundle Version="@CPACK_PACKAGE_VERSION@" UpgradeCode="FB9A7D6E-2EB6-4901-8EA9-816F0081A92A" Name="Bundle-@CPACK_PACKAGE_FILE_NAME@"
+        IconSourceFile="@WIX_BUNDLE_ICON@">
+        <BootstrapperApplicationRef Id="WixStandardBootstrapperApplication.RtfLicense">
+          <bal:WixStandardBootstrapperApplication
+            LicenseFile="@CPACK_WIX_LICENSE_RTF@"
+            ShowVersion="yes"
+            />
+        </BootstrapperApplicationRef>
+        <Chain>
+            <MsiPackage Id="WinFSP"  Name="WinFSP" Visible="no" DisplayInternalUI="no" DownloadUrl="@WIX_BUNDLE_WINFSP_URL@" SourceFile="@WIX_BUNDLE_WINFSP_MSI@"/>
+            <MsiPackage Id="MyApps.space"  Name="MyApps.space" After="WinFSP" Visible="yes" ForcePerMachine="no" SourceFile="@CPACK_PACKAGE_FILE_NAME@.msi" />
+        </Chain>
+      </Bundle>
+    </Wix>
