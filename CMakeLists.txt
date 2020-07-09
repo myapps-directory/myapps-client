@@ -229,7 +229,7 @@ if(WIN32)
         configure_file(${CMAKE_CURRENT_SOURCE_DIR}/cpack/wix/bundle.wxs.in ${CMAKE_BINARY_DIR}/bundle.wxs) 
 
         add_custom_command(
-            OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/Bundle-${CPACK_PACKAGE_FILE_NAME}
+            OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/Bundle-${CPACK_PACKAGE_FILE_NAME}.exe
             COMMAND ${WIX_TOOL_CANDLE} ${CMAKE_CURRENT_BINARY_DIR}/bundle.wxs -ext WixBalExtension
             COMMAND ${WIX_TOOL_LIGHT} ${CMAKE_CURRENT_BINARY_DIR}/bundle.wixobj -ext WixBalExtension -out "Bundle-${CPACK_PACKAGE_FILE_NAME}.exe"
             DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/bundle.wxs
@@ -237,7 +237,7 @@ if(WIN32)
 
         add_custom_target(BUNDLE
             DEPENDS
-            ${CMAKE_CURRENT_BINARY_DIR}/Bundle-${CPACK_PACKAGE_FILE_NAME}
+            ${CMAKE_CURRENT_BINARY_DIR}/Bundle-${CPACK_PACKAGE_FILE_NAME}.exe
         )
         add_dependencies(BUNDLE WinFSP_Download)
     endif()

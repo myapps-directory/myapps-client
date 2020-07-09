@@ -10,8 +10,8 @@
             />
         </BootstrapperApplicationRef>
         <Chain>
-            <MsiPackage Id="WinFSP"  Name="WinFSP" Visible="no" DisplayInternalUI="no" DownloadUrl="@WIX_BUNDLE_WINFSP_URL@" SourceFile="@WIX_BUNDLE_WINFSP_MSI@"/>
-            <MsiPackage Id="MyApps.space"  Name="MyApps.space" After="WinFSP" Visible="yes" ForcePerMachine="no" SourceFile="@CPACK_PACKAGE_FILE_NAME@.msi" />
+            <MsiPackage Id="WinFSP"  Name="WinFSP" Visible="yes" DisplayInternalUI="yes" Permanent="yes" Vital="yes" DownloadUrl="@WIX_BUNDLE_WINFSP_URL@" SourceFile="@WIX_BUNDLE_WINFSP_MSI@"/>
+            <MsiPackage Id="MyApps.space"  Name="MyApps.space" After="WinFSP" DisplayInternalUI="yes" Visible="yes"  Vital="yes" EnableFeatureSelection="yes" ForcePerMachine="no" SourceFile="@CPACK_PACKAGE_FILE_NAME@.msi" />
         </Chain>
       </Bundle>
     </Wix>
