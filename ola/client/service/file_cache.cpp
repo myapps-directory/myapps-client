@@ -539,7 +539,7 @@ void Engine::Implementation::removeApplication(ApplicationStub& _rapp)
         file_free_index_stack_.push(p.second);
     }
     boost::system::error_code err;
-    fs::remove_all(computeApplicationPath(_rapp.name_, _rapp.build_));
+    fs::remove_all(computeApplicationPath(_rapp.name_, _rapp.build_), err);
     _rapp.clear();
 }
 
