@@ -1,5 +1,7 @@
 if(WIN32)
+    
     set_source_files_properties(example_basic_win.cpp PROPERTIES COMPILE_FLAGS -bigobj)
+    
     add_executable(
         example_basic
         WIN32
@@ -19,7 +21,10 @@ if(WIN32)
         find_file(VCRUNTIME_DLL "vcruntime140d.dll" PATHS "$ENV{SYSTEMROOT}\\System32")
         find_file(VCRUNTIME_1_DLL "vcruntime140_1d.dll" PATHS "$ENV{SYSTEMROOT}\\System32")
     else()
-        message("TODO - not implemented")
+        find_file(MSVCP_DLL "msvcp140.dll" PATHS "$ENV{SYSTEMROOT}\\System32")
+        find_file(UCRTBASE_DLL "ucrtbase.dll" PATHS "$ENV{SYSTEMROOT}\\System32")
+        find_file(VCRUNTIME_DLL "vcruntime140.dll" PATHS "$ENV{SYSTEMROOT}\\System32")
+        find_file(VCRUNTIME_1_DLL "vcruntime140_1.dll" PATHS "$ENV{SYSTEMROOT}\\System32")
     endif()
 
     message("Found: ${MSVCP_DLL}, ${UCRTBASE_DLL}, ${VCRUNTIME_DLL}, ${VCRUNTIME_1_DLL}")

@@ -13,7 +13,7 @@ LAST=$START+$COUNT
 createIcon()
 {
     echo "create icon $1"
-    magick -size 422x238 xc:none -gravity Center -fill green -draw "ellipse 210,118 210,118 0,360"  -fill purple -font /c/windows/fonts/arial.ttf -pointsize 100 -annotate +0+0 "$1" tmp/main.png
+    magick -size 422x238 xc:none -gravity Center -fill green -draw "ellipse 210,118 210,118 0,360"  -fill purple -font /c/windows/fonts/arial.ttf -pointsize 80 -annotate +0+0 "$1" tmp/main.png
     magick tmp/main.png -define icon:auto-resize="256,128,96,64,48,32,16" tmp/build/icon.ico
 }
 
@@ -41,14 +41,14 @@ createMedia()
     local APPID=$2
     local MEDIAID=$3
     echo "create media $INDEX"
-    magick example_basic_thumb.png  -fill red  -undercolor '#00000080'  -pointsize 100 -gravity Center -annotate +0+5 " ${INDEX}-${MEDIAID} "  tmp/media/red_thumb.jpg
-    magick example_basic.png  -fill red  -undercolor '#00000080' -pointsize 100 -gravity Center -annotate +0+5 " ${INDEX}-${MEDIAID} "  tmp/media/red_image.jpg
+    magick example_basic_thumb.png  -fill red  -undercolor '#00000080'  -pointsize 80 -gravity Center -annotate +0+5 " ${INDEX}-${MEDIAID} "  tmp/media/red_thumb.jpg
+    magick example_basic.png  -fill red  -undercolor '#00000080' -pointsize 80 -gravity Center -annotate +0+5 " ${INDEX}-${MEDIAID} "  tmp/media/red_image.jpg
 
-    magick example_basic_thumb.png  -fill green  -undercolor '#00000080'  -pointsize 100 -gravity Center -annotate +0+5 " ${INDEX}-${MEDIAID} "  tmp/media/green_thumb.jpg
-    magick example_basic.png  -fill green  -undercolor '#00000080' -pointsize 100 -gravity Center -annotate +0+5 " ${INDEX}-${MEDIAID} "  tmp/media/green_image.jpg
+    magick example_basic_thumb.png  -fill green  -undercolor '#00000080'  -pointsize 80 -gravity Center -annotate +0+5 " ${INDEX}-${MEDIAID} "  tmp/media/green_thumb.jpg
+    magick example_basic.png  -fill green  -undercolor '#00000080' -pointsize 80 -gravity Center -annotate +0+5 " ${INDEX}-${MEDIAID} "  tmp/media/green_image.jpg
 
-    magick example_basic_thumb.png  -fill blue  -undercolor '#00000080'  -pointsize 100 -gravity Center -annotate +0+5 " ${INDEX}-${MEDIAID} "  tmp/media/blue_thumb.jpg
-    magick example_basic.png  -fill blue  -undercolor '#00000080' -pointsize 100 -gravity Center -annotate +0+5 " ${INDEX}-${MEDIAID} "  tmp/media/blue_image.jpg
+    magick example_basic_thumb.png  -fill blue  -undercolor '#00000080'  -pointsize 80 -gravity Center -annotate +0+5 " ${INDEX}-${MEDIAID} "  tmp/media/blue_thumb.jpg
+    magick example_basic.png  -fill blue  -undercolor '#00000080' -pointsize 80 -gravity Center -annotate +0+5 " ${INDEX}-${MEDIAID} "  tmp/media/blue_image.jpg
 
     echo -ne "create media $APPID "$MEDIAID" tmp/media\nq\n" | ./ola_client_cli
 }
