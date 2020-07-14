@@ -37,7 +37,8 @@ struct Configuration {
     std::string       path_prefix_;
     std::string       temp_folder_;
     std::string       mount_prefix_;
-    std::string       secure_prefix_;  
+    std::string       secure_prefix_;
+    std::string       app_list_path_;
     FolderUpdateFunctionT folder_update_fnc_;
     AuthOnResponseFunctionT auth_on_response_fnc_;
     AuthGetTokenFunctionT auth_get_token_fnc_;
@@ -69,6 +70,8 @@ public:
     void stop();
 
     void relogin();
+
+    void appListUpdate();
 
     Descriptor* open(const fs::path& _path, uint32_t _create_flags);
 

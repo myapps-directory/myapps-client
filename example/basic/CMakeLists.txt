@@ -8,7 +8,6 @@ if(WIN32)
 
     add_custom_command(TARGET example_basic POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/example_basic.build.yml $<TARGET_FILE_DIR:example_basic>
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/example_basic.media.yml $<TARGET_FILE_DIR:example_basic>
         COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/example_basic.png $<TARGET_FILE_DIR:example_basic>
         COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/example_basic_thumb.png $<TARGET_FILE_DIR:example_basic>
         COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/upload $<TARGET_FILE_DIR:example_basic>

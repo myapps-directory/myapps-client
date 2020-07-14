@@ -52,3 +52,12 @@ configurations:
         icon: icon.ico
         arguments: ""
         run_folder: ""
+    media:
+      name: "MEDIAID"
+      entries:
+      - thumbnail:  "red_thumb.jpg"
+        file: "red_image.jpg"
+      - thumbnail:  "green_thumb.jpg"
+        file: "green_image.jpg"
+      - thumbnail:  "blue_thumb.jpg"
+        file: "blue_image.jpg"

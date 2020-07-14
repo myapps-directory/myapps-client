@@ -20,6 +20,7 @@
 #include "ola/client/service/engine.hpp"
 #include "ola/client/utility/locale.hpp"
 #include "ola/client/utility/auth_file.hpp"
+#include "ola/client/utility/app_list_file.hpp"
 #include "ola/client/utility/file_monitor.hpp"
 
 #include <iostream>
@@ -233,7 +234,7 @@ class FileSystemService final : public Service {
     ola::client::utility::FileMonitor   file_monitor_;
 
 
-    fs::path authDataDirectoryPath() const
+    fs::path configDirectoryPath() const
     {
         fs::path p = params_.path_prefix_;
         p /= "config";
@@ -242,15 +243,19 @@ class FileSystemService final : public Service {
 
     fs::path authDataFilePath() const
     {
-        return authDataDirectoryPath() / "auth.data";
+        return configDirectoryPath() / "auth.data";
     }
 
+    fs::path appListDataFilePath() const
+    {
+        return configDirectoryPath() / "app_list.data";
+    }
 public:
     FileSystemService();
 
     bool waitAuthentication();
     void onAuthFileChange(const chrono::system_clock::time_point& _time_point);
-
+    void onAppListFileChange(const chrono::system_clock::time_point& _time_point);
 protected:
     NTSTATUS OnStart(ULONG Argc, PWSTR* Argv) override;
     NTSTATUS OnStop() override;
@@ -287,7 +292,6 @@ int wmain(int argc, wchar_t** argv)
     FileSystemService service;
     const auto rv = service.Run();
     if (!service.waitAuthentication()) {
-        return rv;
     } else {
         //we need to restart the service
         TCHAR szFileName[MAX_PATH];
@@ -301,6 +305,7 @@ int wmain(int argc, wchar_t** argv)
         CloseHandle(m_singleInstanceMutex);
         _wexecv(szFileName, arg_vec.data());
     }
+    return rv;
 }
 
 namespace {
@@ -647,6 +652,11 @@ void FileSystemService::onAuthFileChange(const chrono::system_clock::time_point&
     }
 }
 
+void FileSystemService::onAppListFileChange(const chrono::system_clock::time_point& _time_point)
+{
+    engine_.appListUpdate();
+}
+
 bool FileSystemService::waitAuthentication()
 {
     unique_lock<mutex> lock(mutex_);
@@ -715,7 +725,7 @@ NTSTATUS FileSystemService::OnStart(ULONG argc, PWSTR *argv)
     }
     {
         boost::system::error_code err;
-        fs::create_directories( authDataDirectoryPath(), err);
+        fs::create_directories( configDirectoryPath(), err);
     }
     wait_status_ = WaitStatusE::Wait;
 
@@ -725,6 +735,7 @@ NTSTATUS FileSystemService::OnStart(ULONG argc, PWSTR *argv)
             onAuthFileChange(_time_point);
         }
     );
+    
     this->file_monitor_.start();
 
     waitAuthentication();
@@ -746,6 +757,7 @@ NTSTATUS FileSystemService::OnStart(ULONG argc, PWSTR *argv)
 	cfg.path_prefix_ = params_.path_prefix_;
 	cfg.mount_prefix_ = utility::narrow(params_.mount_point_);
 	cfg.temp_folder_ = env_temp_prefix();
+    cfg.app_list_path_ = appListDataFilePath().string();
     cfg.auth_get_token_fnc_ = [this](){
         lock_guard<mutex> lock(mutex_);
         return auth_token_;
@@ -773,8 +785,17 @@ NTSTATUS FileSystemService::OnStart(ULONG argc, PWSTR *argv)
     cfg.folder_update_fnc_ = [this](const std::string &_folder){
         SHChangeNotify(SHCNE_UPDATEDIR, SHCNF_PATH | SHCNF_FLUSHNOWAIT, params_.mount_point_.c_str(), NULL);
     };
+    
     engine_.start(cfg);
-	NTSTATUS  Result = STATUS_SUCCESS;
+	
+    this->file_monitor_.add(
+        appListDataFilePath(),
+        [this](const fs::path& _dir, const fs::path& _name, const chrono::system_clock::time_point& _time_point) mutable {
+            onAppListFileChange(_time_point);
+        }
+    );
+    
+    NTSTATUS  Result = STATUS_SUCCESS;
 	ULONG     DebugFlags     = 0;
 	
 	EnableBackupRestorePrivileges();

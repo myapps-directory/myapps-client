@@ -16,6 +16,7 @@
 
 #include "ola/client/auth/auth_protocol.hpp"
 #include "ola/client/utility/locale.hpp"
+#include "ola/client/utility/app_list_file.hpp"
 
 #include "file_cache.hpp"
 #include "ola/common/ola_front_protocol.hpp"
@@ -128,6 +129,8 @@ using EntryMapT       = std::unordered_map<const std::reference_wrapper<const st
 using EntryPtrMapT    = std::unordered_map<const std::reference_wrapper<const string>, Entry*, Hash, Equal>;
 using EntryPtrVectorT = std::vector<Entry*>;
 using UpdatesMapT     = std::unordered_map<string, pair<string, string>>;
+using AppListFileT = ola::client::utility::AppListFile;
+
 
 struct DirectoryData {
     EntryMapT entry_map_;
@@ -757,6 +760,7 @@ struct Engine::Implementation {
     condition_variable        root_cv_;
     RecipientVectorT          auth_recipient_vec_;
     bool                      running_ = true;
+    bool                      app_list_update_ = false;
     EntryPointerT             root_entry_ptr_;
     EntryPointerT             media_entry_ptr_;
     atomic<size_t>            current_mutex_index_ = 0;
@@ -767,9 +771,9 @@ struct Engine::Implementation {
     ShortcutCreator           shortcut_creator_;
     file_cache::Engine        file_cache_engine_;
     atomic<size_t>            open_count_ = 0;
-    thread                    update_thread;
+    thread                    update_thread_;
     atomic<bool>              first_run_{true};
-
+    AppListFileT              app_list_;
 public:
     Implementation(
         const Configuration& _rcfg)
@@ -785,13 +789,13 @@ public:
     {
         front_rpc_service_.stop();
 
-        if (update_thread.joinable()) {
+        if (update_thread_.joinable()) {
             {
                 lock_guard<mutex> lock(root_mutex_);
                 running_ = false;
                 root_cv_.notify_one();
             }
-            update_thread.join();
+            update_thread_.join();
         }
     }
 
@@ -922,12 +926,15 @@ struct FrontProtocolSetup {
 void Engine::start(const Configuration& _rcfg)
 {
     solid_log(logger, Verbose, "");
+
     pimpl_ = make_unique<Implementation>(_rcfg);
 
     {
         pimpl_->mutex_dq_.resize(pimpl_->config_.mutex_count_);
         pimpl_->cv_dq_.resize(pimpl_->config_.cv_count_);
     }
+
+    pimpl_->app_list_.load(pimpl_->config_.app_list_path_);
 
     pimpl_->createRootEntry();
 
@@ -1036,6 +1043,14 @@ void Engine::relogin()
 
     for (const auto& recipient_id : auth_recipient_vec) {
         pimpl_->front_rpc_service_.sendRequest(recipient_id, req_ptr, lambda);
+    }
+}
+
+void Engine::appListUpdate() {
+    lock_guard<mutex> lock(pimpl_->mutex_);
+    if (!pimpl_->app_list_update_) {
+        pimpl_->app_list_update_ = true;
+        pimpl_->root_cv_.notify_one();
     }
 }
 
@@ -1842,6 +1857,7 @@ void Engine::Implementation::remoteFetchApplication(
     size_t                                                  _app_index)
 {
     _rsent_msg_ptr->app_id_ = _rapp_id_vec[_app_index].id_;
+    _rsent_msg_ptr->build_id_ = app_list_.find(_rapp_id_vec[_app_index].unique_).name_;
 
     auto lambda = [this, _app_index, app_id_vec = std::move(_rapp_id_vec)](
                       frame::mprpc::ConnectionContext&                         _rctx,
@@ -1905,7 +1921,10 @@ void Engine::Implementation::update()
             auto req_ptr = make_shared<FetchBuildUpdatesRequest>();
             req_ptr->app_id_vec_.reserve(_rrecv_msg_ptr->app_vec_.size());
             for (auto&& a : _rrecv_msg_ptr->app_vec_) {
-                req_ptr->app_id_vec_.emplace_back(std::move(a.id_));
+                auto build_req = app_list_.find(a.unique_).name_;
+                if (build_req != ola::utility::app_item_invalid) {
+                    req_ptr->app_id_vec_.emplace_back(std::move(a.id_), app_list_.find(a.unique_).name_);
+                }
             }
             req_ptr->lang_  = "US_en";
             req_ptr->os_id_ = "Windows10x86_64";
@@ -1921,8 +1940,9 @@ void Engine::Implementation::update()
                         const auto& app_unique   = _rrecv_msg_ptr->app_vec_[i].first;
                         const auto& build_unique = _rrecv_msg_ptr->app_vec_[i].second;
                         const auto& app_id       = _rsent_msg_ptr->app_id_vec_[i];
-
-                        updates_map[app_unique] = make_pair(app_id, build_unique);
+                        if (!build_unique.empty()) {
+                            updates_map[app_unique] = make_pair(app_id.first, build_unique);
+                        }
                         solid_log(logger, Info, "update: app_unique = " << app_unique << " build_unique = " << build_unique);
                     }
                     unique_lock<mutex> lock(root_mutex_);
@@ -1947,14 +1967,21 @@ void Engine::Implementation::update()
     };
 
     while (true) {
+        bool app_list_update = false;
         {
             unique_lock<mutex> lock(root_mutex_);
 
-            root_cv_.wait_for(lock, chrono::seconds(config_.update_poll_seconds_), [this]() { return !running_; });
+            root_cv_.wait_for(lock, chrono::seconds(config_.update_poll_seconds_), [this]() { return !running_ && app_list_update_; });
             if (!running_) {
                 return;
             }
+            if (app_list_update_) {
+                app_list_update_ = false;
+                app_list_update = true;
+            }
         }
+
+        app_list_.load(config_.app_list_path_);
 
         auto req_ptr     = make_shared<ListAppsRequest>();
         req_ptr->choice_ = 'a';
@@ -2068,7 +2095,7 @@ void Engine::Implementation::onAllApplicationsFetched()
 
     if (first_run_.compare_exchange_strong(expect, false)) {
         cleanFileCache();
-        update_thread = thread(&Implementation::update, this);
+        update_thread_ = thread(&Implementation::update, this);
     }
     config_.folder_update_fnc_("");
 }
@@ -2167,7 +2194,7 @@ void Engine::Implementation::insertApplicationEntry(std::shared_ptr<front::Fetch
         root_entry_ptr_, _rrecv_msg_ptr->configuration_.directory_,
         EntryTypeE::Application);
 
-    entry_ptr->remote_   = _rrecv_msg_ptr->storage_id_;
+    entry_ptr->remote_   = _rrecv_msg_ptr->build_storage_id_;
     entry_ptr->data_any_ = ApplicationData(_rrecv_msg_ptr->app_unique_, _rrecv_msg_ptr->build_unique_);
     entry_ptr->pmaster_  = entry_ptr.get();
 

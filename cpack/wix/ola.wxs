@@ -17,8 +17,7 @@
 
         <MajorUpgrade
             Schedule="afterInstallInitialize"
-            AllowSameVersionUpgrades="yes"
-            DowngradeErrorMessage="A later version of [ProductName] is already installed. Setup will now exit."/>
+            AllowDowngrades="yes"/>
 
         <WixVariable Id="WixUILicenseRtf" Value="$(var.CPACK_WIX_LICENSE_RTF)"/>
         <Property Id="WIXUI_INSTALLDIR" Value="INSTALL_ROOT"/>
