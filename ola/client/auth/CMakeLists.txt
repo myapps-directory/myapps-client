@@ -94,9 +94,9 @@ if(${Qt5Widgets_FOUND})
         ola_client_auth
         ola_client_utility
 		ola_utility
-        solid_frame_mprpc
-        solid_frame_aio_openssl
-        solid_serialization_v2
+        SolidFrame::solid_frame_mprpc
+        SolidFrame::solid_frame_aio_openssl
+        SolidFrame::solid_serialization_v2
         ${OPENSSL_LIBRARIES}
         ${Boost_PROGRAM_OPTIONS_LIBRARY}
         ${Boost_SYSTEM_LIBRARY}

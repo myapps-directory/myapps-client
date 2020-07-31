@@ -22,9 +22,9 @@ if(WIN32)
         ${FUSE_LIBRARY}
         ola_utility
         ola_client_utility
-        solid_frame_mprpc
-        solid_frame_aio_openssl
-        solid_serialization_v2
+        SolidFrame::solid_frame_mprpc
+        SolidFrame::solid_frame_aio_openssl
+        SolidFrame::solid_serialization_v2
         ${OPENSSL_LIBRARIES}
 		${SNAPPY_LIB}
         ${Boost_PROGRAM_OPTIONS_LIBRARY}
@@ -58,9 +58,9 @@ if(WIN32)
     target_link_libraries(passthrough
         ${FUSE_LIBRARY}
 		ola_utility
-        solid_frame_mprpc
-        solid_frame_aio_openssl
-        solid_serialization_v2
+        SolidFrame::solid_frame_mprpc
+        SolidFrame::solid_frame_aio_openssl
+        SolidFrame::solid_serialization_v2
         ${OPENSSL_LIBRARIES}
 		${SNAPPY_LIB}
         ${Boost_PROGRAM_OPTIONS_LIBRARY}
@@ -79,9 +79,9 @@ if(WIN32)
     target_link_libraries(passthrough_c
         ${FUSE_LIBRARY}
 		ola_utility
-        solid_frame_mprpc
-        solid_frame_aio_openssl
-        solid_serialization_v2
+        SolidFrame::solid_frame_mprpc
+        SolidFrame::solid_frame_aio_openssl
+        SolidFrame::solid_serialization_v2
         ${OPENSSL_LIBRARIES}
 		${SNAPPY_LIB}
         ${Boost_PROGRAM_OPTIONS_LIBRARY}
