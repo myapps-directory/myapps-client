@@ -61,3 +61,5 @@ configurations:
         file: "green_image.jpg"
       - thumbnail:  "blue_thumb.jpg"
         file: "blue_image.jpg"
+
+        

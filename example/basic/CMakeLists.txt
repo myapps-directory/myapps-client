@@ -1,18 +1,37 @@
 if(WIN32)
     
     set_source_files_properties(example_basic_win.cpp PROPERTIES COMPILE_FLAGS -bigobj)
-    
+
     add_executable(
         example_basic
         WIN32
         example_basic_win.cpp
+        ${CMAKE_CURRENT_BINARY_DIR}/dummy.cpp
+        example_basic.build.yml
+        example_basic.png
+        example_basic_thumb.png
+        ola_upload
     )
 
-    add_custom_command(TARGET example_basic POST_BUILD
+    get_property(example_basic_location TARGET example_basic PROPERTY RUNTIME_OUTPUT_DIRECTORY)
+
+    message("example_basic location: ${example_basic_location}")
+
+    add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/dummy.cpp
+        COMMAND ${CMAKE_COMMAND} -E touch ${CMAKE_CURRENT_BINARY_DIR}/dummy.cpp
+        DEPENDS
+        example_basic.build.yml
+        example_basic.png
+        example_basic_thumb.png
+        ola_upload
+        COMMENT "Force trigger rebuild when artifact files do change"
+    )
+
+    add_custom_command(TARGET example_basic PRE_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/example_basic.build.yml $<TARGET_FILE_DIR:example_basic>
         COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/example_basic.png $<TARGET_FILE_DIR:example_basic>
         COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/example_basic_thumb.png $<TARGET_FILE_DIR:example_basic>
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/upload $<TARGET_FILE_DIR:example_basic>
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/ola_upload $<TARGET_FILE_DIR:example_basic>
     )
 
     if(CMAKE_BUILD_TYPE MATCHES "debug")
