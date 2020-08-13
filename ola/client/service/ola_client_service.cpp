@@ -12,8 +12,6 @@
 
 #include "ola/common/utility/encode.hpp"
 
-#include "ola/common/ola_front_protocol.hpp"
-
 #include "boost/filesystem.hpp"
 #include "boost/program_options.hpp"
 

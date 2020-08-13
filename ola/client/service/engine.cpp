@@ -19,7 +19,6 @@
 #include "ola/client/utility/app_list_file.hpp"
 
 #include "file_cache.hpp"
-#include "ola/common/ola_front_protocol.hpp"
 #include "shortcut_creator.hpp"
 
 #include <boost/algorithm/string/predicate.hpp>
@@ -951,6 +950,7 @@ void Engine::start(const Configuration& _rcfg)
         auto                        proto = ProtocolT::create();
         frame::mprpc::Configuration cfg(pimpl_->scheduler_, proto);
 
+        front::protocol_setup_init(FrontProtocolSetup(), *proto);
         front::protocol_setup(FrontProtocolSetup(), *proto);
 
         cfg.client.name_resolve_fnc = frame::mprpc::InternetResolverF(pimpl_->resolver_, ola::front::default_port());
