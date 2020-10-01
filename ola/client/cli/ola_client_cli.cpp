@@ -12,6 +12,7 @@
 #include "solid/frame/mprpc/mprpcsocketstub_openssl.hpp"
 
 #include "ola/common/utility/encode.hpp"
+#include "ola/common/ola_front_protocol_init.hpp"
 #include "ola/common/ola_front_protocol.hpp"
 
 #include "ola/client/utility/auth_file.hpp"
@@ -440,6 +441,7 @@ void configure_service(Engine &_reng, AioSchedulerT &_rsch, frame::aio::Resolver
     auto                        proto = front::ProtocolT::create();
     frame::mprpc::Configuration cfg(_rsch, proto);
 
+    front::protocol_setup_init(FrontSetup(), *proto);
     front::protocol_setup(FrontSetup(), *proto);
 
     cfg.client.name_resolve_fnc = frame::mprpc::InternetResolverF(_rres, ola::front::default_port());
@@ -1453,42 +1455,11 @@ void handle_parse(istream& _ris, Engine& _reng) {
 //  Acquire
 //-----------------------------------------------------------------------------
 
-void handle_acquire_app(istream& _ris, Engine &_reng){
-    auto req_ptr = make_shared<AcquireAppRequest>();
-    
-    _ris>>std::quoted(req_ptr->app_id_);
-    
-    req_ptr->app_id_ = ola::utility::base64_decode(req_ptr->app_id_);
-    
-    promise<void> prom;
-    
-    auto lambda = [&prom](
-        frame::mprpc::ConnectionContext&        _rctx,
-        std::shared_ptr<AcquireAppRequest>&  _rsent_msg_ptr,
-        std::shared_ptr<Response>& _rrecv_msg_ptr,
-        ErrorConditionT const&                  _rerror
-    ){
-        if(_rrecv_msg_ptr){
-            cout<<"Acquire response: "<<_rrecv_msg_ptr->error_<<" "<<_rrecv_msg_ptr->message_<<endl;
-        }else{
-            cout<<"Error - no response: "<<_rerror.message()<<endl;
-        }
-        prom.set_value();
-    };
-    _reng.rpcService().sendRequest(_reng.serverEndpoint().c_str(), req_ptr, lambda);
-    
-    solid_check(prom.get_future().wait_for(chrono::seconds(100)) == future_status::ready, "Taking too long - waited 100 secs");
-};
-
 //-----------------------------------------------------------------------------
 
 void handle_acquire(istream& _ris, Engine &_reng){
     string what;
     _ris>>std::quoted(what);
-    
-    if(what == "app"){
-        handle_acquire_app(_ris, _reng);
-    }
 }
 
 //-----------------------------------------------------------------------------

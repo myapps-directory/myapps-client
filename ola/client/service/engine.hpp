@@ -5,6 +5,10 @@
 #include <memory>
 #include <string>
 
+
+#include "ola/common/ola_front_protocol_init.hpp"
+#include "ola/common/ola_front_protocol.hpp"
+
 namespace ola {
 namespace client {
 namespace service {

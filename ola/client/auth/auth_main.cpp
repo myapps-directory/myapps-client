@@ -37,7 +37,8 @@
 #include "ola/client/utility/auth_file.hpp"
 
 #include "auth_protocol.hpp"
-#include "ola/common/ola_front_protocol.hpp"
+#include "ola/common/ola_front_protocol_init.hpp"
+#include "ola/common/ola_front_protocol_auth.hpp"
 
 #include "boost/filesystem.hpp"
 #include "boost/program_options.hpp"
@@ -414,7 +415,8 @@ void front_configure_service(Engine& _rengine, const Parameters& _params, frame:
     auto                        proto = front::ProtocolT::create();
     frame::mprpc::Configuration cfg(_rsch, proto);
 
-    front::protocol_setup(FrontSetup(), *proto);
+    front::protocol_setup_init(FrontSetup(), *proto);
+    front::protocol_setup_auth(FrontSetup(), *proto);
 
     cfg.client.name_resolve_fnc = frame::mprpc::InternetResolverF(_rres, ola::front::default_port());
 
