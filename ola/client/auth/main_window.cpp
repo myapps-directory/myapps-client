@@ -11,11 +11,16 @@
 #include <QDesktopWidget>
 
 #include <string>
+#include <sstream>
 #include <stack>
 #include <regex>
+#include <chrono>
+#include <iomanip>
 #include <stdio.h>
 #include <windows.h>
 #pragma comment(lib, "user32.lib")
+
+#include "ola/client/utility/version.hpp"
 
 #include "solid/system/log.hpp"
 
@@ -324,10 +329,14 @@ MainWindow::MainWindow(QWidget* parent)
 
     pimpl_->amend_action_.setEnabled(false);
 
+    QWidget* empty = new QWidget();
+    empty->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+
     pimpl_->tool_bar_.addAction(&pimpl_->back_action_);
     pimpl_->tool_bar_.addAction(&pimpl_->home_action_);
     pimpl_->tool_bar_.addAction(&pimpl_->create_action_);
     pimpl_->tool_bar_.addAction(&pimpl_->amend_action_);
+    pimpl_->tool_bar_.addWidget(empty);
     pimpl_->tool_bar_.addSeparator();
     pimpl_->tool_bar_.addAction(&pimpl_->about_action_);
 
@@ -343,6 +352,66 @@ MainWindow::MainWindow(QWidget* parent)
         [this]() {
             pimpl_->showWidget(this, pimpl_->main_form_.homeWidget);
         });
+    
+    {
+        using namespace std;
+        ostringstream oss;
+
+        oss << client::utility::VERSION_MAJOR << '.' << client::utility::VERSION_MINOR;
+        //oss << " - " << client::utility::version_vcs_branch();
+        oss << " - <a href=https://github.com/vipalade/ola-client/tree/" << client::utility::version_vcs_commit()<<">"<< client::utility::version_vcs_commit() << "</a>";
+
+        pimpl_->about_form_.label_version->setText(QString::fromStdString(oss.str()));
+    }
+    {
+        using namespace std;
+        using namespace std::chrono;
+        auto now_c = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+        std::tm ptm;
+        localtime_s(&ptm, &now_c);
+
+        {
+            ostringstream oss;
+
+            oss << "Copyright 2019-" << std::put_time(&ptm, "%Y") << " MyApps Co. All rights reserverd." << endl;
+            oss << endl;
+            oss << "License <a href=https://www.gnu.org/licenses/gpl-3.0.en.html>GPL3</a>" << endl;
+            oss << endl;
+            oss << "The program is provided AS IS with NO WARRANTY OF ANY KIND, INCLUDING THE WARRANTY OF DESIGN, MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE." << endl;
+
+            pimpl_->about_form_.label_about->setText(QString::fromStdString(oss.str()));
+        }
+        {
+            ostringstream oss;
+            oss << "Open Source Software:" << endl;
+            oss << endl;
+            oss << " <a href=https://github.com/solidoss/solidframe>SolidFrame</a> - " << solid::VERSION_MAJOR << '.' << solid::VERSION_MINOR;
+            oss << " - <a href=https://github.com/solidoss/solidframe/tree/" << solid::version_vcs_commit() << ">" << solid::version_vcs_commit() << "</a>" << endl;
+            oss << endl;
+            oss << " <a href=http://www.secfs.net/winfsp>WinFsp</a>" << endl;
+            oss << endl;
+            oss << " <a href=https://www.qt.io>Qt</a>" << endl;
+            oss << endl;
+            oss << " <a href=https://www.boost.org>Boost</a>" << endl;
+            oss << endl;
+            oss << " <a href=https://www.openssl.org>OpenSSL</a>" << endl;
+            oss << endl;
+            oss << " <a href=https://github.com/USCiLab/cereal>Cereal</a>" << endl;
+            oss << endl;
+            oss << " <a href=https://github.com/google/snappy>Snappy</a>" << endl;
+            oss << endl;
+            oss << " <a href=https://zlib.net>zlib</a>" << endl;
+            oss << endl;
+            oss << " <a href=https://libzip.org>libzip</a>" << endl;
+            oss << endl;
+            oss << " <a href=https://github.com/AmokHuginnsson/replxx>replxx</a>" << endl;
+            oss << endl;
+            oss << " <a href=https://github.com/jbeder/yaml-cpp>yaml</a>" << endl;
+            oss << endl;
+
+            pimpl_->about_form_.label_credits->setText(QString::fromStdString(oss.str()));
+        }
+    }
 }
 
 MainWindow::~MainWindow() {}
