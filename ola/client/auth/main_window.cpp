@@ -373,7 +373,7 @@ MainWindow::MainWindow(QWidget* parent)
         {
             ostringstream oss;
 
-            oss << "Copyright 2019-" << std::put_time(&ptm, "%Y") << " MyApps Co. All rights reserverd." << endl;
+            oss << "Copyright 2019-" << std::put_time(&ptm, "%Y") << " MyApps Co. All rights reserved." << endl;
             oss << endl;
             oss << "License <a href=https://www.gnu.org/licenses/gpl-3.0.en.html>GPL3</a>" << endl;
             oss << endl;
