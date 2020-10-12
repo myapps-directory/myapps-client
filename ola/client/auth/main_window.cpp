@@ -9,6 +9,7 @@
 #include <QToolBar>
 #include <QToolButton>
 #include <QDesktopWidget>
+#include <QMessageBox>
 
 #include <string>
 #include <sstream>
@@ -143,6 +144,9 @@ struct MainWindow::Data {
         if (main_form_.createWidget != _pw) {
             main_form_.createWidget->hide();
         } else {
+            create_form_.password1Edit->clear();
+            create_form_.password2Edit->clear();
+            create_form_.codeEdit->clear();
             current_action_ = ActionE::Create;
         }
         if (main_form_.aboutWidget != _pw) {
@@ -542,17 +546,33 @@ void MainWindow::onAuthSlot(bool _authenticated)
 
     pimpl_->authenticated_ = _authenticated;
     if (_authenticated) {
-        pimpl_->validate_email_ = false;
+        if (pimpl_->validate_email_) {
+            pimpl_->validate_email_ = false;
+            pimpl_->home_form_.userEdit->setText(pimpl_->create_form_.userEdit->text());
+        }
         pimpl_->main_form_.label->setText("Logged in");
         while (!pimpl_->history_.empty()) {
             pimpl_->history_.pop();
         }
     } else {
-        pimpl_->validate_email_ = false;
-        pimpl_->main_form_.label->setText("Authentication failed");
-        pimpl_->home_form_.passwordEdit->setText("");
-        pimpl_->home_form_.codeEdit->setText("");
-        this->setEnabled(true);
+        if (pimpl_->current_action_ == ActionE::Create) {
+            pimpl_->main_form_.label->setText("Invalid user + e-mail combination!");
+            pimpl_->create_form_.codeEdit->clear();
+            pimpl_->create_form_.password1Edit->clear();
+            pimpl_->create_form_.password2Edit->clear();
+            QMessageBox msgBox;
+            msgBox.setText("Invalid user + e-mail combination!");
+            msgBox.exec();
+            pimpl_->create_form_.userEdit->setFocus();
+            return;
+        }
+        else {
+            pimpl_->validate_email_ = false;
+            pimpl_->main_form_.label->setText("Authentication failed");
+            pimpl_->home_form_.passwordEdit->setText("");
+            pimpl_->home_form_.codeEdit->setText("");
+            this->setEnabled(true);
+        }
     }
     
     pimpl_->historyPush(ActionE::Home, [this]() {
