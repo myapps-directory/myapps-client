@@ -15,6 +15,8 @@
 #include "ola/common/ola_front_protocol_init.hpp"
 #include "ola/common/ola_front_protocol.hpp"
 
+#include "ola/common/utility/version.hpp"
+
 #include "ola/client/utility/auth_file.hpp"
 
 #include <signal.h>
@@ -371,10 +373,11 @@ bool parse_arguments(Parameters& _par, int argc, char* argv[])
 {
     using namespace boost::program_options;
     try {
-        options_description desc("ola_auth_service");
+        options_description desc("ola_client_cli");
         // clang-format off
         desc.add_options()
             ("help,h", "List program options")
+            ("version,v", "Version")
             ("debug-modules,M", value<vector<string>>(&_par.dbg_modules), "Debug logging modules")
             ("debug-address,A", value<string>(&_par.dbg_addr), "Debug server address (e.g. on linux use: nc -l 9999)")
             ("debug-port,P", value<string>(&_par.dbg_port)->default_value("9999"), "Debug server port (e.g. on linux use: nc -l 9999)")
@@ -392,6 +395,12 @@ bool parse_arguments(Parameters& _par, int argc, char* argv[])
         notify(vm);
         if (vm.count("help")) {
             cout << desc << "\n";
+            return true;
+        }
+
+        if (vm.count("version")) {
+            cout << ola::utility::version_full() << endl;
+            cout << "SolidFrame: " << solid::version_full() << endl;
             return true;
         }
 
