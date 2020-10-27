@@ -357,6 +357,7 @@ MainWindow::MainWindow(QWidget* parent)
             pimpl_->showWidget(this, pimpl_->main_form_.homeWidget);
         });
     
+    pimpl_->about_form_.tabWidget->setCurrentIndex(0);//About
     {
         using namespace std;
         ostringstream oss;
