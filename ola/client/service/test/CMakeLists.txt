@@ -17,7 +17,6 @@ add_executable(
 target_link_libraries(test_client_service
     SolidFrame::solid_system
     ola_utility
-    ${OPENSSL_LIBRARIES}
     ${Boost_SYSTEM_LIBRARY}
     ${Boost_FILESYSTEM_LIBRARY}
     ${SYSTEM_BASIC_LIBRARIES}

@@ -25,8 +25,7 @@ if(WIN32)
         SolidFrame::solid_frame_mprpc
         SolidFrame::solid_frame_aio_openssl
         SolidFrame::solid_serialization_v2
-        ${OPENSSL_LIBRARIES}
-		${SNAPPY_LIB}
+        ${SNAPPY_LIB}
         ${Boost_PROGRAM_OPTIONS_LIBRARY}
         ${Boost_SYSTEM_LIBRARY}
         ${Boost_FILESYSTEM_LIBRARY}
@@ -61,8 +60,7 @@ if(WIN32)
         SolidFrame::solid_frame_mprpc
         SolidFrame::solid_frame_aio_openssl
         SolidFrame::solid_serialization_v2
-        ${OPENSSL_LIBRARIES}
-		${SNAPPY_LIB}
+        ${SNAPPY_LIB}
         ${Boost_PROGRAM_OPTIONS_LIBRARY}
         ${Boost_SYSTEM_LIBRARY}
         ${Boost_FILESYSTEM_LIBRARY}
@@ -82,8 +80,7 @@ if(WIN32)
         SolidFrame::solid_frame_mprpc
         SolidFrame::solid_frame_aio_openssl
         SolidFrame::solid_serialization_v2
-        ${OPENSSL_LIBRARIES}
-		${SNAPPY_LIB}
+        ${SNAPPY_LIB}
         ${Boost_PROGRAM_OPTIONS_LIBRARY}
         ${Boost_SYSTEM_LIBRARY}
         ${Boost_FILESYSTEM_LIBRARY}
