@@ -62,7 +62,7 @@ struct Parameters {
     wstring        debug_log_file_;
     uint32_t       debug_flags_;
     wstring        mount_point_;
-    vector<string> debug_modules_ = {"ola::.*:IEW"};
+    vector<string> debug_modules_ = {"ola::.*:IEW", "\\*:VIEWX"};
     string         debug_addr_;
     string         debug_port_;
     bool           debug_console_;
@@ -673,7 +673,7 @@ bool FileSystemService::waitAuthentication()
 
 NTSTATUS FileSystemService::OnStart(ULONG argc, PWSTR *argv)
 {
-    SetEnvironmentVariable(L"QT_QPA_PLATFORM_PLUGIN_PATH", L".\platforms");
+    SetEnvironmentVariable(L"QT_QPA_PLATFORM_PLUGIN_PATH", L".\\platforms");
     try {
         if(params_.parse(argc, argv)){
             return STATUS_UNSUCCESSFUL;
@@ -704,21 +704,51 @@ NTSTATUS FileSystemService::OnStart(ULONG argc, PWSTR *argv)
             3,
             1024 * 1024 * 64);
     }
-
+    solid_log(solid::generic_logger, Error, "Start logging. Mount point: "<< utility::narrow(params_.mount_point_));
     {
         namespace fs = boost::filesystem;
-        if(fs::exists(params_.mount_point_)){
-            if(fs::is_directory(params_.mount_point_)){
-                if(fs::is_empty(params_.mount_point_)){
-                    fs::remove(params_.mount_point_);
-                }else{
-                    log_fail(L"cannot mount file system - directory exists instead %s", params_.mount_point_.c_str());
+        boost::system::error_code err;
+        if(fs::is_directory(params_.mount_point_, err)){
+            if(fs::is_empty(params_.mount_point_, err)){
+                solid_log(solid::generic_logger, Info, "Removing existing mount dir " << utility::narrow(params_.mount_point_));
+                fs::remove(params_.mount_point_, err);
+                if (err) {
+                    solid_log(solid::generic_logger, Error, "cannot remove mount dir "<< utility::narrow(params_.mount_point_) <<" "<<err.message());
                     return STATUS_UNSUCCESSFUL;
                 }
             }else{
-                log_fail(L"cannot mount file system - file exists instead %s", params_.mount_point_.c_str());
+                solid_log(solid::generic_logger, Error, "cannot mount file system - non empty directory exists instead: "<< utility::narrow(params_.mount_point_));
+                log_fail(L"cannot mount file system - directory exists instead %s", params_.mount_point_.c_str());
                 return STATUS_UNSUCCESSFUL;
             }
+        }else if(fs::is_regular(params_.mount_point_, err)){
+            solid_log(solid::generic_logger, Error, "cannot mount file system - file exists instead: "<< utility::narrow(params_.mount_point_));
+            log_fail(L"cannot mount file system - file exists instead %s", params_.mount_point_.c_str());
+            return STATUS_UNSUCCESSFUL;
+        }
+        else if (fs::is_regular_file(params_.mount_point_, err)){
+            solid_log(solid::generic_logger, Error, "cannot mount file system - regular file exists instead: "<< utility::narrow(params_.mount_point_));
+            log_fail(L"cannot mount file system - file exists instead %s", params_.mount_point_.c_str());
+            return STATUS_UNSUCCESSFUL;
+        }
+        else if (fs::is_symlink(params_.mount_point_, err)) {
+            solid_log(solid::generic_logger, Warning, "Removing in the way symlink: "<<utility::narrow(params_.mount_point_));
+            fs::remove(params_.mount_point_, err);
+            if (err) {
+                solid_log(solid::generic_logger, Error, "cannot remove symlink " << utility::narrow(params_.mount_point_) << ": " << err.message());
+                return STATUS_UNSUCCESSFUL;
+            }
+        }
+        else if (fs::is_other(params_.mount_point_, err)) {
+            solid_log(solid::generic_logger, Error, "cannot mount file system - other filesystem item exists instead: "<< utility::narrow(params_.mount_point_));
+            log_fail(L"cannot mount file system - file exists instead %s", params_.mount_point_.c_str());
+            return STATUS_UNSUCCESSFUL;
+        }
+        else {
+            solid_log(solid::generic_logger, Info, "Mount point does not exist");
+        }
+        if (err) {
+            solid_log(solid::generic_logger, Error, "error " << err.message());
         }
     }
     {
