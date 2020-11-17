@@ -153,6 +153,7 @@ include(CTest)
 ###############################################################################
 add_subdirectory(ola)
 add_subdirectory(example)
+add_subdirectory(updater)
 add_subdirectory(cpack/wix)
 ###############################################################################
 include(cmake/source-format.cmake)

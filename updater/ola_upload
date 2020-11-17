@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+
+#FRONT=$1
+OPTION=$1
+START=$2
+COUNT=$3
+BUILDID=$4
+MEDIAID=$5
+
+PADDING=4
+LAST=$START+$COUNT
+
+createIcon()
+{
+    echo "create icon $1"
+    magick -size 422x238 xc:none -gravity Center -fill green -draw "ellipse 210,118 210,118 0,360"  -fill purple -font /c/windows/fonts/arial.ttf -pointsize 80 -annotate +0+0 "$1" tmp/main.png
+    magick tmp/main.png -define icon:auto-resize="256,128,96,64,48,32,16" tmp/build/icon.ico
+}
+
+createBuild()
+{
+    local INDEX=$1
+    local APPID=$2
+    local BUILDID=$3
+    local MEDIAID=$4
+	local BUILD="$INDEX-$BUILDID"
+	
+    createIcon $BUILD
+
+    cp example_basic.exe tmp/build
+    cp example_basic_dlls/* tmp/build
+    echo "$INDEX" > tmp/build/id.txt
+    sed "s/APPID/$BUILD/g" example_basic.build.yml > tmp/example_basic.build_.yml
+    sed "s/MEDIAID/$MEDIAID/g" tmp/example_basic.build_.yml > tmp/example_basic.build.yml
+    echo -ne "create build $APPID "$BUILDID" tmp/example_basic.build.yml tmp/build tmp/main.png\nq\n" | ./ola_client_cli
+}
+
+createMedia()
+{
+    local INDEX=$1
+    local APPID=$2
+    local MEDIAID=$3
+    echo "create media $INDEX"
+    magick example_basic_thumb.png  -fill red  -undercolor '#00000080'  -pointsize 80 -gravity Center -annotate +0+5 " ${INDEX}-${MEDIAID} "  tmp/media/red_thumb.jpg
+    magick example_basic.png  -fill red  -undercolor '#00000080' -pointsize 80 -gravity Center -annotate +0+5 " ${INDEX}-${MEDIAID} "  tmp/media/red_image.jpg
+
+    magick example_basic_thumb.png  -fill green  -undercolor '#00000080'  -pointsize 80 -gravity Center -annotate +0+5 " ${INDEX}-${MEDIAID} "  tmp/media/green_thumb.jpg
+    magick example_basic.png  -fill green  -undercolor '#00000080' -pointsize 80 -gravity Center -annotate +0+5 " ${INDEX}-${MEDIAID} "  tmp/media/green_image.jpg
+
+    magick example_basic_thumb.png  -fill blue  -undercolor '#00000080'  -pointsize 80 -gravity Center -annotate +0+5 " ${INDEX}-${MEDIAID} "  tmp/media/blue_thumb.jpg
+    magick example_basic.png  -fill blue  -undercolor '#00000080' -pointsize 80 -gravity Center -annotate +0+5 " ${INDEX}-${MEDIAID} "  tmp/media/blue_image.jpg
+
+    echo -ne "create media $APPID "$MEDIAID" tmp/media\nq\n" | ./ola_client_cli
+}
+
+for (( num=${START}; num<${LAST}; num++ )); do
+    printf -v var "%0${PADDING}d" $num
+    echo "$var"
+    rm -rf tmp
+    mkdir tmp
+    mkdir tmp/build
+    mkdir tmp/media
+    
+    APPID=$(ALFA=`echo -ne "create app test${num}\nq\n" | ./ola_client_cli | grep message`; echo -ne "${ALFA##* }"); echo "APPID=$APPID"
+
+    if [ $OPTION == "m" ] || [ $OPTION == "A" ] ; then
+        createMedia "${var}" $APPID $MEDIAID
+    fi
+
+    if [ $OPTION == "b" ] || [ $OPTION == "A" ]; then
+        createBuild "${var}" $APPID $BUILDID $MEDIAID
+    fi
+done
