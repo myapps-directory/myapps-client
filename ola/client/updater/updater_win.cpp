@@ -28,6 +28,10 @@ processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
 #include <atomic>
 #include <shellapi.h>
 #include <mutex>
+#include <fstream>
+#include <boost/filesystem.hpp>
+#include "ola/client/utility/locale.hpp"
+#include "ola/common/utility/encode.hpp"
 
 using namespace std;
 
@@ -59,7 +63,9 @@ WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 
 	return 0;
 }
-
+bool file_copy(const LPWSTR _src_path, HWND _hProgCtrl, wstring &_rdes_path);
+bool file_validate(const wstring &_des_path, HWND _hProgCtrl, const LPWSTR _sum);
+bool file_launch(const wstring& _des_path, HWND _hProgCtrl);
 //
 //
 // WinMain - Win32 application entry point.
@@ -76,7 +82,7 @@ wWinMain(
 	int	 argc = 0;
 	auto argv = CommandLineToArgvW(lpCmdLine, &argc);
 
-	if (argc != 3) {
+	if (argc != 2) {
 		int msgboxID = MessageBox(
 			NULL,
 			TEXT("Not propery called. There should be two arguments."),
@@ -124,7 +130,7 @@ wWinMain(
 	HWND hWnd = ::CreateWindowEx(
 		0,
 		TEXT("PROGRESSBARSAMPLE"),
-		TEXT("MyApps.space update: copy installer"),
+		TEXT("MyApps.space update"),
 		//WS_OVERLAPPEDWINDOW,
 		WS_OVERLAPPED | WS_SYSMENU,
 		rect.left,
@@ -137,9 +143,9 @@ wWinMain(
 		NULL);
 
 	// Validate window.
-	if (!hWnd)
+	if (!hWnd) {
 		return 1;
-
+	}
 
 	HWND hDefaultProgressCtrl;
 
@@ -161,7 +167,8 @@ wWinMain(
 
 	//::SendMessage(hDefaultProgressCtrl, PBM_SETPOS, (WPARAM)(INT)40, 0);
 
-	auto thr = thread([](HWND hWnd, HWND hProgCtrl) {
+	auto thr = thread([](HWND hWnd, HWND hProgCtrl, int argc, LPWSTR *argv) {
+#if 0
 		for (int i = 0; i < 100; ++i) {
 			this_thread::sleep_for(chrono::milliseconds(100));
 			::SendNotifyMessage(hProgCtrl, PBM_SETPOS, (WPARAM)(INT)(i + 1), 0);
@@ -175,7 +182,48 @@ wWinMain(
 		}
 
 		::PostMessage(hWnd, WM_SYSCOMMAND, SC_CLOSE, 0);
-	}, hWnd, hDefaultProgressCtrl);
+#endif
+		wstring des_path;
+		SetWindowText(hWnd, TEXT("MyApps.space update: copy installer"));
+		if (!file_copy(argv[0], hProgCtrl, des_path)) {
+			MessageBox(
+				NULL,
+				TEXT("Failed copying the installer."),
+				TEXT("Runtime Error"),
+				MB_OK
+			);
+			::PostMessage(hWnd, WM_SYSCOMMAND, SC_CLOSE, 0);
+			return;
+		}
+		SetWindowText(hWnd, TEXT("MyApps.space update: validate installer"));
+		//::SendNotifyMessage(hProgCtrl, PBM_SETPOS, (WPARAM)(INT)(0), 0);
+		
+		if (!file_validate(des_path, hProgCtrl, argv[1])) {
+			MessageBox(
+				NULL,
+				TEXT("Failed validating the installer."),
+				TEXT("Runtime Error"),
+				MB_OK
+			);
+			::PostMessage(hWnd, WM_SYSCOMMAND, SC_CLOSE, 0);
+			return;
+		}
+
+		SetWindowText(hWnd, TEXT("MyApps.space update: launch installer"));
+		//::SendNotifyMessage(hProgCtrl, PBM_SETPOS, (WPARAM)(INT)(0), 0);
+
+		if (!file_launch(des_path, hProgCtrl)) {
+			MessageBox(
+				NULL,
+				TEXT("Failed launching the installer."),
+				TEXT("Runtime Error"),
+				MB_OK
+			);
+			::PostMessage(hWnd, WM_SYSCOMMAND, SC_CLOSE, 0);
+			return;
+		}
+		::PostMessage(hWnd, WM_SYSCOMMAND, SC_CLOSE, 0);
+	}, hWnd, hDefaultProgressCtrl, argc, argv);
 
 	// Display the window.
 	::ShowWindow(hWnd, SW_SHOWDEFAULT);
@@ -191,4 +239,60 @@ wWinMain(
 	::UnregisterClass(wcex.lpszClassName, hInstance);
 	thr.join();
 	return (int)msg.wParam;
+}
+
+string env_temp_prefix()
+{
+	const char* v = getenv("TEMP");
+	if (v == nullptr) {
+		v = getenv("TMP");
+		if (v == nullptr) {
+			v = "c:";
+		}
+	}
+
+	return v;
+}
+
+namespace fs = boost::filesystem;
+
+DWORD CopyProgressRoutine(
+	LARGE_INTEGER TotalFileSize,
+	LARGE_INTEGER TotalBytesTransferred,
+	LARGE_INTEGER StreamSize,
+	LARGE_INTEGER StreamBytesTransferred,
+	DWORD dwStreamNumber,
+	DWORD dwCallbackReason,
+	HANDLE hSourceFile,
+	HANDLE hDestinationFile,
+	LPVOID lpData
+){
+
+	::SendNotifyMessage((HWND)lpData, PBM_SETPOS, (WPARAM)(INT)((TotalBytesTransferred.QuadPart * 100) / TotalFileSize.QuadPart), 0);
+	return running ? PROGRESS_CONTINUE : PROGRESS_CANCEL;
+}
+
+bool file_copy(LPWSTR _src_path, HWND _hProgCtrl, wstring& _rdes_path) {
+	fs::path src_path(_src_path);
+	fs::path des_path(env_temp_prefix());
+	des_path /= src_path.filename();
+	_rdes_path = des_path.wstring();
+	BOOL cancel = false;
+	return CopyFileExW(_src_path, _rdes_path.c_str(), CopyProgressRoutine, (LPVOID)_hProgCtrl, &cancel, 0) == TRUE;
+}
+
+bool file_validate(const wstring& _des_path, HWND _hProgCtrl, const LPWSTR _sum) {
+	ifstream ifs(_des_path, ios_base::binary);
+	if (ifs) {
+		auto sha_sum = ola::utility::sha256hex(ifs);
+		::SendNotifyMessage(_hProgCtrl, PBM_SETPOS, (WPARAM)(INT)(100), 0);
+		return sha_sum == ola::client::utility::narrow(_sum);
+	}
+	return false;
+}
+
+
+bool file_launch(const wstring& _des_path, HWND _hProgCtrl) {
+	auto rv = ShellExecuteW(nullptr, L"open", _des_path.c_str(), L"", L"", SW_SHOW);
+	return (int)rv > 32;
 }
