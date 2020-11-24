@@ -31,7 +31,7 @@ if(WIN32)
         COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/example_basic.build.yml $<TARGET_FILE_DIR:example_basic>
         COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/example_basic.png $<TARGET_FILE_DIR:example_basic>
         COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/example_basic_thumb.png $<TARGET_FILE_DIR:example_basic>
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/ola_upload $<TARGET_FILE_DIR:example_basic>
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/ola_upload $<TARGET_FILE_DIR:example_basic>/ola_upload_example
     )
 
     if(CMAKE_BUILD_TYPE MATCHES "debug")

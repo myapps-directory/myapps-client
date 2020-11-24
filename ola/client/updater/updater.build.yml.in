@@ -1,0 +1,43 @@
+name: windows
+tag: r1.3
+dictionary:
+  - language: en-US
+    name: MyApps.space Updater
+    description: |
+        Updater for MyApps.space.
+    brief: Updater for MyApps.space.
+    company: "MyApps.space"
+  - language: ro-RO
+    name: Updater MyApps.space
+    description: |
+        Updater MyApps.space.
+    brief: |
+        Updater MyApps.space.
+    company: "MyApps.space"
+properties:
+  name: ${name}
+  description: ${description}
+configurations:
+  - name: windows64bit
+    directory: ${name}
+    flags:
+      - HiddenDirectory
+    oses:
+      - Windows10x86_64
+    exes:
+      - ola_updater.exe
+      - OLA_INSTALLER_NAME
+    mount-points: []
+    properties:
+      name: ${name}
+      description: ${description}
+      brief: ${brief}
+      company: ${company}
+    shortcuts:
+      - name: ${name}
+        command: ola_updater.exe
+        icon: ""
+        arguments:
+          - OLA_INSTALLER_NAME
+          - OLA_INSTALLER_SUM
+        run_folder: ""
