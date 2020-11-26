@@ -56,7 +56,9 @@ if(WIN32)
         COMMAND ${CMAKE_COMMAND} -E copy_if_different ${UCRTBASE_DLL} $<TARGET_FILE_DIR:ola_updater>/updater_dlls
         COMMAND ${CMAKE_COMMAND} -E copy_if_different ${VCRUNTIME_DLL} $<TARGET_FILE_DIR:ola_updater>/updater_dlls
         COMMAND ${CMAKE_COMMAND} -E copy_if_different ${VCRUNTIME_1_DLL} $<TARGET_FILE_DIR:ola_updater>/updater_dlls
-        COMMAND ${CMAKE_COMMAND} -DINFILE="${CMAKE_CURRENT_SOURCE_DIR}/updater.build.yml.in"  -DOUTFILE=$<TARGET_FILE_DIR:ola_updater>/updater.build.yml -P "${CMAKE_SOURCE_DIR}/cmake/generic-configure-file.cmake"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${OPENSSL_CRYPTO_DLL} $<TARGET_FILE_DIR:ola_updater>/updater_dlls
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/updater.build.yml.in" $<TARGET_FILE_DIR:ola_updater>/updater.build.yml
+        #COMMAND ${CMAKE_COMMAND} -DINFILE="${CMAKE_CURRENT_SOURCE_DIR}/updater.build.yml.in"  -DOUTFILE=$<TARGET_FILE_DIR:ola_updater>/updater.build.yml -P "${CMAKE_SOURCE_DIR}/cmake/generic-configure-file.cmake"
         COMMAND ${CMAKE_COMMAND} -DINFILE="${CMAKE_CURRENT_SOURCE_DIR}/ola_upload.in"  -DOUTFILE=$<TARGET_FILE_DIR:ola_updater>/ola_upload_updater -DPROJECT_ROOT_DIR="${CMAKE_SOURCE_DIR}" -DOLA_INSTALLER_PATH="${CMAKE_BINARY_DIR}" -DOLA_INSTALLER_NAME="${OLA_INSTALLER_NAME}" -P "${CMAKE_SOURCE_DIR}/cmake/generic-configure-file.cmake"
     )
 endif()

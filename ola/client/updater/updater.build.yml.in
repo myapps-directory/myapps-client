@@ -36,8 +36,13 @@ configurations:
     shortcuts:
       - name: ${name}
         command: ola_updater.exe
-        icon: ""
-        arguments:
-          - OLA_INSTALLER_NAME
-          - OLA_INSTALLER_SUM
+        icon: updater.ico
+        arguments: "OLA_INSTALLER_NAME OLA_INSTALLER_SUM"
         run_folder: ""
+    media:
+      name: ""
+      entries:
+      - thumbnail: ""
+        file: ""
+      - thumbnail: ""
+        file: ""

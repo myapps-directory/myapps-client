@@ -80,12 +80,12 @@ wWinMain(
 	int nShowCmd)
 {
 	int	 argc = 0;
-	auto argv = CommandLineToArgvW(lpCmdLine, &argc);
+	auto argv = CommandLineToArgvW(GetCommandLineW(), &argc);
 
-	if (argc != 2) {
+	if (argc != 3) {
 		int msgboxID = MessageBox(
 			NULL,
-			TEXT("Not propery called. There should be two arguments."),
+			TEXT("Not properly called. There should be two arguments."),
 			TEXT("Wrong program arguments"),
 			MB_OK
 		);
@@ -185,7 +185,7 @@ wWinMain(
 #endif
 		wstring des_path;
 		SetWindowText(hWnd, TEXT("MyApps.space update: copy installer"));
-		if (!file_copy(argv[0], hProgCtrl, des_path)) {
+		if (!file_copy(argv[1], hProgCtrl, des_path)) {
 			MessageBox(
 				NULL,
 				TEXT("Failed copying the installer."),
@@ -198,7 +198,7 @@ wWinMain(
 		SetWindowText(hWnd, TEXT("MyApps.space update: validate installer"));
 		//::SendNotifyMessage(hProgCtrl, PBM_SETPOS, (WPARAM)(INT)(0), 0);
 		
-		if (!file_validate(des_path, hProgCtrl, argv[1])) {
+		if (!file_validate(des_path, hProgCtrl, argv[2])) {
 			MessageBox(
 				NULL,
 				TEXT("Failed validating the installer."),
@@ -277,6 +277,9 @@ bool file_copy(LPWSTR _src_path, HWND _hProgCtrl, wstring& _rdes_path) {
 	fs::path des_path(env_temp_prefix());
 	des_path /= src_path.filename();
 	_rdes_path = des_path.wstring();
+	SetFileAttributesW(_rdes_path.c_str(),
+		GetFileAttributesW(_rdes_path.c_str()) & ~FILE_ATTRIBUTE_READONLY);
+	DeleteFileW(_rdes_path.c_str());
 	BOOL cancel = false;
 	return CopyFileExW(_src_path, _rdes_path.c_str(), CopyProgressRoutine, (LPVOID)_hProgCtrl, &cancel, 0) == TRUE;
 }

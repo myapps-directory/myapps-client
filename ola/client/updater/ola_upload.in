@@ -19,6 +19,7 @@ createBuild()
     cp updater_dlls/* tmp/build
     cp "$INSTALLER_PATH/$INSTALLER_NAME" tmp/build
 	cp "$PROJECT_ROOT/ola/client/updater/updater.png" tmp
+    cp "$PROJECT_ROOT/ola/client/updater/updater.ico" tmp/build
 	
     #cp "$PROJECT_ROOT/ola/client/store/images/ola_store_bag.png" tmp
     INSTALLER_SUM=`sha256sum $INSTALLER_PATH/$INSTALLER_NAME | cut -d' ' -f 1`
@@ -34,7 +35,7 @@ createBuild()
     #sed "s/OLA_INSTALLER/$INSTALLER_NAME/g" updater.build.yml > tmp/updater.build1.yml
     #sed "s/OLA_INSTALLER_SUM/$INSTALLER_SUM/g" tmp/updater.build1.yml > tmp/updater.build.yml
 
-    #echo -ne "create build $APPID $BUILDID tmp/updater.build.yml tmp/build tmp/updater.png\nq\n" | ola_client_cli
+    echo -ne "create build $APPID $BUILDID tmp/updater.build.yml tmp/build tmp/updater.png\nq\n" | ola_client_cli
 }
 
 createMedia()
