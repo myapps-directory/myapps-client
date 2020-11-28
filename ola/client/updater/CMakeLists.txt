@@ -19,6 +19,8 @@ if(WIN32)
         ola_client_utility
     )
 
+    add_dependencies(ola_updater ola_client_cli)
+
     get_property(updater_location TARGET ola_updater PROPERTY RUNTIME_OUTPUT_DIRECTORY)
 
     message("updater location: ${example_basic_location}")

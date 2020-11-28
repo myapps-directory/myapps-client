@@ -17,6 +17,7 @@ dictionary:
 properties:
   name: ${name}
   description: ${description}
+  version: OLA_VERSION
 configurations:
   - name: windows64bit
     directory: ${name}
@@ -26,7 +27,6 @@ configurations:
       - Windows10x86_64
     exes:
       - ola_updater.exe
-      - OLA_INSTALLER_NAME
     mount-points: []
     properties:
       name: ${name}

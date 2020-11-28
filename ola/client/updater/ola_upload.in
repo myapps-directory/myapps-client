@@ -8,6 +8,7 @@ MEDIAID=$4
 INSTALLER_PATH="@OLA_INSTALLER_PATH@"
 INSTALLER_NAME="@OLA_INSTALLER_NAME@"
 PROJECT_ROOT="@PROJECT_ROOT_DIR@"
+PROJECT_VERSION=`ola_client_cli --version | head -n 1`
 
 createBuild()
 {
@@ -30,7 +31,7 @@ createBuild()
     #sed "s/OLA_INSTALLER_NAME/$INSTALLER_NAME/g" updater.build.yml > tmp/updater.build.1.yml
     #sed "s/OLA_INSTALLER_SUM/$INSTALLER_SUM/g" tmp/updater.build.1.yml > tmp/updater.build.yml
 
-    sed "s/OLA_INSTALLER_NAME/$INSTALLER_NAME/g" updater.build.yml | sed "s/OLA_INSTALLER_SUM/$INSTALLER_SUM/g" > tmp/updater.build.yml
+    sed "s/OLA_INSTALLER_NAME/$INSTALLER_NAME/g" updater.build.yml | sed "s/OLA_VERSION/$PROJECT_VERSION/g" | sed "s/OLA_INSTALLER_SUM/$INSTALLER_SUM/g" > tmp/updater.build.yml
 
     #sed "s/OLA_INSTALLER/$INSTALLER_NAME/g" updater.build.yml > tmp/updater.build1.yml
     #sed "s/OLA_INSTALLER_SUM/$INSTALLER_SUM/g" tmp/updater.build1.yml > tmp/updater.build.yml

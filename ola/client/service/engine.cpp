@@ -14,6 +14,8 @@
 
 #include "ola/common/utility/encode.hpp"
 
+#include "ola/common/utility/version.hpp"
+
 #include "ola/client/auth/auth_protocol.hpp"
 #include "ola/client/utility/locale.hpp"
 #include "ola/client/utility/app_list_file.hpp"
@@ -876,7 +878,10 @@ private:
     }
 #endif
 
-    void insertApplicationEntry(std::shared_ptr<front::FetchBuildConfigurationResponse>& _rrecv_msg_ptr);
+    void insertApplicationEntry(
+        std::shared_ptr<front::FetchBuildConfigurationResponse>& _rrecv_msg_ptr,
+        const ola::utility::ApplicationListItem &_app
+    );
     void insertMountEntry(EntryPointerT& _rparent_ptr, const fs::path& _local, const string& _remote);
     bool canPreFetch(const EntryPointerT& _rentry_ptr) const;
 
@@ -1002,7 +1007,7 @@ void Engine::start(const Configuration& _rcfg)
         };
 
         auto req_ptr     = make_shared<ListAppsRequest>();
-        req_ptr->choice_ = 'a'; //TODO change to 'a' -> aquired apps
+        req_ptr->choice_ = 'a';
 
         err = pimpl_->front_rpc_service_.sendRequest(pimpl_->config_.auth_endpoint_.c_str(), req_ptr, lambda);
         solid_check(!err);
@@ -1871,8 +1876,8 @@ void Engine::Implementation::remoteFetchApplication(
             if (_rrecv_msg_ptr->error_ == 0) {
 
                 this->workpool_.push(
-                    [this, recv_msg_ptr = std::move(_rrecv_msg_ptr), is_last = _app_index >= app_id_vec.size()]() mutable {
-                        insertApplicationEntry(recv_msg_ptr);
+                    [this, recv_msg_ptr = std::move(_rrecv_msg_ptr), is_last = _app_index >= app_id_vec.size(), app = app_id_vec[_app_index - 1]]() mutable {
+                        insertApplicationEntry(recv_msg_ptr, app);
                         if (is_last) {
                             //done with all applications
                             onAllApplicationsFetched();
@@ -2082,6 +2087,7 @@ void Engine::Implementation::updateApplications(const UpdatesMapT& _updates_map)
         ola::utility::Build::set_option(req_ptr->fetch_options_, ola::utility::Build::FetchOptionsE::Flags);
         ola::utility::Build::set_option(req_ptr->fetch_options_, ola::utility::Build::FetchOptionsE::Shortcuts);
         req_ptr->property_vec_.emplace_back("brief");
+        req_ptr->property_vec_.emplace_back("version");
 
         remoteFetchApplication(new_app_id_vec, req_ptr, 0);
     } else if(erased_applications){
@@ -2124,6 +2130,7 @@ void Engine::Implementation::onFrontListAppsResponse(
     ola::utility::Build::set_option(req_ptr->fetch_options_, ola::utility::Build::FetchOptionsE::Flags);
     ola::utility::Build::set_option(req_ptr->fetch_options_, ola::utility::Build::FetchOptionsE::Shortcuts);
     req_ptr->property_vec_.emplace_back("brief");
+    req_ptr->property_vec_.emplace_back("version");
 
     remoteFetchApplication(_rrecv_msg_ptr->app_vec_, req_ptr, 0);
 }
@@ -2185,7 +2192,9 @@ string to_system_path(const string& _path)
     return to;
 }
 
-void Engine::Implementation::insertApplicationEntry(std::shared_ptr<front::FetchBuildConfigurationResponse>& _rrecv_msg_ptr)
+void Engine::Implementation::insertApplicationEntry(
+    std::shared_ptr<front::FetchBuildConfigurationResponse>& _rrecv_msg_ptr,
+    const ola::utility::ApplicationListItem& _app)
 {
     //NOTE: because of the entry_ptr, which after inserting it into root entry
     //will have use count == 2, the application cannot be deleted on releaseApplication
@@ -2200,6 +2209,18 @@ void Engine::Implementation::insertApplicationEntry(std::shared_ptr<front::Fetch
 
     if (_rrecv_msg_ptr->configuration_.hasHiddenDirectoryFlag()) {
         entry_ptr->flagSet(EntryFlagsE::Hidden);
+    }
+
+    bool is_invisible = false;
+    if (
+        _app.isFlagSet(ola::utility::AppFlagE::Default) &&
+        _rrecv_msg_ptr->configuration_.exe_vec_.size() == 1 && 
+        _rrecv_msg_ptr->configuration_.exe_vec_[0] == "ola_updater.exe" &&
+        _rrecv_msg_ptr->configuration_.property_vec_.size() >= 2 &&
+        _rrecv_msg_ptr->configuration_.property_vec_[1].second == ola::utility::version_full()
+    ) {
+        entry_ptr->flagSet(EntryFlagsE::Invisible);
+        is_invisible = true;
     }
 
     if (!_rrecv_msg_ptr->configuration_.mount_vec_.empty()) {
@@ -2241,7 +2262,7 @@ void Engine::Implementation::insertApplicationEntry(std::shared_ptr<front::Fetch
 
     const auto& app_folder_name = entry_ptr->name_;
 
-    if (!_rrecv_msg_ptr->configuration_.shortcut_vec_.empty()) {
+    if (!is_invisible && !_rrecv_msg_ptr->configuration_.shortcut_vec_.empty()) {
         for (const auto& sh : _rrecv_msg_ptr->configuration_.shortcut_vec_) {
             ostringstream oss;
             oss << sh.name_;
