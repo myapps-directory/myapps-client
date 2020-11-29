@@ -8,7 +8,7 @@ MEDIAID=$4
 INSTALLER_PATH="@OLA_INSTALLER_PATH@"
 INSTALLER_NAME="@OLA_INSTALLER_NAME@"
 PROJECT_ROOT="@PROJECT_ROOT_DIR@"
-PROJECT_VERSION=`ola_client_cli --version | head -n 1`
+PROJECT_VERSION=`./ola_client_cli --version | head -n 1`
 
 createBuild()
 {
