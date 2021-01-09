@@ -18,26 +18,40 @@ message("project version: ${PROJECT_VERSION} - ${PROJECT_VERSION_MAJOR}.${PROJEC
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 if(NOT CMAKE_BUILD_TYPE)
-    set(CMAKE_BUILD_TYPE "release")
+    message(STATUS "Setting build type to 'release' as none was specified.")
+    set(CMAKE_BUILD_TYPE "release" CACHE STRING "Choose the type of build." FORCE)
+    # Set the possible values of build type for cmake-gui
+    set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS
+        "release" "debug" "maintain")
 endif()
 
 string(TOLOWER "${CMAKE_BUILD_TYPE}" CMAKE_BUILD_TYPE)
 
-set(QT5PREFIX_DIR "" CACHE PATH "QT Prefix directory")
-set(CMAKE_CONFIGURATION_TYPES "release" CACHE STRING "" FORCE)
-set(CONFIGURATION_TYPE "release")
+if(CMAKE_BUILD_TYPE STREQUAL "release")
+    #force a single configuration type on Windows builds
+    set(CMAKE_CONFIGURATION_TYPES "release")
+    set(CONFIGURATION_TYPE "release")
+endif(CMAKE_BUILD_TYPE STREQUAL "release")
 
-message("project build type: ${CMAKE_BUILD_TYPE}")
+if(CMAKE_BUILD_TYPE STREQUAL "maintain")
+    set(CMAKE_VERBOSE_MAKEFILE ON)
+
+    #force a single configuration type on Windows builds
+    set(CMAKE_CONFIGURATION_TYPES "RelWithDebInfo")
+    set(CONFIGURATION_TYPE "RelWithDebInfo")
+endif(CMAKE_BUILD_TYPE STREQUAL "maintain")
+
 
 if(CMAKE_BUILD_TYPE STREQUAL "debug")
+    set(CMAKE_VERBOSE_MAKEFILE ON)
     #force a single configuration type on Windows builds
-    set(CMAKE_CONFIGURATION_TYPES "debug" CACHE STRING "" FORCE)
+    set(CMAKE_CONFIGURATION_TYPES "debug")
     set(CONFIGURATION_TYPE "debug")
-else()
-    #force a single configuration type on Windows builds
-    set(CMAKE_CONFIGURATION_TYPES "release" CACHE STRING "" FORCE)
-    set(CONFIGURATION_TYPE "release")
-endif()
+endif(CMAKE_BUILD_TYPE STREQUAL "debug")
+
+set(QT5PREFIX_DIR "" CACHE PATH "QT Prefix directory")
+
+message("project build type: ${CMAKE_BUILD_TYPE}")
 
 set(EXTRA_DEFINITIONS "${EXTRA_DEFINITIONS}" CACHE STRING "Extra compiler definitions")
 set(OLA_FRONT_URL "front.myapps.space:443" CACHE STRING "OLA Front Default URL")

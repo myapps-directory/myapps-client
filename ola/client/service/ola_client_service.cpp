@@ -606,11 +606,14 @@ void WriteErrorLogEntry(PWSTR pszFunction, DWORD dwError)
 
 void FileSystemService::onAuthFileChange(const chrono::system_clock::time_point& _time_point)
 {
+    const chrono::system_clock::time_point    empty_time_point;
+
     unique_lock<mutex> lock(mutex_);
     string endpoint;
     string user;
     string token;
     ola::client::utility::auth_read(authDataFilePath(), endpoint, user, token);
+    auth_file_time_point_ = empty_time_point;//reset the timepoint so we can do the next auth_update
     
     if((auth_endpoint_.empty() || endpoint == auth_endpoint_) && (auth_user_.empty() || user == auth_user_)){
         auth_endpoint_ = endpoint;
