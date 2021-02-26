@@ -96,7 +96,7 @@ if(${Qt5Widgets_FOUND})
 		ola_utility
         SolidFrame::solid_frame_mprpc
         SolidFrame::solid_frame_aio_openssl
-        SolidFrame::solid_serialization_v2
+        SolidFrame::solid_serialization_v3
         ${Boost_PROGRAM_OPTIONS_LIBRARY}
         ${Boost_SYSTEM_LIBRARY}
         Qt5::Widgets

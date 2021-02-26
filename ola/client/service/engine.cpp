@@ -11,6 +11,7 @@
 #include "solid/frame/mprpc/mprpcconfiguration.hpp"
 #include "solid/frame/mprpc/mprpcservice.hpp"
 #include "solid/frame/mprpc/mprpcsocketstub_openssl.hpp"
+#include "solid/frame/mprpc/mprpcprotocol_serialization_v3.hpp"
 
 #include "ola/common/utility/encode.hpp"
 
@@ -181,8 +182,8 @@ struct FetchStub {
     uint64_t                              offset_ = 0;
     size_t                                size_   = 0;
     StatusE                               status_ = NotUsedE;
-    shared_ptr<FetchStoreRequest>         request_ptr_;
-    shared_ptr<front::FetchStoreResponse> response_ptr_;
+    shared_ptr<main::FetchStoreRequest>         request_ptr_;
+    shared_ptr<main::FetchStoreResponse> response_ptr_;
 };
 
 struct FileData : file_cache::FileData {
@@ -743,7 +744,7 @@ struct Descriptor {
     }
 };
 
-using ListNodeDequeT = decltype(ola::front::ListStoreResponse::node_dq_);
+using ListNodeDequeT = decltype(ola::front::main::ListStoreResponse::node_dq_);
 
 struct Engine::Implementation {
     using RecipientVectorT = std::vector<frame::mprpc::RecipientId>;
@@ -805,14 +806,14 @@ public:
     void onFrontConnectionInit(frame::mprpc::ConnectionContext& _ctx);
     void onFrontAuthResponse(
         frame::mprpc::ConnectionContext&      _ctx,
-        const front::AuthRequest&             _rreq,
-        std::shared_ptr<front::AuthResponse>& _rrecv_msg_ptr);
+        const front::core::AuthRequest&             _rreq,
+        std::shared_ptr<core::AuthResponse>& _rrecv_msg_ptr);
 
     void loadAuthData();
 
     void onFrontListAppsResponse(
         frame::mprpc::ConnectionContext&          _ctx,
-        std::shared_ptr<front::ListAppsResponse>& _rrecv_msg_ptr);
+        std::shared_ptr<main::ListAppsResponse>& _rrecv_msg_ptr);
 
     void onAllApplicationsFetched();
     void cleanFileCache();
@@ -879,7 +880,7 @@ private:
 #endif
 
     void insertApplicationEntry(
-        std::shared_ptr<front::FetchBuildConfigurationResponse>& _rrecv_msg_ptr,
+        std::shared_ptr<main::FetchBuildConfigurationResponse>& _rrecv_msg_ptr,
         const ola::utility::ApplicationListItem &_app
     );
     void insertMountEntry(EntryPointerT& _rparent_ptr, const fs::path& _local, const string& _remote);
@@ -897,8 +898,8 @@ private:
         uint64_t _offset, unsigned long _length, unsigned long& _rbytes_transfered);
 
     void remoteFetchApplication(
-        front::ListAppsResponse::AppVectorT&                  _rapp_id_vec,
-        std::shared_ptr<front::FetchBuildConfigurationRequest>& _rsent_msg_ptr,
+        main::ListAppsResponse::AppVectorT&                  _rapp_id_vec,
+        std::shared_ptr<main::FetchBuildConfigurationRequest>& _rsent_msg_ptr,
         size_t                                                  _app_index);
 };
 
@@ -918,13 +919,6 @@ void complete_message(
     //solid_check(false); //this method should not be called
 }
 
-struct FrontProtocolSetup {
-    template <class T>
-    void operator()(front::ProtocolT& _rprotocol, TypeToType<T> _t2t, const front::ProtocolT::TypeIdT& _rtid)
-    {
-        _rprotocol.registerMessage<T>(complete_message<T>, _rtid);
-    }
-};
 } //namespace
 
 void Engine::start(const Configuration& _rcfg)
@@ -952,11 +946,18 @@ void Engine::start(const Configuration& _rcfg)
     pimpl_->scheduler_.start(1);
 
     {
-        auto                        proto = ProtocolT::create();
+        auto                        proto = frame::mprpc::serialization_v3::create_protocol<reflection::v1::metadata::Variant, ola::front::ProtocolTypeIndexT>(
+            ola::utility::metadata_factory,
+            [&](auto& _rmap) {
+                auto lambda = [&](const ola::front::ProtocolTypeIndexT _id, const std::string_view _name, auto const& _rtype) {
+                    using TypeT = typename std::decay_t<decltype(_rtype)>::TypeT;
+                    _rmap.template registerMessage<TypeT>(_id, _name, complete_message<TypeT>);
+                };
+                ola::front::core::configure_protocol(lambda);
+                ola::front::main::configure_protocol(lambda);
+            }
+        );
         frame::mprpc::Configuration cfg(pimpl_->scheduler_, proto);
-
-        front::protocol_setup_init(FrontProtocolSetup(), *proto);
-        front::protocol_setup(FrontProtocolSetup(), *proto);
 
         cfg.client.name_resolve_fnc = frame::mprpc::InternetResolverF(pimpl_->resolver_, ola::front::default_port());
 
@@ -998,15 +999,15 @@ void Engine::start(const Configuration& _rcfg)
     if (!err) {
         auto lambda = [pimpl = pimpl_.get()](
                           frame::mprpc::ConnectionContext&          _rctx,
-                          std::shared_ptr<front::ListAppsRequest>&  _rsent_msg_ptr,
-                          std::shared_ptr<front::ListAppsResponse>& _rrecv_msg_ptr,
+                          std::shared_ptr<main::ListAppsRequest>&  _rsent_msg_ptr,
+                          std::shared_ptr<main::ListAppsResponse>& _rrecv_msg_ptr,
                           ErrorConditionT const&                    _rerror) {
             if (_rrecv_msg_ptr) {
                 pimpl->onFrontListAppsResponse(_rctx, _rrecv_msg_ptr);
             }
         };
 
-        auto req_ptr     = make_shared<ListAppsRequest>();
+        auto req_ptr     = make_shared<main::ListAppsRequest>();
         req_ptr->choice_ = 'a';
 
         err = pimpl_->front_rpc_service_.sendRequest(pimpl_->config_.auth_endpoint_.c_str(), req_ptr, lambda);
@@ -1035,15 +1036,15 @@ void Engine::relogin()
 
     auto lambda = [this](
                       frame::mprpc::ConnectionContext&      _rctx,
-                      std::shared_ptr<front::AuthRequest>&  _rsent_msg_ptr,
-                      std::shared_ptr<front::AuthResponse>& _rrecv_msg_ptr,
+                      std::shared_ptr<core::AuthRequest>&  _rsent_msg_ptr,
+                      std::shared_ptr<core::AuthResponse>& _rrecv_msg_ptr,
                       ErrorConditionT const&                _rerror) {
         if (_rrecv_msg_ptr) {
             pimpl_->onFrontAuthResponse(_rctx, *_rsent_msg_ptr, _rrecv_msg_ptr);
         }
     };
 
-    auto req_ptr   = std::make_shared<front::AuthRequest>();
+    auto req_ptr   = std::make_shared<core::AuthRequest>();
     req_ptr->pass_ = pimpl_->config_.auth_get_token_fnc_();
 
     for (const auto& recipient_id : auth_recipient_vec) {
@@ -1269,8 +1270,8 @@ bool Engine::Implementation::entry(const fs::path& _path, EntryPointerT& _rentry
 
         auto lambda = [entry_ptr = _rentry_ptr, &generic_path_str, this](
                           frame::mprpc::ConnectionContext&           _rctx,
-                          std::shared_ptr<front::ListStoreRequest>&  _rsent_msg_ptr,
-                          std::shared_ptr<front::ListStoreResponse>& _rrecv_msg_ptr,
+                          std::shared_ptr<main::ListStoreRequest>&  _rsent_msg_ptr,
+                          std::shared_ptr<main::ListStoreResponse>& _rrecv_msg_ptr,
                           ErrorConditionT const&                     _rerror) mutable {
             auto&              m = entry_ptr->mutex();
             unique_lock<mutex> lock{m};
@@ -1283,7 +1284,7 @@ bool Engine::Implementation::entry(const fs::path& _path, EntryPointerT& _rentry
             entry_ptr->conditionVariable().notify_all();
         };
 
-        auto req_ptr         = make_shared<ListStoreRequest>();
+        auto req_ptr         = make_shared<main::ListStoreRequest>();
         req_ptr->path_       = remote_path;
         req_ptr->storage_id_ = _rentry_ptr->pmaster_->remote_;
 
@@ -1353,7 +1354,7 @@ void Engine::Implementation::releaseApplication(Entry& _rapp_entry)
 {
     lock_guard<mutex>                     lock(root_mutex_);
     auto&                                 rad = _rapp_entry.applicationData();
-    front::ListAppsResponse::AppVectorT   new_app_id_vec;
+    main::ListAppsResponse::AppVectorT    new_app_id_vec;
     auto&                                 rrd = root_entry_ptr_->rootData();
 
     rad.releaseApplication();
@@ -1380,7 +1381,7 @@ void Engine::Implementation::releaseApplication(Entry& _rapp_entry)
     }
 
     if (!new_app_id_vec.empty()) {
-        auto req_ptr = make_shared<front::FetchBuildConfigurationRequest>();
+        auto req_ptr = make_shared<main::FetchBuildConfigurationRequest>();
 
         //TODO:
         req_ptr->lang_  = "US_en";
@@ -1714,8 +1715,8 @@ void Engine::Implementation::asyncFetch(EntryPointerT& _rentry_ptr, const size_t
 
     auto lambda = [entry_ptr = _rentry_ptr, this, _fetch_index](
                       frame::mprpc::ConnectionContext&            _rctx,
-                      std::shared_ptr<front::FetchStoreRequest>&  _rsent_msg_ptr,
-                      std::shared_ptr<front::FetchStoreResponse>& _rrecv_msg_ptr,
+                      std::shared_ptr<main::FetchStoreRequest>&  _rsent_msg_ptr,
+                      std::shared_ptr<main::FetchStoreResponse>& _rrecv_msg_ptr,
                       ErrorConditionT const&                      _rerror) mutable {
         solid_check(_rrecv_msg_ptr, _rerror.message());
         solid_log(logger, Verbose, "recv data: " << _rsent_msg_ptr->offset_ << " " << _rrecv_msg_ptr->size_);
@@ -1767,7 +1768,7 @@ void Engine::Implementation::asyncFetch(EntryPointerT& _rentry_ptr, const size_t
     };
 
     if (!rfetch_stub.request_ptr_) {
-        rfetch_stub.request_ptr_ = make_shared<FetchStoreRequest>();
+        rfetch_stub.request_ptr_ = make_shared<main::FetchStoreRequest>();
     }
     rfetch_stub.request_ptr_->path_       = rfile_data.remote_path_;
     rfetch_stub.request_ptr_->storage_id_ = _rentry_ptr->pmaster_->remote_;
@@ -1784,12 +1785,12 @@ void Engine::Implementation::tryAuthenticate(frame::mprpc::ConnectionContext& _r
     string auth_token = config_.auth_get_token_fnc_();
 
     if (!auth_token.empty()) {
-        auto req_ptr = std::make_shared<AuthRequest>();
+        auto req_ptr = std::make_shared<core::AuthRequest>();
         req_ptr->pass_ = auth_token;
         auto lambda  = [this](
                           frame::mprpc::ConnectionContext&      _rctx,
-                          std::shared_ptr<front::AuthRequest>&  _rsent_msg_ptr,
-                          std::shared_ptr<front::AuthResponse>& _rrecv_msg_ptr,
+                          std::shared_ptr<core::AuthRequest>&  _rsent_msg_ptr,
+                          std::shared_ptr<core::AuthResponse>& _rrecv_msg_ptr,
                           ErrorConditionT const&                _rerror) {
             if (_rrecv_msg_ptr) {
                 onFrontAuthResponse(_rctx, *_rsent_msg_ptr, _rrecv_msg_ptr);
@@ -1805,11 +1806,11 @@ void Engine::Implementation::tryAuthenticate(frame::mprpc::ConnectionContext& _r
 
 void Engine::Implementation::onFrontConnectionStart(frame::mprpc::ConnectionContext& _ctx)
 {
-    auto req_ptr = std::make_shared<front::InitRequest>();
+    auto req_ptr = std::make_shared<main::InitRequest>();
     auto lambda  = [this](
                       frame::mprpc::ConnectionContext&      _rctx,
-                      std::shared_ptr<front::InitRequest>&  _rsent_msg_ptr,
-                      std::shared_ptr<front::InitResponse>& _rrecv_msg_ptr,
+                      std::shared_ptr<main::InitRequest>&  _rsent_msg_ptr,
+                      std::shared_ptr<core::InitResponse>& _rrecv_msg_ptr,
                       ErrorConditionT const&                _rerror) {
         if (_rrecv_msg_ptr) {
             if (_rrecv_msg_ptr->error_ == 0) {
@@ -1828,8 +1829,8 @@ void Engine::Implementation::onFrontConnectionInit(frame::mprpc::ConnectionConte
 
 void Engine::Implementation::onFrontAuthResponse(
     frame::mprpc::ConnectionContext&      _rctx,
-    const front::AuthRequest&             _rreq,
-    std::shared_ptr<front::AuthResponse>& _rrecv_msg_ptr)
+    const core::AuthRequest&             _rreq,
+    std::shared_ptr<core::AuthResponse>& _rrecv_msg_ptr)
 {
     if (!_rrecv_msg_ptr)
         return;
@@ -1857,8 +1858,8 @@ void Engine::Implementation::onFrontAuthResponse(
 }
 
 void Engine::Implementation::remoteFetchApplication(
-    front::ListAppsResponse::AppVectorT&                  _rapp_id_vec,
-    std::shared_ptr<front::FetchBuildConfigurationRequest>& _rsent_msg_ptr,
+    main::ListAppsResponse::AppVectorT&                  _rapp_id_vec,
+    std::shared_ptr<main::FetchBuildConfigurationRequest>& _rsent_msg_ptr,
     size_t                                                  _app_index)
 {
     _rsent_msg_ptr->app_id_ = _rapp_id_vec[_app_index].id_;
@@ -1866,8 +1867,8 @@ void Engine::Implementation::remoteFetchApplication(
 
     auto lambda = [this, _app_index, app_id_vec = std::move(_rapp_id_vec)](
                       frame::mprpc::ConnectionContext&                         _rctx,
-                      std::shared_ptr<front::FetchBuildConfigurationRequest>&  _rsent_msg_ptr,
-                      std::shared_ptr<front::FetchBuildConfigurationResponse>& _rrecv_msg_ptr,
+                      std::shared_ptr<main::FetchBuildConfigurationRequest>&  _rsent_msg_ptr,
+                      std::shared_ptr<main::FetchBuildConfigurationResponse>& _rrecv_msg_ptr,
                       ErrorConditionT const&                                   _rerror) mutable {
         if (_rrecv_msg_ptr) {
 
@@ -1919,11 +1920,11 @@ void Engine::Implementation::update()
     UpdatesMapT updates_map;
     auto        list_lambda = [this, &done, &updates_map](
                            frame::mprpc::ConnectionContext&          _rctx,
-                           std::shared_ptr<front::ListAppsRequest>&  _rsent_msg_ptr,
-                           std::shared_ptr<front::ListAppsResponse>& _rrecv_msg_ptr,
+                           std::shared_ptr<main::ListAppsRequest>&  _rsent_msg_ptr,
+                           std::shared_ptr<main::ListAppsResponse>& _rrecv_msg_ptr,
                            ErrorConditionT const&                    _rerror) {
         if (_rrecv_msg_ptr) {
-            auto req_ptr = make_shared<FetchBuildUpdatesRequest>();
+            auto req_ptr = make_shared<main::FetchBuildUpdatesRequest>();
             req_ptr->app_id_vec_.reserve(_rrecv_msg_ptr->app_vec_.size());
             for (auto&& a : _rrecv_msg_ptr->app_vec_) {
                 auto build_req = app_list_.find(a.unique_).name_;
@@ -1936,8 +1937,8 @@ void Engine::Implementation::update()
 
             auto lambda = [this, &done, &updates_map](
                               frame::mprpc::ConnectionContext&                   _rctx,
-                              std::shared_ptr<front::FetchBuildUpdatesRequest>&  _rsent_msg_ptr,
-                              std::shared_ptr<front::FetchBuildUpdatesResponse>& _rrecv_msg_ptr,
+                              std::shared_ptr<main::FetchBuildUpdatesRequest>&  _rsent_msg_ptr,
+                              std::shared_ptr<main::FetchBuildUpdatesResponse>& _rrecv_msg_ptr,
                               ErrorConditionT const&                             _rerror) {
                 if (_rrecv_msg_ptr) {
                     updates_map.clear();
@@ -1988,7 +1989,7 @@ void Engine::Implementation::update()
 
         app_list_.load(config_.app_list_path_);
 
-        auto req_ptr     = make_shared<ListAppsRequest>();
+        auto req_ptr     = make_shared<main::ListAppsRequest>();
         req_ptr->choice_ = 'a';
 
         const auto err = front_rpc_service_.sendRequest(config_.auth_endpoint_.c_str(), req_ptr, list_lambda);
@@ -2007,7 +2008,7 @@ void Engine::Implementation::updateApplications(const UpdatesMapT& _updates_map)
 {
     //under root lock
     //get new applications
-    front::ListAppsResponse::AppVectorT new_app_id_vec;
+    main::ListAppsResponse::AppVectorT new_app_id_vec;
 
     auto& rrd = root_entry_ptr_->rootData();
     bool  erased_applications = false;
@@ -2076,7 +2077,7 @@ void Engine::Implementation::updateApplications(const UpdatesMapT& _updates_map)
     }
 
     if (!new_app_id_vec.empty()) {
-        auto req_ptr = make_shared<front::FetchBuildConfigurationRequest>();
+        auto req_ptr = make_shared<main::FetchBuildConfigurationRequest>();
 
         //TODO:
         req_ptr->lang_  = "en_US";
@@ -2108,7 +2109,7 @@ void Engine::Implementation::onAllApplicationsFetched()
 
 void Engine::Implementation::onFrontListAppsResponse(
     frame::mprpc::ConnectionContext&          _ctx,
-    std::shared_ptr<front::ListAppsResponse>& _rrecv_msg_ptr)
+    std::shared_ptr<main::ListAppsResponse>& _rrecv_msg_ptr)
 {
     if (_rrecv_msg_ptr->app_vec_.empty()) {
 
@@ -2119,7 +2120,7 @@ void Engine::Implementation::onFrontListAppsResponse(
         return;
     }
 
-    auto req_ptr = make_shared<front::FetchBuildConfigurationRequest>();
+    auto req_ptr = make_shared<main::FetchBuildConfigurationRequest>();
 
     //TODO:
     req_ptr->lang_  = "en_US";
@@ -2193,7 +2194,7 @@ string to_system_path(const string& _path)
 }
 
 void Engine::Implementation::insertApplicationEntry(
-    std::shared_ptr<front::FetchBuildConfigurationResponse>& _rrecv_msg_ptr,
+    std::shared_ptr<main::FetchBuildConfigurationResponse>& _rrecv_msg_ptr,
     const ola::utility::ApplicationListItem& _app)
 {
     //NOTE: because of the entry_ptr, which after inserting it into root entry

@@ -23,8 +23,6 @@
 
 #include "ola/common/utility/encode.hpp"
 
-#include "ola/common/ola_front_protocol.hpp"
-
 #define PROGNAME "ola-fs"
 
 #define ALLOCATION_UNIT 4096
