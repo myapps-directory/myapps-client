@@ -320,8 +320,12 @@ int main(int argc, char* argv[])
 
             rx.history_add(line);
         } else if (cmd == "history") {
-            for (size_t i = 0, sz = rx.history_size(); i < sz; ++i) {
-                std::cout << std::setw(4) << i << ": " << rx.history_line(i) << "\n";
+            //for (size_t i = 0, sz = rx.history_size(); i < sz; ++i) {
+            //    std::cout << std::setw(4) << i << ": " << rx.history_line(i) << "\n";
+            //}
+            auto h = rx.history_scan();
+            for (size_t i = 0; h.next(); ++i) {
+                std::cout << std::setw(4) << i << ": " << h.get().text() << "\n";
             }
 
             rx.history_add(line);
@@ -461,7 +465,7 @@ void configure_service(Engine &_reng, AioSchedulerT &_rsch, frame::aio::Resolver
 //             engine_ptr->onConnectionStop(_ctx);
 //         };
         auto connection_start_lambda = [&_reng](frame::mprpc::ConnectionContext &_rctx){
-            _rctx.anyTuple() = std::make_tuple(core::version, main::version);
+            _rctx.anyTuple() = std::make_tuple(core::version, main::version, ola::utility::version);
             _reng.onConnectionStart(_rctx);
         };
         //cfg.connection_stop_fnc = std::move(connection_stop_lambda);

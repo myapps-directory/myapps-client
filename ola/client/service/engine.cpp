@@ -964,8 +964,9 @@ void Engine::start(const Configuration& _rcfg)
         cfg.client.connection_start_state = frame::mprpc::ConnectionState::Passive;
 
         {
-            auto connection_start_lambda = [this](frame::mprpc::ConnectionContext& _ctx) {
-                pimpl_->onFrontConnectionStart(_ctx);
+            auto connection_start_lambda = [this](frame::mprpc::ConnectionContext& _rctx) {
+                _rctx.anyTuple() = std::make_tuple(front::core::version, front::main::version, ola::utility::version);
+                pimpl_->onFrontConnectionStart(_rctx);
             };
             auto connection_stop_lambda = [this](frame::mprpc::ConnectionContext& _ctx) {
                 solid_log(logger, Verbose, "Connection stopping");

@@ -431,7 +431,7 @@ void front_configure_service(Engine& _rengine, const Parameters& _params, frame:
             _rengine.onConnectionStop(_rctx);
         };
         auto connection_start_lambda = [&_rengine](frame::mprpc::ConnectionContext& _rctx) {
-            _rctx.anyTuple() = std::make_tuple(front::core::version, front::main::version);
+            _rctx.anyTuple() = std::make_tuple(front::core::version, front::main::version, front::auth::version);
             _rengine.onConnectionStart(_rctx);
         };
         cfg.connection_stop_fnc         = std::move(connection_stop_lambda);
