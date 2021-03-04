@@ -6,8 +6,7 @@
 #include <string>
 
 
-#include "ola/common/ola_front_protocol_init.hpp"
-#include "ola/common/ola_front_protocol.hpp"
+#include "ola/common/ola_front_protocol_main.hpp"
 
 namespace ola {
 namespace client {

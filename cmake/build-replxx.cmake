@@ -4,7 +4,7 @@ ExternalProject_Add(
         build-replxx
         EXCLUDE_FROM_ALL 1
         PREFIX ${replxx_PREFIX}
-        URL https://github.com/AmokHuginnsson/replxx/archive/release-0.0.2.tar.gz
+        URL https://github.com/AmokHuginnsson/replxx/archive/release-0.0.3.tar.gz
         CMAKE_ARGS
             -DCMAKE_INSTALL_PREFIX:PATH=${CMAKE_BINARY_DIR}/external -DREPLXX_BuildExamples:BOOLEAN=OFF -DBUILD_SHARED_LIBS=OFF
 )

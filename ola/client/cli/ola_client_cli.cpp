@@ -10,10 +10,10 @@
 #include "solid/frame/mprpc/mprpcconfiguration.hpp"
 #include "solid/frame/mprpc/mprpcservice.hpp"
 #include "solid/frame/mprpc/mprpcsocketstub_openssl.hpp"
+#include "solid/frame/mprpc/mprpcprotocol_serialization_v3.hpp"
 
 #include "ola/common/utility/encode.hpp"
-#include "ola/common/ola_front_protocol_init.hpp"
-#include "ola/common/ola_front_protocol.hpp"
+#include "ola/common/ola_front_protocol_main.hpp"
 
 #include "ola/common/utility/version.hpp"
 
@@ -148,7 +148,7 @@ struct Engine {
     void onConnectionStart(frame::mprpc::ConnectionContext& _ctx);
     void onConnectionInit(frame::mprpc::ConnectionContext& _ctx);
     void authRun();
-    void onAuthResponse(frame::mprpc::ConnectionContext& _ctx, AuthResponse& _rresponse);
+    void onAuthResponse(frame::mprpc::ConnectionContext& _ctx, core::AuthResponse& _rresponse);
 
     void stop()
     {
@@ -320,8 +320,12 @@ int main(int argc, char* argv[])
 
             rx.history_add(line);
         } else if (cmd == "history") {
-            for (size_t i = 0, sz = rx.history_size(); i < sz; ++i) {
-                std::cout << std::setw(4) << i << ": " << rx.history_line(i) << "\n";
+            //for (size_t i = 0, sz = rx.history_size(); i < sz; ++i) {
+            //    std::cout << std::setw(4) << i << ": " << rx.history_line(i) << "\n";
+            //}
+            auto h = rx.history_scan();
+            for (size_t i = 0; h.next(); ++i) {
+                std::cout << std::setw(4) << i << ": " << h.get().text() << "\n";
             }
 
             rx.history_add(line);
@@ -438,20 +442,19 @@ string get_command(const string &_line){
 //-----------------------------------------------------------------------------
 // Front
 //-----------------------------------------------------------------------------
-struct FrontSetup {
-    template <class T>
-    void operator()(front::ProtocolT& _rprotocol, TypeToType<T> _t2t, const front::ProtocolT::TypeIdT& _rtid)
-    {
-        _rprotocol.registerMessage<T>(complete_message<T>, _rtid);
-    }
-};
-
 void configure_service(Engine &_reng, AioSchedulerT &_rsch, frame::aio::Resolver &_rres){
-    auto                        proto = front::ProtocolT::create();
+    auto                        proto = frame::mprpc::serialization_v3::create_protocol<reflection::v1::metadata::Variant, ola::front::ProtocolTypeIndexT>(
+        ola::utility::metadata_factory,
+        [&](auto& _rmap) {
+            auto lambda = [&](const ola::front::ProtocolTypeIndexT _id, const std::string_view _name, auto const& _rtype) {
+                using TypeT = typename std::decay_t<decltype(_rtype)>::TypeT;
+                _rmap.template registerMessage<TypeT>(_id, _name, complete_message<TypeT>);
+            };
+            ola::front::core::configure_protocol(lambda);
+            ola::front::main::configure_protocol(lambda);
+        }
+    );
     frame::mprpc::Configuration cfg(_rsch, proto);
-
-    front::protocol_setup_init(FrontSetup(), *proto);
-    front::protocol_setup(FrontSetup(), *proto);
 
     cfg.client.name_resolve_fnc = frame::mprpc::InternetResolverF(_rres, ola::front::default_port());
 
@@ -461,8 +464,9 @@ void configure_service(Engine &_reng, AioSchedulerT &_rsch, frame::aio::Resolver
 //         auto connection_stop_lambda = [&_rctx](frame::mpipc::ConnectionContext &_ctx){
 //             engine_ptr->onConnectionStop(_ctx);
 //         };
-        auto connection_start_lambda = [&_reng](frame::mprpc::ConnectionContext &_ctx){
-            _reng.onConnectionStart(_ctx);
+        auto connection_start_lambda = [&_reng](frame::mprpc::ConnectionContext &_rctx){
+            _rctx.anyTuple() = std::make_tuple(core::version, main::version, ola::utility::version);
+            _reng.onConnectionStart(_rctx);
         };
         //cfg.connection_stop_fnc = std::move(connection_stop_lambda);
         cfg.client.connection_start_fnc = std::move(connection_start_lambda);
@@ -524,14 +528,14 @@ void handle_help(istream& _ris, Engine &_reng){
 //-----------------------------------------------------------------------------
 
 void handle_list_oses(istream& /*_ris*/, Engine &_reng){
-    auto req_ptr = make_shared<ListOSesRequest>();
+    auto req_ptr = make_shared<main::ListOSesRequest>();
     
     promise<void> prom;
     
     auto lambda = [&prom](
         frame::mprpc::ConnectionContext&        _rctx,
-        std::shared_ptr<ListOSesRequest>&  _rsent_msg_ptr,
-        std::shared_ptr<ListOSesResponse>& _rrecv_msg_ptr,
+        std::shared_ptr<main::ListOSesRequest>&  _rsent_msg_ptr,
+        std::shared_ptr<main::ListOSesResponse>& _rrecv_msg_ptr,
         ErrorConditionT const&                  _rerror
     ){
         if(_rrecv_msg_ptr){
@@ -553,7 +557,7 @@ void handle_list_oses(istream& /*_ris*/, Engine &_reng){
 //-----------------------------------------------------------------------------
 
 void handle_list_apps(istream& _ris, Engine &_reng){
-    auto req_ptr = make_shared<ListAppsRequest>();
+    auto req_ptr = make_shared<main::ListAppsRequest>();
     
     //o - owned applications
     //a - aquired applications
@@ -564,8 +568,8 @@ void handle_list_apps(istream& _ris, Engine &_reng){
     
     auto lambda = [&prom](
         frame::mprpc::ConnectionContext&        _rctx,
-        std::shared_ptr<ListAppsRequest>&  _rsent_msg_ptr,
-        std::shared_ptr<ListAppsResponse>& _rrecv_msg_ptr,
+        std::shared_ptr<main::ListAppsRequest>&  _rsent_msg_ptr,
+        std::shared_ptr<main::ListAppsResponse>& _rrecv_msg_ptr,
         ErrorConditionT const&                  _rerror
     ){
         if(_rrecv_msg_ptr && _rrecv_msg_ptr->error_ == 0){
@@ -590,7 +594,7 @@ void handle_list_apps(istream& _ris, Engine &_reng){
 //-----------------------------------------------------------------------------
 
 void handle_list_store(istream& _ris, Engine &_reng){
-    auto req_ptr = make_shared<ListStoreRequest>();
+    auto req_ptr = make_shared<main::ListStoreRequest>();
     
     _ris>>std::quoted(req_ptr->storage_id_);
     _ris>>std::quoted(req_ptr->path_);
@@ -602,8 +606,8 @@ void handle_list_store(istream& _ris, Engine &_reng){
     
     auto lambda = [&prom](
         frame::mprpc::ConnectionContext&        _rctx,
-        std::shared_ptr<ListStoreRequest>&  _rsent_msg_ptr,
-        std::shared_ptr<ListStoreResponse>& _rrecv_msg_ptr,
+        std::shared_ptr<main::ListStoreRequest>&  _rsent_msg_ptr,
+        std::shared_ptr<main::ListStoreResponse>& _rrecv_msg_ptr,
         ErrorConditionT const&                  _rerror
     ){
         if(_rrecv_msg_ptr && _rrecv_msg_ptr->error_ == 0){
@@ -651,7 +655,7 @@ ostream& operator<<(ostream &_ros, const utility::Application &_cfg){
 }
 
 void handle_fetch_app(istream& _ris, Engine &_reng){
-     auto req_ptr = make_shared<FetchAppRequest>();
+     auto req_ptr = make_shared<main::FetchAppRequest>();
     
     _ris>>std::quoted(req_ptr->app_id_);
     _ris>>std::quoted(req_ptr->os_id_);
@@ -662,8 +666,8 @@ void handle_fetch_app(istream& _ris, Engine &_reng){
     
     auto lambda = [&prom](
         frame::mprpc::ConnectionContext&        _rctx,
-        std::shared_ptr<FetchAppRequest>&  _rsent_msg_ptr,
-        std::shared_ptr<FetchAppResponse>& _rrecv_msg_ptr,
+        std::shared_ptr<main::FetchAppRequest>&  _rsent_msg_ptr,
+        std::shared_ptr<main::FetchAppResponse>& _rrecv_msg_ptr,
         ErrorConditionT const&                  _rerror
     ){
         if(_rrecv_msg_ptr && _rrecv_msg_ptr->error_ == 0){
@@ -759,7 +763,7 @@ ostream& operator<<(ostream &_ros, const utility::Build &_cfg){
 }
 
 void handle_fetch_build(istream& _ris, Engine &_reng){
-    auto req_ptr = make_shared<FetchBuildRequest>();
+    auto req_ptr = make_shared<main::FetchBuildRequest>();
     
     _ris>>std::quoted(req_ptr->app_id_);
     _ris>>std::quoted(req_ptr->build_id_);
@@ -771,8 +775,8 @@ void handle_fetch_build(istream& _ris, Engine &_reng){
     
     auto lambda = [&prom](
         frame::mprpc::ConnectionContext&        _rctx,
-        std::shared_ptr<FetchBuildRequest>&  _rsent_msg_ptr,
-        std::shared_ptr<FetchBuildResponse>& _rrecv_msg_ptr,
+        std::shared_ptr<main::FetchBuildRequest>&  _rsent_msg_ptr,
+        std::shared_ptr<main::FetchBuildResponse>& _rrecv_msg_ptr,
         ErrorConditionT const&                  _rerror
     ){
         if(_rrecv_msg_ptr && _rrecv_msg_ptr->error_ == 0){
@@ -795,7 +799,7 @@ void handle_fetch_build(istream& _ris, Engine &_reng){
 }
 
 void handle_fetch_config(istream& _ris, Engine &_reng){
-    auto req_ptr = make_shared<FetchBuildConfigurationRequest>();
+    auto req_ptr = make_shared<main::FetchBuildConfigurationRequest>();
     
     _ris>>std::quoted(req_ptr->app_id_);
     _ris>>std::quoted(req_ptr->lang_);
@@ -815,8 +819,8 @@ void handle_fetch_config(istream& _ris, Engine &_reng){
     
     auto lambda = [&prom](
         frame::mprpc::ConnectionContext&        _rctx,
-        std::shared_ptr<FetchBuildConfigurationRequest>&  _rsent_msg_ptr,
-        std::shared_ptr<FetchBuildConfigurationResponse>& _rrecv_msg_ptr,
+        std::shared_ptr<main::FetchBuildConfigurationRequest>&  _rsent_msg_ptr,
+        std::shared_ptr<main::FetchBuildConfigurationResponse>& _rrecv_msg_ptr,
         ErrorConditionT const&                  _rerror
     ){
         if(_rrecv_msg_ptr && _rrecv_msg_ptr->error_ == 0){
@@ -856,12 +860,12 @@ uint64_t stream_copy(std::ostream &_ros, std::istream &_ris){
     return size;
 }
 
-bool fetch_remote_file(Engine &_reng, promise<uint32_t> &_rprom, ofstream &_rofs, std::shared_ptr<FetchStoreRequest>&  _rreq_msg_ptr, uint64_t &_rfile_size){
+bool fetch_remote_file(Engine &_reng, promise<uint32_t> &_rprom, ofstream &_rofs, std::shared_ptr<main::FetchStoreRequest>&  _rreq_msg_ptr, uint64_t &_rfile_size){
     
     auto lambda = [&_rprom, &_rofs, &_reng, &_rfile_size](
         frame::mprpc::ConnectionContext&        _rctx,
-        std::shared_ptr<FetchStoreRequest>&  _rsent_msg_ptr,
-        std::shared_ptr<FetchStoreResponse>& _rrecv_msg_ptr,
+        std::shared_ptr<main::FetchStoreRequest>&  _rsent_msg_ptr,
+        std::shared_ptr<main::FetchStoreResponse>& _rrecv_msg_ptr,
         ErrorConditionT const&                  _rerror
     ){
         
@@ -891,7 +895,7 @@ bool fetch_remote_file(Engine &_reng, promise<uint32_t> &_rprom, ofstream &_rofs
 }
 
 void handle_fetch_store(istream& _ris, Engine &_reng){
-    auto req_ptr = make_shared<FetchStoreRequest>();
+    auto req_ptr = make_shared<main::FetchStoreRequest>();
     string local_path;
     
     _ris>>std::quoted(req_ptr->storage_id_);
@@ -921,7 +925,7 @@ void handle_fetch_store(istream& _ris, Engine &_reng){
 }
 
 void handle_fetch_updates(istream& _ris, Engine &_reng){
-    auto req_ptr = make_shared<FetchBuildUpdatesRequest>();
+    auto req_ptr = make_shared<main::FetchBuildUpdatesRequest>();
     
     _ris>>std::quoted(req_ptr->lang_);
     _ris>>std::quoted(req_ptr->os_id_);
@@ -944,8 +948,8 @@ void handle_fetch_updates(istream& _ris, Engine &_reng){
     promise<void> prom;
     auto lambda = [&prom](
         frame::mprpc::ConnectionContext&        _rctx,
-        std::shared_ptr<FetchBuildUpdatesRequest>&  _rsent_msg_ptr,
-        std::shared_ptr<FetchBuildUpdatesResponse>& _rrecv_msg_ptr,
+        std::shared_ptr<main::FetchBuildUpdatesRequest>&  _rsent_msg_ptr,
+        std::shared_ptr<main::FetchBuildUpdatesResponse>& _rrecv_msg_ptr,
         ErrorConditionT const&                  _rerror
     ){
         if(_rrecv_msg_ptr && _rrecv_msg_ptr->error_ == 0){
@@ -997,7 +1001,7 @@ bool store_app_config(const ola::utility::Application &_rcfg, const string &_pat
 string generate_temp_name();
 
 void handle_create_app ( istream& _ris, Engine &_reng){
-    auto req_ptr = make_shared<CreateAppRequest>();
+    auto req_ptr = make_shared<main::CreateAppRequest>();
     
 #ifdef APP_CONFIG
     string config_path;
@@ -1014,8 +1018,8 @@ void handle_create_app ( istream& _ris, Engine &_reng){
     
     auto lambda = [&prom](
         frame::mprpc::ConnectionContext&     _rctx,
-        std::shared_ptr<CreateAppRequest>&  _rsent_msg_ptr,
-        std::shared_ptr<Response>&          _rrecv_msg_ptr,
+        std::shared_ptr<main::CreateAppRequest>&  _rsent_msg_ptr,
+        std::shared_ptr<core::Response>&          _rrecv_msg_ptr,
         ErrorConditionT const&              _rerror
     ){
         if(_rrecv_msg_ptr){
@@ -1046,8 +1050,8 @@ bool zip_create(const string &_zip_path, string _root, uint64_t &_rsize);
 
 void on_upload_receive_last_response(
     frame::mprpc::ConnectionContext& _rctx,
-    std::shared_ptr<UploadRequest>&        _rsent_msg_ptr,
-    std::shared_ptr<Response>&       _rrecv_msg_ptr,
+    std::shared_ptr<main::UploadRequest>&        _rsent_msg_ptr,
+    std::shared_ptr<core::Response>&       _rrecv_msg_ptr,
     ErrorConditionT const&           _rerror,
     promise<void> &prom,
     const string &zip_path)
@@ -1071,8 +1075,8 @@ void on_upload_receive_last_response(
 
 void on_upload_receive_response(
     frame::mprpc::ConnectionContext& _rctx,
-    std::shared_ptr<UploadRequest>&        _rsent_msg_ptr,
-    std::shared_ptr<Response>&       _rrecv_msg_ptr,
+    std::shared_ptr<main::UploadRequest>&        _rsent_msg_ptr,
+    std::shared_ptr<core::Response>&       _rrecv_msg_ptr,
     ErrorConditionT const&           _rerror,
     promise<void> &prom,
     const string &zip_path)
@@ -1081,8 +1085,8 @@ void on_upload_receive_response(
     if (!_rsent_msg_ptr->ifs_.eof()) {
         auto lambda = [&prom, &zip_path](
             frame::mprpc::ConnectionContext&        _rctx,
-            std::shared_ptr<UploadRequest>&  _rsent_msg_ptr,
-            std::shared_ptr<Response>& _rrecv_msg_ptr,
+            std::shared_ptr<main::UploadRequest>&  _rsent_msg_ptr,
+            std::shared_ptr<core::Response>& _rrecv_msg_ptr,
             ErrorConditionT const&                  _rerror
         ){
             on_upload_receive_response(_rctx, _rsent_msg_ptr, _rrecv_msg_ptr, _rerror, prom, zip_path);
@@ -1094,8 +1098,8 @@ void on_upload_receive_response(
     } else {
         auto lambda = [&prom, &zip_path](
             frame::mprpc::ConnectionContext&        _rctx,
-            std::shared_ptr<UploadRequest>&  _rsent_msg_ptr,
-            std::shared_ptr<Response>& _rrecv_msg_ptr,
+            std::shared_ptr<main::UploadRequest>&  _rsent_msg_ptr,
+            std::shared_ptr<core::Response>& _rrecv_msg_ptr,
             ErrorConditionT const&                  _rerror
         ){
             on_upload_receive_last_response(_rctx, _rsent_msg_ptr, _rrecv_msg_ptr, _rerror, prom, zip_path);
@@ -1132,7 +1136,7 @@ bool load_icon(std::vector<char> &_ricon_blob, const std::string &_path){
 }
 
 void handle_create_build(istream& _ris, Engine &_reng){
-    auto req_ptr = make_shared<CreateBuildRequest>();
+    auto req_ptr = make_shared<main::CreateBuildRequest>();
     
     string config_path, build_path, icon_path;
     _ris>>std::quoted(req_ptr->app_id_)>>std::quoted(req_ptr->unique_);
@@ -1174,8 +1178,8 @@ void handle_create_build(istream& _ris, Engine &_reng){
     
     auto lambda = [&prom, &zip_path](
         frame::mprpc::ConnectionContext&        _rctx,
-        std::shared_ptr<CreateBuildRequest>&  _rsent_msg_ptr,
-        std::shared_ptr<Response>& _rrecv_msg_ptr,
+        std::shared_ptr<main::CreateBuildRequest>&  _rsent_msg_ptr,
+        std::shared_ptr<core::Response>& _rrecv_msg_ptr,
         ErrorConditionT const&                  _rerror
     ){
         if(_rrecv_msg_ptr){
@@ -1185,7 +1189,7 @@ void handle_create_build(istream& _ris, Engine &_reng){
             }else{
                 cout<<"Start uploading build file: "<<zip_path<<" for build tagged: "<<_rsent_msg_ptr->unique_<<endl;
                 //now we must upload the file
-                auto req_ptr = make_shared<UploadRequest>();
+                auto req_ptr = make_shared<main::UploadRequest>();
                 req_ptr->ifs_.open(zip_path, std::ifstream::binary);
                 solid_check(req_ptr->ifs_, "failed open file: "<<zip_path);
                 req_ptr->header(_rrecv_msg_ptr->header());
@@ -1194,8 +1198,8 @@ void handle_create_build(istream& _ris, Engine &_reng){
                     
                     auto lambda = [&prom, &zip_path](
                         frame::mprpc::ConnectionContext&        _rctx,
-                        std::shared_ptr<UploadRequest>&  _rsent_msg_ptr,
-                        std::shared_ptr<Response>& _rrecv_msg_ptr,
+                        std::shared_ptr<main::UploadRequest>&  _rsent_msg_ptr,
+                        std::shared_ptr<core::Response>& _rrecv_msg_ptr,
                         ErrorConditionT const&                  _rerror
                     ){
                         on_upload_receive_response(_rctx, _rsent_msg_ptr, _rrecv_msg_ptr, _rerror, prom, zip_path);
@@ -1209,8 +1213,8 @@ void handle_create_build(istream& _ris, Engine &_reng){
                 } else {
                     auto lambda = [&prom, &zip_path](
                         frame::mprpc::ConnectionContext&        _rctx,
-                        std::shared_ptr<UploadRequest>&  _rsent_msg_ptr,
-                        std::shared_ptr<Response>& _rrecv_msg_ptr,
+                        std::shared_ptr<main::UploadRequest>&  _rsent_msg_ptr,
+                        std::shared_ptr<core::Response>& _rrecv_msg_ptr,
                         ErrorConditionT const&                  _rerror
                     ){
                         on_upload_receive_last_response(_rctx, _rsent_msg_ptr, _rrecv_msg_ptr, _rerror, prom, zip_path);
@@ -1234,7 +1238,7 @@ void handle_create_build(istream& _ris, Engine &_reng){
 //-----------------------------------------------------------------------------
 
 void handle_create_media(istream& _ris, Engine &_reng){
-    auto req_ptr = make_shared<CreateMediaRequest>();
+    auto req_ptr = make_shared<main::CreateMediaRequest>();
     
     string media_path;
     _ris>>std::quoted(req_ptr->app_id_)>>std::quoted(req_ptr->unique_);
@@ -1270,8 +1274,8 @@ void handle_create_media(istream& _ris, Engine &_reng){
     
     auto lambda = [&prom, &zip_path](
         frame::mprpc::ConnectionContext&        _rctx,
-        std::shared_ptr<CreateMediaRequest>&  _rsent_msg_ptr,
-        std::shared_ptr<Response>& _rrecv_msg_ptr,
+        std::shared_ptr<main::CreateMediaRequest>&  _rsent_msg_ptr,
+        std::shared_ptr<core::Response>& _rrecv_msg_ptr,
         ErrorConditionT const&                  _rerror
     ){
         if(_rrecv_msg_ptr){
@@ -1281,7 +1285,7 @@ void handle_create_media(istream& _ris, Engine &_reng){
             }else{
                 cout<<"Start uploading media file: "<<zip_path<<" for build tagged: "<<_rsent_msg_ptr->unique_<<endl;
                 //now we must upload the file
-                auto req_ptr = make_shared<UploadRequest>();
+                auto req_ptr = make_shared<main::UploadRequest>();
                 req_ptr->ifs_.open(zip_path, std::ifstream::binary);
                 solid_check(req_ptr->ifs_, "failed open file: "<<zip_path);
                 req_ptr->header(_rrecv_msg_ptr->header());
@@ -1290,8 +1294,8 @@ void handle_create_media(istream& _ris, Engine &_reng){
                     
                     auto lambda = [&prom, &zip_path](
                         frame::mprpc::ConnectionContext&        _rctx,
-                        std::shared_ptr<UploadRequest>&  _rsent_msg_ptr,
-                        std::shared_ptr<Response>& _rrecv_msg_ptr,
+                        std::shared_ptr<main::UploadRequest>&  _rsent_msg_ptr,
+                        std::shared_ptr<core::Response>& _rrecv_msg_ptr,
                         ErrorConditionT const&                  _rerror
                     ){
                         on_upload_receive_response(_rctx, _rsent_msg_ptr, _rrecv_msg_ptr, _rerror, prom, zip_path);
@@ -1305,8 +1309,8 @@ void handle_create_media(istream& _ris, Engine &_reng){
                 } else {
                     auto lambda = [&prom, &zip_path](
                         frame::mprpc::ConnectionContext&        _rctx,
-                        std::shared_ptr<UploadRequest>&  _rsent_msg_ptr,
-                        std::shared_ptr<Response>& _rrecv_msg_ptr,
+                        std::shared_ptr<main::UploadRequest>&  _rsent_msg_ptr,
+                        std::shared_ptr<core::Response>& _rrecv_msg_ptr,
                         ErrorConditionT const&                  _rerror
                     ){
                         on_upload_receive_last_response(_rctx, _rsent_msg_ptr, _rrecv_msg_ptr, _rerror, prom, zip_path);
@@ -1478,11 +1482,11 @@ void handle_acquire(istream& _ris, Engine &_reng){
 //-----------------------------------------------------------------------------
 
 void Engine::onConnectionStart(frame::mprpc::ConnectionContext &_ctx){
-    auto req_ptr = std::make_shared<InitRequest>();
+    auto req_ptr = std::make_shared<main::InitRequest>();
     auto lambda = [this](
         frame::mprpc::ConnectionContext&        _rctx,
-        std::shared_ptr<InitRequest>&  _rsent_msg_ptr,
-        std::shared_ptr<InitResponse>& _rrecv_msg_ptr,
+        std::shared_ptr<main::InitRequest>&  _rsent_msg_ptr,
+        std::shared_ptr<core::InitResponse>& _rrecv_msg_ptr,
         ErrorConditionT const&                  _rerror
     ){
         if(_rrecv_msg_ptr){
@@ -1501,12 +1505,12 @@ void Engine::onConnectionStart(frame::mprpc::ConnectionContext &_ctx){
 void Engine::onConnectionInit(frame::mprpc::ConnectionContext &_ctx){
     solid_check(!auth_token_.empty());
     std::lock_guard<mutex> lock(mutex_);
-    auto req_ptr = std::make_shared<AuthRequest>();
+    auto req_ptr = std::make_shared<core::AuthRequest>();
     req_ptr->pass_ = auth_token_;
     auto lambda = [this](
         frame::mprpc::ConnectionContext&        _rctx,
-        std::shared_ptr<AuthRequest>&  _rsent_msg_ptr,
-        std::shared_ptr<AuthResponse>& _rrecv_msg_ptr,
+        std::shared_ptr<core::AuthRequest>&  _rsent_msg_ptr,
+        std::shared_ptr<core::AuthResponse>& _rrecv_msg_ptr,
         ErrorConditionT const&                  _rerror
     ){
         if(_rrecv_msg_ptr){
@@ -1519,7 +1523,7 @@ void Engine::onConnectionInit(frame::mprpc::ConnectionContext &_ctx){
 
 //-----------------------------------------------------------------------------
 
-void Engine::onAuthResponse(frame::mprpc::ConnectionContext &_ctx, AuthResponse &_rresponse){
+void Engine::onAuthResponse(frame::mprpc::ConnectionContext &_ctx, core::AuthResponse &_rresponse){
     solid_check(_rresponse.error_ == 0, "Please authenticate using ola_client_auth");
 
     if(!_rresponse.message_.empty()){

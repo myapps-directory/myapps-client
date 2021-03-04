@@ -24,7 +24,7 @@ if(WIN32)
         ola_client_utility
         SolidFrame::solid_frame_mprpc
         SolidFrame::solid_frame_aio_openssl
-        SolidFrame::solid_serialization_v2
+        SolidFrame::solid_serialization_v3
         ${SNAPPY_LIB}
         ${Boost_PROGRAM_OPTIONS_LIBRARY}
         ${Boost_SYSTEM_LIBRARY}

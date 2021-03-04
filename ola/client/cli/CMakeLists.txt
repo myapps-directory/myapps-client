@@ -1,4 +1,4 @@
-add_executable (ola_client_cli ola_client_cli.cpp ../../common/ola_front_protocol.hpp)
+add_executable (ola_client_cli ola_client_cli.cpp)
 
 if(WIN32)
     set_source_files_properties(ola_client_cli.cpp PROPERTIES COMPILE_FLAGS "-bigobj -DOLA_FRONT_URL=\\\"${OLA_FRONT_URL}\\\"")
@@ -11,7 +11,7 @@ target_link_libraries (ola_client_cli
     ola_client_utility
     SolidFrame::solid_frame_mprpc
     SolidFrame::solid_frame_aio_openssl
-    SolidFrame::solid_serialization_v2
+    SolidFrame::solid_serialization_v3
     ${Boost_PROGRAM_OPTIONS_LIBRARY}
     ${Boost_SYSTEM_LIBRARY}
     ${Boost_FILESYSTEM_LIBRARY}
