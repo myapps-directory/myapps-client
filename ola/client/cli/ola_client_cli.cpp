@@ -171,6 +171,7 @@ void handle_create(istream& _ris, Engine& _reng);
 void handle_generate(istream& _ris, Engine& _reng);
 void handle_acquire(istream& _ris, Engine& _reng);
 void handle_parse(istream& _ris, Engine& _reng);
+void handle_change(istream& _ris, Engine& _reng);
 
 void uninstall_cleanup();
 
@@ -314,6 +315,9 @@ int main(int argc, char* argv[])
             rx.history_add(line);
         } else if (cmd == "help" || line == "h") {
             handle_help(iss, engine);
+            rx.history_add(line);
+        } else if (cmd == "change") {
+            handle_change(iss, engine);
             rx.history_add(line);
         } else if (cmd == "clear") {
             rx.clear_screen();
@@ -499,7 +503,7 @@ void handle_help(istream& _ris, Engine &_reng){
     cout<<"\ta - aquired applications\n";
     cout<<"\tA - All applications\n\n";
     cout<<"> list store STORAGE_ID PATH\n\n";
-    cout<<"> fetch app APP_ID\n\n";
+    cout<<"> fetch app APP_ID [OS_ID]\n\n";
     cout<<"> fetch build APP_ID BUILD_ID\n\n";
     cout<<"> fetch config APP_ID LANGUAGE_ID OS_ID\n\n"; 
     cout<<"> generate build ~/path/to/build.yml\n\n";
@@ -507,6 +511,7 @@ void handle_help(istream& _ris, Engine &_reng){
     cout<<"> create app\n\n";
     cout<<"> create build APP_ID BUILD_TAG ~/path/to/build.yml ~/path/to/build_folder ~/path/to/build_icon.png\n";
     cout<<"> fetch updates LANGUAGE_ID OS_ID APP_ID [APP_ID]\n";
+    cout << "> change state m|M|b|B APP_ID OS_ID ITEM_NAME ITEM_STATE\n";
     cout<<"\nExamples:\n";
     cout<<"> create app bubbles.app\n";
     cout<<"> create build l/AQPpeZWqoR1Fcngt3t2w== first bubbles.build.yml ~/tmp/bubbles_client ~/tmp/bubbles.png\n";
@@ -551,7 +556,9 @@ void handle_list_oses(istream& /*_ris*/, Engine &_reng){
     };
     _reng.rpcService().sendRequest(_reng.serverEndpoint().c_str(), req_ptr, lambda);
     
-    solid_check(prom.get_future().wait_for(chrono::seconds(100)) == future_status::ready, "Taking too long - waited 100 secs");
+    auto fut = prom.get_future();
+    solid_check(fut.wait_for(chrono::seconds(100)) == future_status::ready, "Taking too long - waited 100 secs");
+    fut.get();
 }
 
 //-----------------------------------------------------------------------------
@@ -587,7 +594,9 @@ void handle_list_apps(istream& _ris, Engine &_reng){
     };
     _reng.rpcService().sendRequest(_reng.serverEndpoint().c_str(), req_ptr, lambda);
     
-    solid_check(prom.get_future().wait_for(chrono::seconds(100)) == future_status::ready, "Taking too long - waited 100 secs");
+    auto fut = prom.get_future();
+    solid_check(fut.wait_for(chrono::seconds(100)) == future_status::ready, "Taking too long - waited 100 secs");
+    fut.get();
     
 }
 
@@ -625,7 +634,9 @@ void handle_list_store(istream& _ris, Engine &_reng){
     };
     _reng.rpcService().sendRequest(_reng.serverEndpoint().c_str(), req_ptr, lambda);
     
-    solid_check(prom.get_future().wait_for(chrono::seconds(100)) == future_status::ready, "Taking too long - waited 100 secs");
+    auto fut = prom.get_future();
+    solid_check(fut.wait_for(chrono::seconds(100)) == future_status::ready, "Taking too long - waited 100 secs");
+    fut.get();
     
 }
 
@@ -641,6 +652,74 @@ void handle_list(istream& _ris, Engine &_reng){
         handle_list_apps(_ris, _reng);
     }else if(what == "store"){
         handle_list_store(_ris, _reng);
+    }
+}
+
+//-----------------------------------------------------------------------------
+//  Change
+//-----------------------------------------------------------------------------
+
+void handle_change_state(istream& _ris, Engine& _reng) {
+    auto req_ptr = make_shared<main::ChangeAppItemStateRequest>();
+
+    char item_type = '\0';//m/M->media, b/B->build
+    string state_name;
+
+    _ris >> item_type >> std::quoted(req_ptr->app_id_) >> std::quoted(req_ptr->os_id_) >> std::quoted(req_ptr->item_.name_) >> std::quoted(state_name);
+
+    auto state = ola::utility::app_item_state_from_name(state_name.c_str());
+    if (state == ola::utility::AppItemStateE::StateCount) {
+        cout << "Error: invalid state name " << state_name << endl;
+        return;
+    }
+
+    if (item_type == 'b' || item_type == 'B')
+    {
+        req_ptr->item_.type(ola::utility::AppItemTypeE::Build);
+    }
+    else if (item_type == 'm' || item_type == 'M') {
+        req_ptr->item_.type(ola::utility::AppItemTypeE::Media);
+    }
+    else {
+        cout << "Error: invalid item type " << item_type << endl;
+        return;
+    }
+    
+    req_ptr->app_id_ = utility::base64_decode(req_ptr->app_id_);
+    req_ptr->new_state_ = static_cast<uint8_t>(state);
+
+    promise<void> prom;
+
+    auto lambda = [&prom](
+        frame::mprpc::ConnectionContext& _rctx,
+        std::shared_ptr<ola::front::main::ChangeAppItemStateRequest>& _rsent_msg_ptr,
+        std::shared_ptr<ola::front::core::Response>& _rrecv_msg_ptr,
+        ErrorConditionT const& _rerror) {
+
+        if (_rrecv_msg_ptr && _rrecv_msg_ptr->error_ == 0) {
+            cout << "Success" << endl;
+        }
+        else if (!_rrecv_msg_ptr) {
+            cout << "Error - no response: " << _rerror.message() << endl;
+        }
+        else {
+            cout << "Error received from server: " << _rrecv_msg_ptr->error_ << " : "<< _rrecv_msg_ptr->message_<< endl;
+        }
+        prom.set_value();
+    };
+
+    _reng.rpcService().sendRequest(_reng.serverEndpoint().c_str(), req_ptr, lambda);
+    auto fut = prom.get_future();
+    solid_check(fut.wait_for(chrono::seconds(100)) == future_status::ready, "Taking too long - waited 100 secs");
+    fut.get();
+}
+
+void handle_change(istream& _ris, Engine& _reng) {
+    string what;
+    _ris >> std::quoted(what);
+
+    if (what == "state") {
+        handle_change_state(_ris, _reng);
     }
 }
 
@@ -672,12 +751,12 @@ void handle_fetch_app(istream& _ris, Engine &_reng){
     ){
         if(_rrecv_msg_ptr && _rrecv_msg_ptr->error_ == 0){
             cout<<"{\n";
-            cout<<"Item: ";
+            cout << "Items: {"<<endl;
             for(const auto& item: _rrecv_msg_ptr->item_vec_){
                 //cout<<utility::base64_encode(build_id)<<endl;
-                cout<<item.name_<<" "<<static_cast<int>(item.type())<<" "<< ola::utility::app_item_state_name(item.state()) <<endl;
+                cout<<'\t'<<item.name_<<" "<< ola::utility::app_item_type_name(item.type())<<" "<< ola::utility::app_item_state_name(item.state()) <<endl;
             }
-            cout<<endl;
+            cout<<'}'<<endl;
             cout<<_rrecv_msg_ptr->application_;
             cout<<endl;
             cout<<"}"<<endl;
@@ -690,7 +769,9 @@ void handle_fetch_app(istream& _ris, Engine &_reng){
     };
     _reng.rpcService().sendRequest(_reng.serverEndpoint().c_str(), req_ptr, lambda);
     
-    solid_check(prom.get_future().wait_for(chrono::seconds(100)) == future_status::ready, "Taking too long - waited 100 secs");
+    auto fut = prom.get_future();
+    solid_check(fut.wait_for(chrono::seconds(100)) == future_status::ready, "Taking too long - waited 100 secs");
+    fut.get();
 }
 
 //-----------------------------------------------------------------------------
@@ -795,7 +876,9 @@ void handle_fetch_build(istream& _ris, Engine &_reng){
     };
     _reng.rpcService().sendRequest(_reng.serverEndpoint().c_str(), req_ptr, lambda);
     
-    solid_check(prom.get_future().wait_for(chrono::seconds(100)) == future_status::ready, "Taking too long - waited 100 secs");
+    auto fut = prom.get_future();
+    solid_check(fut.wait_for(chrono::seconds(100)) == future_status::ready, "Taking too long - waited 100 secs");
+    fut.get();
 }
 
 void handle_fetch_config(istream& _ris, Engine &_reng){
@@ -841,7 +924,9 @@ void handle_fetch_config(istream& _ris, Engine &_reng){
     };
     _reng.rpcService().sendRequest(_reng.serverEndpoint().c_str(), req_ptr, lambda);
     
-    solid_check(prom.get_future().wait_for(chrono::seconds(100)) == future_status::ready, "Taking too long - waited 100 secs");
+    auto fut = prom.get_future();
+    solid_check(fut.wait_for(chrono::seconds(100)) == future_status::ready, "Taking too long - waited 100 secs");
+    fut.get();
 }
 
 uint64_t stream_copy(std::ostream &_ros, std::istream &_ris){
@@ -968,7 +1053,9 @@ void handle_fetch_updates(istream& _ris, Engine &_reng){
     };
     _reng.rpcService().sendRequest(_reng.serverEndpoint().c_str(), req_ptr, lambda);
     
-    solid_check(prom.get_future().wait_for(chrono::seconds(100)) == future_status::ready, "Taking too long - waited 100 secs");
+    auto fut = prom.get_future();
+    solid_check(fut.wait_for(chrono::seconds(100)) == future_status::ready, "Taking too long - waited 100 secs");
+    fut.get();
 }
 
 //-----------------------------------------------------------------------------
@@ -1038,7 +1125,9 @@ void handle_create_app ( istream& _ris, Engine &_reng){
     };
     _reng.rpcService().sendRequest(_reng.serverEndpoint().c_str(), req_ptr, lambda);
     
-    solid_check(prom.get_future().wait_for(chrono::seconds(100)) == future_status::ready, "Taking too long - waited 100 secs");
+    auto fut = prom.get_future();
+    solid_check(fut.wait_for(chrono::seconds(100)) == future_status::ready, "Taking too long - waited 100 secs");
+    fut.get();
 }
 
 //-----------------------------------------------------------------------------
@@ -1232,7 +1321,9 @@ void handle_create_build(istream& _ris, Engine &_reng){
     };
     _reng.rpcService().sendRequest(_reng.serverEndpoint().c_str(), req_ptr, lambda);
     
-    solid_check(prom.get_future().wait_for(chrono::seconds(100)) == future_status::ready, "Taking too long - waited 100 secs");
+    auto fut = prom.get_future();
+    solid_check(fut.wait_for(chrono::seconds(100)) == future_status::ready, "Taking too long - waited 100 secs");
+    fut.get();
 }
 
 //-----------------------------------------------------------------------------
@@ -1328,7 +1419,9 @@ void handle_create_media(istream& _ris, Engine &_reng){
     };
     _reng.rpcService().sendRequest(_reng.serverEndpoint().c_str(), req_ptr, lambda);
     
-    solid_check(prom.get_future().wait_for(chrono::seconds(100)) == future_status::ready, "Taking too long - waited 100 secs");
+    auto fut = prom.get_future();
+    solid_check(fut.wait_for(chrono::seconds(100)) == future_status::ready, "Taking too long - waited 100 secs");
+    fut.get();
 }
 
 //-----------------------------------------------------------------------------
