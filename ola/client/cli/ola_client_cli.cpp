@@ -1617,7 +1617,7 @@ void Engine::onConnectionStart(frame::mprpc::ConnectionContext &_ctx){
             if(_rrecv_msg_ptr->error_ == 0){
                 onConnectionInit(_rctx);
             }else{
-                cout<<"ERROR initiating connection: version "<<_rctx.peerVersionMajor()<<'.'<<_rctx.peerVersionMinor()<<" error "<<_rrecv_msg_ptr->error_<<':'<<_rrecv_msg_ptr->message_<<endl;
+                cout<<"ERROR initiating connection: error "<<_rrecv_msg_ptr->error_<<':'<<_rrecv_msg_ptr->message_<<endl;
             }
         }
     };
@@ -1725,22 +1725,6 @@ string get_temp_env()
     return pname == nullptr ? "/tmp" : pname;
 #endif
 }
-
-string envConfigPathPrefix()
-{
-    const char* v = getenv("APPDATA");
-    if (v == nullptr) {
-        v = getenv("LOCALAPPDATA");
-        if (v == nullptr) {
-            v = "c:";
-        }
-    }
-
-    string r = v;
-    r += "\\MyApps.space";
-    return r;
-}
-
 //-----------------------------------------------------------------------------
 
 bool read(string& _rs, istream& _ris, size_t _sz)
