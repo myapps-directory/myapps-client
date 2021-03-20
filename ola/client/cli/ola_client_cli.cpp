@@ -79,6 +79,7 @@ struct Parameters {
     bool           compress;
     string         front_endpoint;
     string         secure_prefix;
+    string         auth_token;
 
     string securePath(const string& _name) const
     {
@@ -124,9 +125,15 @@ struct Engine {
     void start()
     {
         
-        const auto path = authDataFilePath();
-        ola::client::utility::auth_read(path, auth_endpoint_, auth_user_, auth_token_);
-
+        if (rparams_.auth_token.empty()) {
+            const auto path = authDataFilePath();
+            ola::client::utility::auth_read(path, auth_endpoint_, auth_user_, auth_token_);
+        }
+        else {
+            solid_check(!rparams_.front_endpoint.empty(), "front_enpoint required");
+            auth_endpoint_ = rparams_.front_endpoint;
+            auth_token_ = ola::utility::base64_decode(rparams_.auth_token);
+        }
         solid_check(!auth_token_.empty(), "Please authenticate using ola_client_auth application");
     }
 
@@ -336,7 +343,7 @@ int main(int argc, char* argv[])
         }
     }
     rx.history_save(history_file);
-    cout << "command history written to: " << history_file << endl;
+    cerr << "command history written to: " << history_file << endl;
 #else
     string line;
 
@@ -393,7 +400,8 @@ bool parse_arguments(Parameters& _par, int argc, char* argv[])
             ("debug-buffered,S", value<bool>(&_par.dbg_buffered)->implicit_value(true)->default_value(false), "Debug buffered")
             ("unsecure", value<bool>(&_par.secure)->implicit_value(false)->default_value(true), "Use SSL to secure communication")
             ("compress", value<bool>(&_par.compress)->implicit_value(true)->default_value(false), "Use Snappy to compress communication")
-            ("front", value<std::string>(&_par.front_endpoint)->default_value(string(OLA_FRONT_URL)), "MyApps.space Front Endpoint")
+            ("front-endpoint", value<std::string>(&_par.front_endpoint)->default_value(string(OLA_FRONT_URL)), "MyApps.space Front Endpoint")
+            ("auth", value<std::string>(&_par.auth_token), "Authentication token")
             ("secure-prefix", value<std::string>(&_par.secure_prefix)->default_value("certs"), "Secure Path prefix")
             ("uninstall-cleanup", "Uninstall cleanup")
         ;
@@ -1561,11 +1569,34 @@ void handle_parse(istream& _ris, Engine& _reng) {
 //  Acquire
 //-----------------------------------------------------------------------------
 
-//-----------------------------------------------------------------------------
-
 void handle_acquire(istream& _ris, Engine &_reng){
-    string what;
-    _ris>>std::quoted(what);
+    auto req_ptr = make_shared<main::AcquireAppRequest>();
+
+    _ris >> std::quoted(req_ptr->app_id_);
+    
+    req_ptr->app_id_ = ola::utility::base64_decode(req_ptr->app_id_);
+
+    promise<void> prom;
+
+    auto lambda = [&prom](
+        frame::mprpc::ConnectionContext& _rctx,
+        std::shared_ptr<main::AcquireAppRequest>& _rsent_msg_ptr,
+        std::shared_ptr<core::Response>& _rrecv_msg_ptr,
+        ErrorConditionT const& _rerror
+        ) {
+            if (_rrecv_msg_ptr) {
+                cout << "Response: error = " << _rrecv_msg_ptr->error_ <<" message = "<< _rrecv_msg_ptr->message_ << endl;
+            }
+            else {
+                cout << "Error - no response: " << _rerror.message() << endl;
+            }
+            prom.set_value();
+    };
+    _reng.rpcService().sendRequest(_reng.serverEndpoint().c_str(), req_ptr, lambda);
+
+    auto fut = prom.get_future();
+    solid_check(fut.wait_for(chrono::seconds(100)) == future_status::ready, "Taking too long - waited 100 secs");
+    fut.get();
 }
 
 //-----------------------------------------------------------------------------

@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+if [[ $# -ne 5 ]] ; then
+    echo 'Usage: ola_upload A|m|b FROM COUNT BUILDID MEDIAID'
+    echo 'Example: ./ola_upload A 0 10 b01 m01'
+    exit 0
+fi
 
 #FRONT=$1
 OPTION=$1

@@ -1,9 +1,16 @@
 #!/usr/bin/env bash
 
+if [[ $# -ne 3 ]] ; then
+    echo 'Usage: ola_upload b APPID BUILDID'
+    echo 'Example: ./ola_upload b 8W9Hu1MnHPoifnCw7lUWWVpLEhDunsUi9cAXl1h6fec= b01'
+    exit 0
+fi
+
 OPTION=$1
 APPID=$2
 BUILDID=$3
-MEDIAID=$4
+#MEDIAID=$4
+MEDIAID=""
 
 INSTALLER_PATH="@OLA_INSTALLER_PATH@"
 INSTALLER_NAME="@OLA_INSTALLER_NAME@"

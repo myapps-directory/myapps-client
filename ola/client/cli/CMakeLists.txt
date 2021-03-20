@@ -33,7 +33,7 @@ install(TARGETS ola_client_cli RUNTIME DESTINATION bin)
 install(DIRECTORY $<TARGET_FILE_DIR:ola_client_cli>/certs DESTINATION "bin")
 
 add_custom_command(TARGET ola_client_cli POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/certs  $<TARGET_FILE_DIR:ola_client_cli>/certs
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${OPENSSL_SSL_DLL} $<TARGET_FILE_DIR:ola_client_auth>
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${OPENSSL_CRYPTO_DLL} $<TARGET_FILE_DIR:ola_client_auth>
+    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/ola/client/utility/certs  $<TARGET_FILE_DIR:ola_client_cli>/certs
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${OPENSSL_SSL_DLL} $<TARGET_FILE_DIR:ola_client_cli>
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${OPENSSL_CRYPTO_DLL} $<TARGET_FILE_DIR:ola_client_cli>
 )
