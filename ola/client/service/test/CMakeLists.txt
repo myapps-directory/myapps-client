@@ -17,8 +17,8 @@ add_executable(
 target_link_libraries(test_client_service
     SolidFrame::solid_system
     ola_utility
-    ${Boost_SYSTEM_LIBRARY}
-    ${Boost_FILESYSTEM_LIBRARY}
+    Boost::system
+    Boost::filesystem
     ${SYSTEM_BASIC_LIBRARIES}
 )
 

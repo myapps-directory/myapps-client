@@ -26,9 +26,9 @@ if(WIN32)
         SolidFrame::solid_frame_aio_openssl
         SolidFrame::solid_serialization_v3
         ${SNAPPY_LIB}
-        ${Boost_PROGRAM_OPTIONS_LIBRARY}
-        ${Boost_SYSTEM_LIBRARY}
-        ${Boost_FILESYSTEM_LIBRARY}
+        Boost::program_options
+        Boost::system
+        Boost::filesystem
     )
 
     set_target_properties(
@@ -61,9 +61,9 @@ if(WIN32)
         SolidFrame::solid_frame_aio_openssl
         SolidFrame::solid_serialization_v2
         ${SNAPPY_LIB}
-        ${Boost_PROGRAM_OPTIONS_LIBRARY}
-        ${Boost_SYSTEM_LIBRARY}
-        ${Boost_FILESYSTEM_LIBRARY}
+        Boost::program_options
+        Boost::system
+        Boost::filesystem
     )
 
     add_executable(passthrough_c passthrough_c.cpp)
@@ -81,9 +81,9 @@ if(WIN32)
         SolidFrame::solid_frame_aio_openssl
         SolidFrame::solid_serialization_v2
         ${SNAPPY_LIB}
-        ${Boost_PROGRAM_OPTIONS_LIBRARY}
-        ${Boost_SYSTEM_LIBRARY}
-        ${Boost_FILESYSTEM_LIBRARY}
+        Boost::program_options
+        Boost::system
+        Boost::filesystem
     )
 
     add_executable(test_security test_security.cpp)

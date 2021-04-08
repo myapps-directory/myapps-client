@@ -8,10 +8,10 @@ if(WIN32)
         resource.h
         resource.rc
         ${CMAKE_CURRENT_BINARY_DIR}/dummy.cpp
-        updater.build.yml
+        updater.build.yml.in
         updater.png
         updater_thumb.png
-        ola_upload
+        ola_upload.in
     )
 
     target_link_libraries(ola_updater

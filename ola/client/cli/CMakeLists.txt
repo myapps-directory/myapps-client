@@ -12,9 +12,9 @@ target_link_libraries (ola_client_cli
     SolidFrame::solid_frame_mprpc
     SolidFrame::solid_frame_aio_openssl
     SolidFrame::solid_serialization_v3
-    ${Boost_PROGRAM_OPTIONS_LIBRARY}
-    ${Boost_SYSTEM_LIBRARY}
-    ${Boost_FILESYSTEM_LIBRARY}
+    Boost::program_options
+    Boost::system
+    Boost::filesystem
     ${SNAPPY_LIB}
     ${SYSTEM_BASIC_LIBRARIES}
     ${SYSTEM_DYNAMIC_LOAD_LIBRARY}

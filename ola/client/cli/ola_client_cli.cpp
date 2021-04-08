@@ -405,7 +405,7 @@ bool parse_arguments(Parameters& _par, int argc, char* argv[])
             ("secure-prefix", value<std::string>(&_par.secure_prefix)->default_value("certs"), "Secure Path prefix")
             ("uninstall-cleanup", "Uninstall cleanup")
         ;
-        // clang-format off
+        // clang-format on
         variables_map vm;
         store(parse_command_line(argc, argv, desc), vm);
         notify(vm);

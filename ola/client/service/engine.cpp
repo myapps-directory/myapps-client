@@ -1472,17 +1472,6 @@ bool FileData::readFromResponses(ReadData& _rdata, const bool _is_front)
     }
 }
 
-void check_file(char* _pbuf, uint64_t _offset, unsigned long _length)
-{
-    static ifstream ifs("C:\\Users\\vipal\\work\\bubbles_release\\bubbles_client.exe", ios::binary);
-    solid_assert(ifs);
-    char buf[1024 * 256];
-
-    ifs.seekg(_offset);
-    ifs.read(buf, _length);
-    solid_assert(memcmp(_pbuf, buf, _length) == 0);
-}
-
 bool Engine::Implementation::read(
     EntryPointerT& _rentry_ptr,
     char*          _pbuf,

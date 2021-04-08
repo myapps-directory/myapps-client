@@ -423,7 +423,7 @@ bool Parameters::parse(ULONG argc, PWSTR* argv)
         ("secure-prefix", value<std::string>(&secure_prefix_)->default_value("certs"), "Secure Path prefix")
         ("path-prefix", value<std::string>(&path_prefix_)->default_value(env_config_path_prefix()), "Path prefix")
     ;
-    // clang-format off
+    // clang-format on
     variables_map vm;
     store(parse_command_line(argc, argv, desc), vm);
     notify(vm);
