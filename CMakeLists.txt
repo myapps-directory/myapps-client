@@ -226,7 +226,7 @@ set(CPACK_WIX_EXTRA_SOURCES             "${CMAKE_BINARY_DIR}/cpack/wix/custom_ac
 if(WIN32)
     set(WIX_BUNDLE_ICON "${CMAKE_SOURCE_DIR}/ola/client/auth/auth.ico")
     set(WIX_BUNDLE_WINFSP_MSI src/winfsp-1.8.20304.msi)
-    set(WIX_BUNDLE_WINFSP_URL https://github.com/billziss-gh/winfsp/releases/download/v1.8/winfsp-1.8.20304.msi)
+    set(WIX_BUNDLE_WINFSP_URL https://github.com/billziss-gh/winfsp/releases/download/v1.9/winfsp-1.9.21096.msi)
 
     ExternalProject_Add(
         WinFSP_Download

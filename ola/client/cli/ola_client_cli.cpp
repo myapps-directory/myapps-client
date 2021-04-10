@@ -80,6 +80,7 @@ struct Parameters {
     string         front_endpoint;
     string         secure_prefix;
     string         auth_token;
+    bool           no_history;
 
     string securePath(const string& _name) const
     {
@@ -298,52 +299,44 @@ int main(int argc, char* argv[])
         iss >> cmd;
 
         if (line == "q" || line == "Q" || line == "quit") {
-            rx.history_add(line);
+            if (!params.no_history) {
+                rx.history_add(line);
+            }
             break;
         }
 
         if (cmd == "list") {
             handle_list(iss, engine);
-            rx.history_add(line);
         } else if (cmd == "fetch") {
             handle_fetch(iss, engine);
-            rx.history_add(line);
         } else if (cmd == "create") {
             handle_create(iss, engine);
-            rx.history_add(line);
         } else if (cmd == "generate") {
             handle_generate(iss, engine);
-            rx.history_add(line);
         } else if (cmd == "parse") {
             handle_parse(iss, engine);
-            rx.history_add(line);
         } else if (cmd == "acquire") {
             handle_acquire(iss, engine);
-            rx.history_add(line);
         } else if (cmd == "help" || line == "h") {
             handle_help(iss, engine);
-            rx.history_add(line);
         } else if (cmd == "change") {
             handle_change(iss, engine);
-            rx.history_add(line);
         } else if (cmd == "clear") {
             rx.clear_screen();
-
-            rx.history_add(line);
         } else if (cmd == "history") {
-            //for (size_t i = 0, sz = rx.history_size(); i < sz; ++i) {
-            //    std::cout << std::setw(4) << i << ": " << rx.history_line(i) << "\n";
-            //}
             auto h = rx.history_scan();
             for (size_t i = 0; h.next(); ++i) {
                 std::cout << std::setw(4) << i << ": " << h.get().text() << "\n";
             }
-
+        }
+        if (!params.no_history) {
             rx.history_add(line);
         }
     }
-    rx.history_save(history_file);
-    cerr << "command history written to: " << history_file << endl;
+    if (!params.no_history) {
+        rx.history_save(history_file);
+        cerr << "command history written to: " << history_file << endl;
+    }
 #else
     string line;
 
@@ -404,6 +397,7 @@ bool parse_arguments(Parameters& _par, int argc, char* argv[])
             ("auth", value<std::string>(&_par.auth_token), "Authentication token")
             ("secure-prefix", value<std::string>(&_par.secure_prefix)->default_value("certs"), "Secure Path prefix")
             ("uninstall-cleanup", "Uninstall cleanup")
+            ("no-history", value<bool>(&_par.no_history)->implicit_value(true)->default_value(false), "Disable history log")
         ;
         // clang-format on
         variables_map vm;
