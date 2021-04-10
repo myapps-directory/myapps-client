@@ -43,7 +43,7 @@ createBuild()
     #sed "s/OLA_INSTALLER/$INSTALLER_NAME/g" updater.build.yml > tmp/updater.build1.yml
     #sed "s/OLA_INSTALLER_SUM/$INSTALLER_SUM/g" tmp/updater.build1.yml > tmp/updater.build.yml
 
-    echo -ne "create build $APPID $BUILDID tmp/updater.build.yml tmp/build tmp/updater.png\nq\n" | ola_client_cli
+    echo -ne "create build $APPID $BUILDID tmp/updater.build.yml tmp/build tmp/updater.png\nq\n" | ola_client_cli --no-history
 }
 
 createMedia()
@@ -61,7 +61,7 @@ createMedia()
         magick convert -resize 384x216 "$filename" "tmp/media/$(basename "$filename" .png)t.jpg"
     done
 
-    echo -ne "create media $APPID $MEDIAID tmp/media\nq\n" | ola_client_cli
+    echo -ne "create media $APPID $MEDIAID tmp/media\nq\n" | ola_client_cli --no-history
 }
 
 rm -rf tmp
