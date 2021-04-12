@@ -54,8 +54,8 @@ set(QT5PREFIX_DIR "" CACHE PATH "QT Prefix directory")
 
 message("project build type: ${CMAKE_BUILD_TYPE}")
 
-set(EXTRA_DEFINITIONS "${EXTRA_DEFINITIONS}" CACHE STRING "Extra compiler definitions")
 set(OLA_FRONT_URL "front.myapps.space:443" CACHE STRING "OLA Front Default URL")
+set(EXTRA_DEFINITIONS "${EXTRA_DEFINITIONS}" CACHE STRING "Extra compiler definitions")
 add_definitions(${EXTRA_DEFINITIONS})
 
 ###############################################################################

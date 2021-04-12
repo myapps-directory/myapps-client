@@ -65,7 +65,7 @@ struct Parameters {
     wstring        debug_log_file_;
     uint32_t       debug_flags_;
     wstring        mount_point_;
-    vector<string> debug_modules_ = {"ola::.*:IEW", "\\*:VIEWX"};
+    vector<string> debug_modules_;
     string         debug_addr_;
     string         debug_port_;
     bool           debug_console_;
@@ -418,40 +418,8 @@ static ULONG wcstol_deflt(wchar_t* w, ULONG deflt)
     ULONG    ul = wcstol(w, &endp, 0);
     return L'\0' != w[0] && L'\0' == *endp ? ul : deflt;
 }
-#if 0
-bool Parameters::parse(ULONG argc, PWSTR* argv)
-{
-    using namespace boost::program_options;
-
-    options_description desc("ola_client_service");
-    // clang-format off
-    desc.add_options()
-        ("help,h", "List program options")
-        ("debug-flags,F", value<uint32_t>(&debug_flags_), "Debug logging flags")
-        ("debug-log-file", wvalue<wstring>(&debug_log_file_), "Debug log file")
-        ("debug-modules,M", value<vector<string>>(&debug_modules_), "Debug logging modules")
-        ("debug-address,A", value<string>(&debug_addr_), "Debug server address (e.g. on linux use: nc -l 9999)")
-        ("debug-port,P", value<string>(&debug_port_)->default_value("9999"), "Debug server port (e.g. on linux use: nc -l 9999)")
-        ("debug-console,C", value<bool>(&debug_console_)->implicit_value(true)->default_value(false), "Debug console")
-        ("debug-buffered,S", value<bool>(&debug_buffered_)->implicit_value(true)->default_value(false), "Debug buffered")
-        ("mount-point,m", wvalue<wstring>(&mount_point_)->default_value(L"C:\\MyApps.space", "C:\\MyApps.space"), "Mount point")
-        ("unsecure", value<bool>(&secure_)->implicit_value(false)->default_value(true), "Don not use SSL to secure communication")
-        ("compress", value<bool>(&compress_)->implicit_value(true)->default_value(false), "Use Snappy to compress communication")
-        ("secure-prefix", value<std::string>(&secure_prefix_)->default_value("certs"), "Secure Path prefix")
-        ("path-prefix", value<std::string>(&path_prefix_)->default_value(env_config_path_prefix()), "Path prefix")
-    ;
-    // clang-format on
-    variables_map vm;
-    store(parse_command_line(argc, argv, desc), vm);
-    notify(vm);
-    if (vm.count("help")) {
-        cout << desc << "\n";
-        return true;
-    }
-    return false;
-}
-#else
-
+//-----------------------------------------------------------------------------
+// Parameters
 //-----------------------------------------------------------------------------
 string Parameters::configPath(const std::string &_path_prefix)const {
     return _path_prefix + "\\config\\" + string(service_name) + ".config";
@@ -481,7 +449,7 @@ bool Parameters::parse(ULONG argc, PWSTR* argv)
     try {
         string              config_file_path;
         bool                generate_config_file;
-        options_description generic(string("ola_client_service") + " generic options");
+        options_description generic(string(service_name) + " generic options");
         // clang-format off
         generic.add_options()
             ("version,v", "Version string")
@@ -490,11 +458,9 @@ bool Parameters::parse(ULONG argc, PWSTR* argv)
             ("generate-config", value<bool>(&generate_config_file)->implicit_value(true)->default_value(false), "Write configuration file and exit")
             ;
         // clang-format on
-        options_description config(string("ola_client_service") + " configuration options");
+        options_description config(string(service_name) + " configuration options");
         // clang-format off
         config.add_options()
-            //("debug-flags,F", value<uint32_t>(&debug_flags_)->default_value(0), "Debug logging flags")
-            //("debug-log-file", wvalue<wstring>(&debug_log_file_)->default_value(L""), "Debug log file")
             ("debug-modules,M", value<std::vector<std::string>>(&this->debug_modules_)->default_value(std::vector<std::string>{"ola::.*:VIEW", ".*:EWX"}), "Debug logging modules")
             ("debug-address,A", value<string>(&debug_addr_)->default_value(""), "Debug server address (e.g. on linux use: nc -l 9999)")
             ("debug-port,P", value<string>(&debug_port_)->default_value("9999"), "Debug server port (e.g. on linux use: nc -l 9999)")
@@ -577,7 +543,7 @@ bool Parameters::parse(ULONG argc, PWSTR* argv)
     }
     return true;
 }
-
+//-----------------------------------------------------------------------------
 void write_value(std::ostream& _ros, const string& _name, const boost::any& _rav)
 {
     if (_rav.type() == typeid(bool)) {
@@ -604,7 +570,7 @@ void write_value(std::ostream& _ros, const string& _name, const boost::any& _rav
         _ros << _name << '=' << "<UNKNOWN-TYPE>" << endl;
     }
 }
-
+//-----------------------------------------------------------------------------
 void Parameters::writeConfigurationFile(string _path, const boost::program_options::options_description& _od, const boost::program_options::variables_map& _vm)const
 {
     if (boost::filesystem::exists(_path)) {
@@ -635,10 +601,9 @@ void Parameters::writeConfigurationFile(string _path, const boost::program_optio
     ofs.close();
     cout<<service_name<<" configuration file writen: "<<_path<<endl;
 }
-
-#endif
-
-
+//-----------------------------------------------------------------------------
+// FileSystemService
+//-----------------------------------------------------------------------------
 FileSystemService::FileSystemService() : Service(L"" PROGNAME), fs_(engine_), host_(fs_)
 {
 }
