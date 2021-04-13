@@ -418,7 +418,7 @@ boost::program_options::variables_map Parameters::bootstrapCommandLine(int argc,
     desc.add_options()
         ("version,v", "Version string")
         ("help,h", "Help Message")
-        ("config,c", value<string>()->default_value(""), "Configuration File Path")
+        ("config,c", value<string>(), "Configuration File Path")
         ("generate-config", value<bool>()->implicit_value(true)->default_value(false), "Write configuration file and exit")
         ;
     // clang-format off
@@ -439,7 +439,7 @@ void Parameters::parse(int argc, char* argv[])
         generic.add_options()
             ("version,v", "Version string")
             ("help,h", "Help Message")
-            ("config,c", value<string>(&config_file_path)->default_value(""), "Configuration File Path")
+            ("config,c", value<string>(&config_file_path), "Configuration File Path")
             ("uninstall-cleanup", "Uninstall cleanup")
             ("auth", value<std::string>(&auth_token), "Authentication token")
             ("generate-config", value<bool>(&generate_config_file)->implicit_value(true)->default_value(false), "Write configuration file and exit")
