@@ -176,7 +176,6 @@ struct FetchStub {
         NotUsedE,
         PendingE,
         FetchedE,
-        WaitE,
     };
 
     uint64_t                              offset_ = 0;
@@ -220,7 +219,7 @@ struct FileData : file_cache::FileData {
         return b;
     }
 
-    bool readFromResponses(ReadData& _rdata, bool _is_front);
+    bool readFromResponses(ReadData& _rdata);
 
     bool enqueue(ReadData& _rdata)
     {
@@ -241,17 +240,17 @@ struct FileData : file_cache::FileData {
         if (_rdata.pprev_ != nullptr) {
             _rdata.pprev_->pnext_ = _rdata.pnext_;
         } else {
-            pfront_ = _rdata.pnext_;
+            pback_ = _rdata.pnext_;
         }
         if (_rdata.pnext_ != nullptr) {
             _rdata.pnext_->pprev_ = _rdata.pprev_;
         } else {
-            pback_ = _rdata.pprev_;
+            pfront_ = _rdata.pprev_;
         }
     }
     size_t findAvailableFetchIndex() const;
     size_t isReadHandledByPendingFetch(const ReadData& _rread_data) const;
-    bool   readFromResponse(const size_t _idx, ReadData& _rdata, bool _is_front);
+    bool   readFromResponse(const size_t _idx, ReadData& _rdata);
     void   updateContiguousRead(uint64_t _offset, uint64_t _size);
 };
 
@@ -1459,16 +1458,16 @@ bool Engine::Implementation::list(
     return false;
 }
 
-bool FileData::readFromResponses(ReadData& _rdata, const bool _is_front)
+bool FileData::readFromResponses(ReadData& _rdata)
 {
     if (fetch_stubs_[0].offset_ < fetch_stubs_[1].offset_) {
-        if (readFromResponse(0, _rdata, _is_front))
+        if (readFromResponse(0, _rdata))
             return true;
-        return readFromResponse(1, _rdata, _is_front);
+        return readFromResponse(1, _rdata);
     } else {
-        if (readFromResponse(1, _rdata, _is_front))
+        if (readFromResponse(1, _rdata))
             return true;
-        return readFromResponse(0, _rdata, _is_front);
+        return readFromResponse(0, _rdata);
     }
 }
 
@@ -1519,7 +1518,7 @@ bool Engine::Implementation::readFromFile(
         return true;
     }
 
-    if (rfile_data.readFromResponses(read_data, false)) {
+    if (rfile_data.readFromResponses(read_data)) {
         _rbytes_transfered = read_data.bytes_transfered_;
         solid_log(logger, Verbose, "READ: " << _rentry_ptr.get() << " read from responses " << _rbytes_transfered);
         return true;
@@ -1644,10 +1643,10 @@ void copy_stream(ReadData& _rread_data, const uint64_t _offset, istream& _ris, u
     _rread_data.size_ -= sz;
 }
 
-bool FileData::readFromResponse(const size_t _idx, ReadData& _rdata, bool _is_front)
+bool FileData::readFromResponse(const size_t _idx, ReadData& _rdata)
 {
     FetchStub& rfetch_stub = fetch_stubs_[_idx];
-    if (rfetch_stub.status_ != FetchStub::FetchedE && rfetch_stub.status_ != FetchStub::WaitE) {
+    if (rfetch_stub.status_ != FetchStub::FetchedE) {
         return false;
     }
 
@@ -1659,9 +1658,6 @@ bool FileData::readFromResponse(const size_t _idx, ReadData& _rdata, bool _is_fr
 
         copy_stream(_rdata, rfetch_stub.offset_, rfetch_stub.response_ptr_->ioss_, tocopy);
 
-        if (_is_front && rfetch_stub.status_ == FetchStub::WaitE) {
-            rfetch_stub.status_ = FetchStub::FetchedE;
-        }
         return _rdata.size_ == 0;
     }
     return false;
@@ -1721,23 +1717,12 @@ void Engine::Implementation::asyncFetch(EntryPointerT& _rentry_ptr, const size_t
 
         rfetch_stub.status_       = FetchStub::FetchedE;
         rfetch_stub.response_ptr_ = std::move(_rrecv_msg_ptr);
+        rfetch_stub.size_         = rfetch_stub.response_ptr_->size_ >= 0 ? rfetch_stub.response_ptr_->size_ : -rfetch_stub.response_ptr_->size_;
 
         rfile_data.writeToCache(_rsent_msg_ptr->offset_, rfetch_stub.response_ptr_->ioss_);
 
-        rfetch_stub.size_ = rfetch_stub.response_ptr_->size_ >= 0 ? rfetch_stub.response_ptr_->size_ : -rfetch_stub.response_ptr_->size_;
-
         for (auto* prd = rfile_data.pfront_; prd != nullptr;) {
-            if (prd->offset_ >= rfetch_stub.offset_ && prd->offset_ < (rfetch_stub.offset_ + rfetch_stub.size_)) {
-                uint64_t tocopy = (rfetch_stub.offset_ + rfetch_stub.size_) - prd->offset_;
-                if (tocopy > prd->size_) {
-                    tocopy = prd->size_;
-                }
-
-                copy_stream(*prd, rfetch_stub.offset_, rfetch_stub.response_ptr_->ioss_, tocopy);
-            } else if (prd == rfile_data.pfront_ && prd->offset_ >= rfetch_stub.offset_ && rfetch_stub.offset_ < (prd->offset_ + prd->size_)) {
-                //TODO: maybe more checks are needed
-                rfetch_stub.status_ = FetchStub::WaitE;
-            }
+            rfile_data.readFromResponses(*prd);
 
             if (prd->size_ == 0) {
                 auto tmp = prd;
@@ -1746,7 +1731,6 @@ void Engine::Implementation::asyncFetch(EntryPointerT& _rentry_ptr, const size_t
                 tmp->done_ = true;
                 entry_ptr->conditionVariable().notify_all();
             } else {
-                rfile_data.readFromResponses(*prd, prd == rfile_data.pfront_);
                 prd = prd->pprev_;
             }
         }
@@ -2250,7 +2234,7 @@ void Engine::Implementation::insertApplicationEntry(
         root_entry_ptr_->rootData().insertApplication(entry_ptr.get());
         root_entry_ptr_->directoryData().insertEntry(EntryPointerT(entry_ptr)); //insert copy
     }
-
+    
     const auto& app_folder_name = entry_ptr->name_;
 
     if (!is_invisible && !_rrecv_msg_ptr->configuration_.shortcut_vec_.empty()) {
@@ -2279,7 +2263,7 @@ void Engine::Implementation::insertApplicationEntry(
                 to_system_path(config_.mount_prefix_ + '/' + app_folder_name + '/' + sh.command_),
                 sh.arguments_,
                 to_system_path(config_.mount_prefix_ + '/' + app_folder_name + '/' + sh.run_folder_),
-                to_system_path(config_.mount_prefix_ + '/' + app_folder_name + '/' + sh.icon_),
+                sh.icon_.empty() ? sh.icon_ : to_system_path(config_.mount_prefix_ + '/' + app_folder_name + '/' + sh.icon_),
                 _rrecv_msg_ptr->configuration_.property_vec_.front().second);
             {
                 lock_guard<mutex> lock{rm};

@@ -397,6 +397,7 @@ boost::program_options::variables_map Parameters::bootstrapCommandLine(ULONG arg
     return vm;
 }
 
+
 bool Parameters::parse(ULONG argc, PWSTR* argv)
 {
     using namespace boost::program_options;

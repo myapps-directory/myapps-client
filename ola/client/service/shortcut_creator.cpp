@@ -73,7 +73,9 @@ size_t ShortcutCreator::create(
         psl->SetArguments(_arguments.c_str());
         psl->SetDescription(_description.c_str());
         psl->SetWorkingDirectory(_run_folder.c_str());
-        psl->SetIconLocation(_icon.c_str(), 0);
+        if (!_icon.empty()) {
+            psl->SetIconLocation(_icon.c_str(), 0);
+        }
 
         // Query IShellLink for the IPersistFile interface, used for saving the
         // shortcut in persistent storage.
