@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+if [[ $# -ne 5 ]] ; then
+    echo 'Usage: ola_upload A|m|b FROM COUNT BUILDID MEDIAID'
+    echo 'Example: ./ola_upload A 0 10 b01 m01'
+    exit 0
+fi
 
 #FRONT=$1
 OPTION=$1
@@ -32,7 +37,7 @@ createBuild()
     echo "$INDEX" > tmp/build/id.txt
     sed "s/APPID/$BUILD/g" example_basic.build.yml > tmp/example_basic.build_.yml
     sed "s/MEDIAID/$MEDIAID/g" tmp/example_basic.build_.yml > tmp/example_basic.build.yml
-    echo -ne "create build $APPID "$BUILDID" tmp/example_basic.build.yml tmp/build tmp/main.png\nq\n" | ./ola_client_cli
+    echo -ne "create build $APPID "$BUILDID" tmp/example_basic.build.yml tmp/build tmp/main.png\nq\n" | ./ola_client_cli --no-history
 }
 
 createMedia()
@@ -50,7 +55,7 @@ createMedia()
     magick example_basic_thumb.png  -fill blue  -undercolor '#00000080'  -pointsize 80 -gravity Center -annotate +0+5 " ${INDEX}-${MEDIAID} "  tmp/media/blue_thumb.jpg
     magick example_basic.png  -fill blue  -undercolor '#00000080' -pointsize 80 -gravity Center -annotate +0+5 " ${INDEX}-${MEDIAID} "  tmp/media/blue_image.jpg
 
-    echo -ne "create media $APPID "$MEDIAID" tmp/media\nq\n" | ./ola_client_cli
+    echo -ne "create media $APPID "$MEDIAID" tmp/media\nq\n" | ./ola_client_cli --no-history
 }
 
 for (( num=${START}; num<${LAST}; num++ )); do
@@ -61,7 +66,7 @@ for (( num=${START}; num<${LAST}; num++ )); do
     mkdir tmp/build
     mkdir tmp/media
     
-    APPID=$(ALFA=`echo -ne "create app test${num}\nq\n" | ./ola_client_cli | grep message`; echo -ne "${ALFA##* }"); echo "APPID=$APPID"
+    APPID=$(ALFA=`echo -ne "create app test${num}\nq\n" | ./ola_client_cli --no-history | grep message`; echo -ne "${ALFA##* }"); echo "APPID=$APPID"
 
     if [ $OPTION == "m" ] || [ $OPTION == "A" ] ; then
         createMedia "${var}" $APPID $MEDIAID

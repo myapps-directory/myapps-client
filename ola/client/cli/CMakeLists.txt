@@ -12,9 +12,9 @@ target_link_libraries (ola_client_cli
     SolidFrame::solid_frame_mprpc
     SolidFrame::solid_frame_aio_openssl
     SolidFrame::solid_serialization_v3
-    ${Boost_PROGRAM_OPTIONS_LIBRARY}
-    ${Boost_SYSTEM_LIBRARY}
-    ${Boost_FILESYSTEM_LIBRARY}
+    Boost::program_options
+    Boost::system
+    Boost::filesystem
     ${SNAPPY_LIB}
     ${SYSTEM_BASIC_LIBRARIES}
     ${SYSTEM_DYNAMIC_LOAD_LIBRARY}
@@ -33,7 +33,7 @@ install(TARGETS ola_client_cli RUNTIME DESTINATION bin)
 install(DIRECTORY $<TARGET_FILE_DIR:ola_client_cli>/certs DESTINATION "bin")
 
 add_custom_command(TARGET ola_client_cli POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/certs  $<TARGET_FILE_DIR:ola_client_cli>/certs
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${OPENSSL_SSL_DLL} $<TARGET_FILE_DIR:ola_client_auth>
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${OPENSSL_CRYPTO_DLL} $<TARGET_FILE_DIR:ola_client_auth>
+    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/ola/client/utility/certs  $<TARGET_FILE_DIR:ola_client_cli>/certs
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${OPENSSL_SSL_DLL} $<TARGET_FILE_DIR:ola_client_cli>
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${OPENSSL_CRYPTO_DLL} $<TARGET_FILE_DIR:ola_client_cli>
 )

@@ -113,8 +113,8 @@ struct FileData {
 struct Configuration {
     fs::path base_path_;
 
-    uint64_t max_size_      = 1024 * 1024 * 1024;
-    uint64_t max_file_size_ = 100 * 1024 * 1024;
+    uint64_t max_size_      = 5 * 1024 * 1024 * 1024;
+    uint64_t max_file_size_ = 200 * 1024 * 1024;
     size_t   max_count_     = 10 * 1024;
 };
 

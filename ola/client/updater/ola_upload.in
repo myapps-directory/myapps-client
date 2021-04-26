@@ -1,9 +1,16 @@
 #!/usr/bin/env bash
 
+if [[ $# -ne 3 ]] ; then
+    echo 'Usage: ola_upload b APPID BUILDID'
+    echo 'Example: ./ola_upload b 8W9Hu1MnHPoifnCw7lUWWVpLEhDunsUi9cAXl1h6fec= b01'
+    exit 0
+fi
+
 OPTION=$1
 APPID=$2
 BUILDID=$3
-MEDIAID=$4
+#MEDIAID=$4
+MEDIAID=""
 
 INSTALLER_PATH="@OLA_INSTALLER_PATH@"
 INSTALLER_NAME="@OLA_INSTALLER_NAME@"
@@ -36,7 +43,7 @@ createBuild()
     #sed "s/OLA_INSTALLER/$INSTALLER_NAME/g" updater.build.yml > tmp/updater.build1.yml
     #sed "s/OLA_INSTALLER_SUM/$INSTALLER_SUM/g" tmp/updater.build1.yml > tmp/updater.build.yml
 
-    echo -ne "create build $APPID $BUILDID tmp/updater.build.yml tmp/build tmp/updater.png\nq\n" | ola_client_cli
+    echo -ne "create build $APPID $BUILDID tmp/updater.build.yml tmp/build tmp/updater.png\nq\n" | ola_client_cli --no-history
 }
 
 createMedia()
@@ -54,7 +61,7 @@ createMedia()
         magick convert -resize 384x216 "$filename" "tmp/media/$(basename "$filename" .png)t.jpg"
     done
 
-    echo -ne "create media $APPID $MEDIAID tmp/media\nq\n" | ola_client_cli
+    echo -ne "create media $APPID $MEDIAID tmp/media\nq\n" | ola_client_cli --no-history
 }
 
 rm -rf tmp

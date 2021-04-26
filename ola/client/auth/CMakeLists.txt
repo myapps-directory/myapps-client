@@ -97,8 +97,8 @@ if(${Qt5Widgets_FOUND})
         SolidFrame::solid_frame_mprpc
         SolidFrame::solid_frame_aio_openssl
         SolidFrame::solid_serialization_v3
-        ${Boost_PROGRAM_OPTIONS_LIBRARY}
-        ${Boost_SYSTEM_LIBRARY}
+        Boost::program_options
+        Boost::system
         Qt5::Widgets
         ${SNAPPY_LIB}
         ${SYS_BASIC_LIBS}
@@ -124,7 +124,7 @@ if(${Qt5Widgets_FOUND})
     endif()
 
     add_custom_command(TARGET ola_client_auth POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/certs  $<TARGET_FILE_DIR:ola_client_auth>/certs
+        COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/ola/client/utility/certs  $<TARGET_FILE_DIR:ola_client_auth>/certs
         COMMAND ${CMAKE_COMMAND} -E copy_if_different ${OPENSSL_SSL_DLL} $<TARGET_FILE_DIR:ola_client_auth>
         COMMAND ${CMAKE_COMMAND} -E copy_if_different ${OPENSSL_CRYPTO_DLL} $<TARGET_FILE_DIR:ola_client_auth>
     )

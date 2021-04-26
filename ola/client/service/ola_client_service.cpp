@@ -11,6 +11,7 @@
 #include "solid/system/log.hpp"
 
 #include "ola/common/utility/encode.hpp"
+#include "ola/common/utility/version.hpp"
 
 #include "boost/filesystem.hpp"
 #include "boost/program_options.hpp"
@@ -56,13 +57,15 @@ namespace fs = boost::filesystem;
 
 namespace {
 
+constexpr string_view service_name("ola_client_service");
+
 const solid::LoggerT logger("ola::client::service");
 
 struct Parameters {
     wstring        debug_log_file_;
     uint32_t       debug_flags_;
     wstring        mount_point_;
-    vector<string> debug_modules_ = {"ola::.*:IEW", "\\*:VIEWX"};
+    vector<string> debug_modules_;
     string         debug_addr_;
     string         debug_port_;
     bool           debug_console_;
@@ -72,7 +75,11 @@ struct Parameters {
     string         secure_prefix_;
     string         path_prefix_;
 
+    string configPath(const string &_path_prefix)const;
+
     bool parse(ULONG argc, PWSTR* argv);
+    boost::program_options::variables_map bootstrapCommandLine(ULONG argc, PWSTR* argv);
+    void writeConfigurationFile(string _path, const boost::program_options::options_description& _od, const boost::program_options::variables_map& _vm)const;
 };
 
 class FileSystem final : public FileSystemBase {
@@ -306,6 +313,16 @@ int wmain(int argc, wchar_t** argv)
     return rv;
 }
 
+namespace std {
+    std::ostream& operator<<(std::ostream& os, const std::vector<string>& vec)
+    {
+        for (auto item : vec) {
+            os << item << ",";
+        }
+        return os;
+    }
+} // namespace std
+
 namespace {
 //TODO: find a better name
 string env_config_path_prefix()
@@ -401,40 +418,192 @@ static ULONG wcstol_deflt(wchar_t* w, ULONG deflt)
     ULONG    ul = wcstol(w, &endp, 0);
     return L'\0' != w[0] && L'\0' == *endp ? ul : deflt;
 }
+//-----------------------------------------------------------------------------
+// Parameters
+//-----------------------------------------------------------------------------
+string Parameters::configPath(const std::string &_path_prefix)const {
+    return _path_prefix + "\\config\\" + string(service_name) + ".config";
+}
+//-----------------------------------------------------------------------------
+boost::program_options::variables_map Parameters::bootstrapCommandLine(ULONG argc, PWSTR* argv)
+{
+    using namespace boost::program_options;
+    boost::program_options::options_description desc{"Bootstrap Options"};
+    // clang-format off
+    desc.add_options()
+        ("version,v", "Version string")
+        ("help,h", "Help Message")
+        ("config,c", value<string>(), "Configuration File Path")
+        ("generate-config", value<bool>()->implicit_value(true)->default_value(false), "Write configuration file and exit")
+        ;
+    // clang-format off
+    variables_map vm;
+    store(basic_command_line_parser(argc, argv).options(desc).allow_unregistered().run(), vm);
+    notify(vm);
+    return vm;
+}
 
 bool Parameters::parse(ULONG argc, PWSTR* argv)
 {
     using namespace boost::program_options;
+    try {
+        string              config_file_path;
+        bool                generate_config_file;
+        options_description generic(string(service_name) + " generic options");
+        // clang-format off
+        generic.add_options()
+            ("version,v", "Version string")
+            ("help,h", "Help Message")
+            ("config,c", value<string>(&config_file_path), "Configuration File Path")
+            ("generate-config", value<bool>(&generate_config_file)->implicit_value(true)->default_value(false), "Write configuration file and exit")
+            ;
+        // clang-format on
+        options_description config(string(service_name) + " configuration options");
+        // clang-format off
+        config.add_options()
+            ("debug-modules,M", value<std::vector<std::string>>(&this->debug_modules_)->default_value(std::vector<std::string>{"ola::.*:VIEW", ".*:EWX"}), "Debug logging modules")
+            ("debug-address,A", value<string>(&debug_addr_)->default_value(""), "Debug server address (e.g. on linux use: nc -l 9999)")
+            ("debug-port,P", value<string>(&debug_port_)->default_value("9999"), "Debug server port (e.g. on linux use: nc -l 9999)")
+            ("debug-console,C", value<bool>(&debug_console_)->implicit_value(true)->default_value(false), "Debug console")
+            ("debug-buffered,S", value<bool>(&this->debug_buffered_)->implicit_value(true)->default_value(true), "Debug unbuffered")
+            ("mount-point,m", wvalue<wstring>(&mount_point_)->default_value(L"C:\\MyApps.space", "C:\\MyApps.space"), "Mount point")
+            ("secure,s", value<bool>(&secure_)->implicit_value(true)->default_value(true), "Use SSL to secure communication")
+            ("compress", value<bool>(&compress_)->implicit_value(true)->default_value(false), "Use Snappy to compress communication")
+            ("secure-prefix", value<std::string>(&secure_prefix_)->default_value("certs"), "Secure Path prefix")
+            ("path-prefix", value<std::string>(&path_prefix_)->default_value(env_config_path_prefix()), "Path prefix")
+            ;
+        // clang-format off
+            
+        options_description cmdline_options;
+        cmdline_options.add(generic).add(config);
 
-    options_description desc("ola_auth_service");
-    // clang-format off
-    desc.add_options()
-        ("help,h", "List program options")
-        ("debug-flags,F", value<uint32_t>(&debug_flags_), "Debug logging flags")
-        ("debug-log-file", wvalue<wstring>(&debug_log_file_), "Debug log file")
-        ("debug-modules,M", value<vector<string>>(&debug_modules_), "Debug logging modules")
-        ("debug-address,A", value<string>(&debug_addr_), "Debug server address (e.g. on linux use: nc -l 9999)")
-        ("debug-port,P", value<string>(&debug_port_)->default_value("9999"), "Debug server port (e.g. on linux use: nc -l 9999)")
-        ("debug-console,C", value<bool>(&debug_console_)->implicit_value(true)->default_value(false), "Debug console")
-        ("debug-buffered,S", value<bool>(&debug_buffered_)->implicit_value(true)->default_value(false), "Debug buffered")
-        ("mount-point,m", wvalue<wstring>(&mount_point_)->default_value(L"C:\\MyApps.space", "C:\\MyApps.space"), "Mount point")
-        ("unsecure", value<bool>(&secure_)->implicit_value(false)->default_value(true), "Don not use SSL to secure communication")
-        ("compress", value<bool>(&compress_)->implicit_value(true)->default_value(false), "Use Snappy to compress communication")
-        ("secure-prefix", value<std::string>(&secure_prefix_)->default_value("certs"), "Secure Path prefix")
-        ("path-prefix", value<std::string>(&path_prefix_)->default_value(env_config_path_prefix()), "Path prefix")
-    ;
-    // clang-format off
-    variables_map vm;
-    store(parse_command_line(argc, argv, desc), vm);
-    notify(vm);
-    if (vm.count("help")) {
-        cout << desc << "\n";
-        return true;
+        options_description config_file_options;
+        config_file_options.add(config);
+
+        options_description visible("Allowed options");
+        visible.add(generic).add(config);
+
+        variables_map vm;
+        store(basic_command_line_parser(argc, argv).options(cmdline_options).run(), vm);
+        
+        auto bootstrap = bootstrapCommandLine(argc, argv);
+        
+        if (bootstrap.count("help") != 0u) {
+            cout << visible << endl;
+            return false;
+        }
+
+        if (bootstrap.count("version") != 0u) {
+            cout << ola::utility::version_full() << endl;
+            cout << "SolidFrame: " << solid::version_full() << endl;
+            return false;
+        }
+        
+        string cfg_path;
+        
+        if(bootstrap.count("config")){
+            cfg_path = bootstrap["config"].as<std::string>();
+        }
+
+        if (cfg_path.empty()) {
+            string prefix;
+            if (bootstrap.count("path-prefix")) {
+                prefix = bootstrap["path-prefix"].as<std::string>();
+            }
+            else {
+                prefix = env_config_path_prefix();
+            }
+            cfg_path = configPath(prefix);
+        }
+        
+        generate_config_file = bootstrap["generate-config"].as<bool>();
+        
+        if (generate_config_file) {
+            writeConfigurationFile(cfg_path, config_file_options, vm);
+            return false;
+        }
+        
+        if (!cfg_path.empty()) {
+            ifstream ifs(cfg_path);
+            if (!ifs) {
+                cout << "cannot open config file: " << cfg_path << endl;
+                if (bootstrap.count("config")) {
+                    //exit only if the config path was explicitly given
+                    return false;
+                }
+            } else {
+                store(parse_config_file(ifs, config_file_options), vm);
+            }
+        }
+        
+        notify(vm);
+    } catch (exception& e) {
+        cout << e.what() << "\n";
+        return false;
     }
-    return false;
-
+    return true;
 }
+//-----------------------------------------------------------------------------
+void write_value(std::ostream& _ros, const string& _name, const boost::any& _rav)
+{
+    if (_rav.type() == typeid(bool)) {
+        _ros << _name << '=' << boost::any_cast<bool>(_rav) << endl;
+    } else if (_rav.type() == typeid(uint16_t)) {
+        _ros << _name << '=' << boost::any_cast<uint16_t>(_rav) << endl;
+    } else if (_rav.type() == typeid(uint32_t)) {
+        _ros << _name << '=' << boost::any_cast<uint32_t>(_rav) << endl;
+    } else if (_rav.type() == typeid(uint64_t)) {
+        _ros << _name << '=' << boost::any_cast<uint64_t>(_rav) << endl;
+    } else if (_rav.type() == typeid(std::string)) {
+        _ros << _name << '=' << boost::any_cast<std::string>(_rav) << endl;
+    } else if (_rav.type() == typeid(std::wstring)) {
+        _ros << _name << '=' << ola::client::utility::narrow(boost::any_cast<std::wstring>(_rav)) << endl;
+    } else if (_rav.type() == typeid(std::vector<std::string>)) {
+        const auto& v = boost::any_cast<const std::vector<std::string>&>(_rav);
+        for (const auto& val : v) {
+            _ros << _name << '=' << val << endl;
+        }
+        if (v.empty()) {
+            _ros << '#' << _name << '=' << endl;
+        }
+    } else {
+        _ros << _name << '=' << "<UNKNOWN-TYPE>" << endl;
+    }
+}
+//-----------------------------------------------------------------------------
+void Parameters::writeConfigurationFile(string _path, const boost::program_options::options_description& _od, const boost::program_options::variables_map& _vm)const
+{
+    if (boost::filesystem::exists(_path)) {
+        
+        cout << "File \"" << _path << "\" already exists - renamed to: " << _path << ".old" << endl;
+        
+        boost::filesystem::rename(_path, _path + ".old");
+    }
 
+    ofstream ofs(_path);
+
+    if (!ofs) {
+        cout << "Could not open file \"" << _path << "\" for writing" << endl;
+        return;
+    }
+    if (!_od.options().empty()) {
+        ofs << '#' << " "<<service_name<<" configuration file" << endl;
+        ofs << endl;
+
+        for (auto& opt : _od.options()) {
+            ofs << '#' << ' ' << opt->description() << endl;
+            const auto& val = _vm[opt->long_name()];
+            write_value(ofs, opt->long_name(), val.value());
+            ofs << endl;
+        }
+    }
+    ofs.flush();
+    ofs.close();
+    cout<<service_name<<" configuration file writen: "<<_path<<endl;
+}
+//-----------------------------------------------------------------------------
+// FileSystemService
+//-----------------------------------------------------------------------------
 FileSystemService::FileSystemService() : Service(L"" PROGNAME), fs_(engine_), host_(fs_)
 {
 }
@@ -678,7 +847,7 @@ NTSTATUS FileSystemService::OnStart(ULONG argc, PWSTR *argv)
 {
     SetEnvironmentVariable(L"QT_QPA_PLATFORM_PLUGIN_PATH", L".\\platforms");
     try {
-        if(params_.parse(argc, argv)){
+        if(!params_.parse(argc, argv)){
             return STATUS_UNSUCCESSFUL;
         }
     } catch (exception& e) {
@@ -835,7 +1004,7 @@ NTSTATUS FileSystemService::OnStart(ULONG argc, PWSTR *argv)
 	host_.SetFlushAndPurgeOnCleanup(TRUE);
 
 	Result = host_.Mount(const_cast<PWSTR>(params_.mount_point_.c_str()), 0, FALSE, DebugFlags);
-	if (!NT_SUCCESS(Result)) {
+    if (!NT_SUCCESS(Result)) {
 		log_fail(L"cannot mount file system");
 		return Result;
 	}

@@ -1,7 +1,8 @@
 cmake_minimum_required(VERSION 3.15 FATAL_ERROR)
 cmake_policy(SET CMP0091 NEW)
+cmake_policy(SET CMP0115 NEW)
 
-project(OlaClient VERSION 0.5)
+project(OlaClient VERSION 0.6)
 
 set(EXTERNAL_DIR "" CACHE PATH "External dependencies folder")
 
@@ -53,8 +54,8 @@ set(QT5PREFIX_DIR "" CACHE PATH "QT Prefix directory")
 
 message("project build type: ${CMAKE_BUILD_TYPE}")
 
-set(EXTRA_DEFINITIONS "${EXTRA_DEFINITIONS}" CACHE STRING "Extra compiler definitions")
 set(OLA_FRONT_URL "front.myapps.space:443" CACHE STRING "OLA Front Default URL")
+set(EXTRA_DEFINITIONS "${EXTRA_DEFINITIONS}" CACHE STRING "Extra compiler definitions")
 add_definitions(${EXTRA_DEFINITIONS})
 
 ###############################################################################
@@ -224,8 +225,8 @@ set(CPACK_WIX_EXTRA_SOURCES             "${CMAKE_BINARY_DIR}/cpack/wix/custom_ac
 
 if(WIN32)
     set(WIX_BUNDLE_ICON "${CMAKE_SOURCE_DIR}/ola/client/auth/auth.ico")
-    set(WIX_BUNDLE_WINFSP_MSI src/winfsp-1.8.20304.msi)
-    set(WIX_BUNDLE_WINFSP_URL https://github.com/billziss-gh/winfsp/releases/download/v1.8/winfsp-1.8.20304.msi)
+    set(WIX_BUNDLE_WINFSP_MSI src/winfsp-1.9.21096.msi)
+    set(WIX_BUNDLE_WINFSP_URL https://github.com/billziss-gh/winfsp/releases/download/v1.9/winfsp-1.9.21096.msi)
 
     ExternalProject_Add(
         WinFSP_Download
