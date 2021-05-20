@@ -16,6 +16,7 @@
 #include "ola/common/ola_front_protocol_main.hpp"
 
 #include "ola/common/utility/version.hpp"
+#include "ola/common/utility/archive.hpp"
 
 #include "ola/client/utility/auth_file.hpp"
 
@@ -29,7 +30,6 @@
 
 #define REPLXX_STATIC
 #include "replxx.hxx"
-#include "zip.h"
 
 #include "yaml-cpp/yaml.h"
 
@@ -448,7 +448,7 @@ void Parameters::parse(int argc, char* argv[])
         options_description config(string(service_name) + " configuration options");
         // clang-format off
         config.add_options()
-            ("debug-modules,M", value<std::vector<std::string>>(&this->debug_modules)->default_value(std::vector<std::string>{"ola::.*:VIEW", ".*:EWX"}), "Debug logging modules")
+            ("debug-modules,M", value<std::vector<std::string>>(&this->debug_modules)->default_value(std::vector<std::string>{"ola::.*:EWX", ".*:EWX"}), "Debug logging modules")
             ("debug-address,A", value<string>(&debug_addr)->default_value(""), "Debug server address (e.g. on linux use: nc -l 9999)")
             ("debug-port,P", value<string>(&debug_port)->default_value("9999"), "Debug server port (e.g. on linux use: nc -l 9999)")
             ("debug-console,C", value<bool>(&debug_console)->implicit_value(true)->default_value(false), "Debug console")
@@ -1121,24 +1121,159 @@ uint64_t stream_copy(std::ostream &_ros, std::istream &_ris){
     return size;
 }
 
-bool fetch_remote_file(Engine &_reng, promise<uint32_t> &_rprom, ofstream &_rofs, std::shared_ptr<main::FetchStoreRequest>&  _rreq_msg_ptr, uint64_t &_rfile_size){
+
+uint64_t stream_copy(string& _str, std::istream& _ris) {
+    constexpr size_t buffer_size = 1024 * 32;
+    char buffer[buffer_size];
+    uint64_t size = 0;
+
+    do {
+        _ris.read(buffer, buffer_size);
+        auto read_count = _ris.gcount();
+        if (read_count) {
+            _str.append(buffer, read_count);
+            size += read_count;
+        }
+    } while (!_ris.eof());
+    return size;
+}
+
+struct StoreFetchStub {
+    ofstream ofs_;
+    uint64_t size_ = 0;
+    uint64_t decompressed_size_ = 0;
+    string   compressed_chunk_;
+    uint32_t chunk_index_ = 0;
+    uint32_t chunk_offset_ = 0;
+    uint32_t compress_chunk_capacity_ = 0;
+    uint8_t  compress_algorithm_type_ = 0;
+    std::shared_ptr<main::FetchStoreRequest> request_ptr_;
+    std::shared_ptr<main::FetchStoreResponse>   response_ptr_[2];
+
+
+    bool isLastChunk(uint64_t chunk_index_)const{
+        return ((chunk_index_ + 1) * compress_chunk_capacity_) >= size_;
+    }
+
+    uint32_t copy(istream& _ris, const uint64_t _chunk_size, const bool _is_compressed) {
+        uint32_t size = 0;
+        if (_is_compressed) {
+            size = stream_copy(compressed_chunk_, _ris);
+            chunk_offset_ += size;
+            solid_check(chunk_offset_ <= _chunk_size);
+            if (chunk_offset_ == _chunk_size) {
+                string uncompressed_data;
+                uncompressed_data.reserve(compress_chunk_capacity_);
+                solid_check(snappy::Uncompress(compressed_chunk_.data(), compressed_chunk_.size(), &uncompressed_data));
+                ofs_.write(uncompressed_data.data(), uncompressed_data.size());
+                decompressed_size_ += uncompressed_data.size();
+                compressed_chunk_.clear();
+                chunk_offset_ = 0;
+                ++chunk_index_;
+            }
+        }
+        else {
+            size = stream_copy(ofs_, _ris);
+            chunk_offset_ += size;
+            solid_check(chunk_offset_ <= _chunk_size);
+            if (chunk_offset_ == _chunk_size) {
+                decompressed_size_ += size;
+                chunk_offset_ = 0;
+                ++chunk_index_;
+            }
+        }
+
+        return size;
+    }
+};
+
+void fetch_remote_file(
+    frame::mprpc::ConnectionContext* _pctx,
+    Engine& _reng,
+    promise<uint32_t>& _rprom,
+    StoreFetchStub& _rfetch_stub,
+    std::shared_ptr<main::FetchStoreRequest>& _rreq_msg_ptr,
+    const uint32_t _chunk_index = 0, const uint32_t _chunk_offset = 0);
+
+void handle_response(
+    frame::mprpc::ConnectionContext& _rctx,
+    Engine& _reng,
+    promise<uint32_t>& _rprom,
+    StoreFetchStub& _rfetch_stub,
+    std::shared_ptr<main::FetchStoreRequest>& _rsent_msg_ptr,
+    std::shared_ptr<main::FetchStoreResponse>& _rrecv_msg_ptr
+) {
+    const uint32_t received_size = _rfetch_stub.copy(_rrecv_msg_ptr->ioss_, _rrecv_msg_ptr->chunk_.size_, _rrecv_msg_ptr->chunk_.isCompressed());
+
+    solid_log(logger, Warning, "Received " << received_size << " offset " << _rfetch_stub.chunk_offset_ << " cid " << _rfetch_stub.chunk_index_ << " totalsz " << _rrecv_msg_ptr->chunk_.size_);
+
+    if (_rfetch_stub.response_ptr_[0]) {
+        auto res_ptr1 = std::move(_rfetch_stub.response_ptr_[0]);
+        auto res_ptr2 = std::move(_rfetch_stub.response_ptr_[1]);
+        handle_response(_rctx, _reng, _rprom, _rfetch_stub, _rsent_msg_ptr, res_ptr1);
+        if (res_ptr2) {
+            handle_response(_rctx, _reng, _rprom, _rfetch_stub, _rsent_msg_ptr, res_ptr2);
+        }
+        return;
+    }
+
+    if (_rrecv_msg_ptr->isResponsePart()) {
+        //_rchunk_offset += received_size;
+        //do we need to request more data for current chunk:
+        if ((_rrecv_msg_ptr->chunk_.size_ - _rfetch_stub.chunk_offset_) > received_size) {
+            fetch_remote_file(&_rctx, _reng, _rprom, _rfetch_stub, _rsent_msg_ptr, _rfetch_stub.chunk_index_, _rfetch_stub.chunk_offset_ + received_size);
+            return;
+        }
+    }
+    else if (
+        received_size == _rrecv_msg_ptr->chunk_.size_ ||
+        (_rfetch_stub.chunk_offset_ == 0 && _rfetch_stub.decompressed_size_ == _rfetch_stub.size_) ||
+        (_rfetch_stub.chunk_offset_ != 0 && (_rrecv_msg_ptr->chunk_.size_ - _rfetch_stub.chunk_offset_) < received_size)
+        ) {
+        _rfetch_stub.request_ptr_ = std::move(_rsent_msg_ptr);
+    }
+    else {
+        _rfetch_stub.request_ptr_ = std::move(_rsent_msg_ptr);
+        return;
+    }
+
+    //is there a next chunk
+    if (!_rfetch_stub.isLastChunk(_rfetch_stub.chunk_index_)) {
+        fetch_remote_file(&_rctx, _reng, _rprom, _rfetch_stub, _rsent_msg_ptr, _rfetch_stub.chunk_index_ + 1);
+    }
+    else if (_rrecv_msg_ptr->isResponseLast()) {
+        _rprom.set_value(0);
+    }
+}
+
+void fetch_remote_file(
+    frame::mprpc::ConnectionContext* _pctx,
+    Engine &_reng,
+    promise<uint32_t> &_rprom,
+    StoreFetchStub&_rfetch_stub,
+    std::shared_ptr<main::FetchStoreRequest>&  _rreq_msg_ptr,
+    const uint32_t _chunk_index, const uint32_t _chunk_offset){
     
-    auto lambda = [&_rprom, &_rofs, &_reng, &_rfile_size](
+    auto lambda = [&_rprom, &_rfetch_stub, &_reng, _chunk_index, _chunk_offset](
         frame::mprpc::ConnectionContext&        _rctx,
         std::shared_ptr<main::FetchStoreRequest>&  _rsent_msg_ptr,
         std::shared_ptr<main::FetchStoreResponse>& _rrecv_msg_ptr,
         ErrorConditionT const&                  _rerror
-    ){
+    )mutable{
         
         if(_rrecv_msg_ptr){
             if(_rrecv_msg_ptr->error_ == 0){
                 _rrecv_msg_ptr->ioss_.seekg(0);
-                _rfile_size += stream_copy(_rofs, _rrecv_msg_ptr->ioss_);
-                if(_rrecv_msg_ptr->size_ > 0){
-                    _rsent_msg_ptr->offset_ = _rfile_size;
-                    fetch_remote_file(_reng, _rprom, _rofs, _rsent_msg_ptr, _rfile_size);
-                }else{
-                    _rprom.set_value(0);
+
+                if (_rfetch_stub.chunk_index_ == _chunk_index && _rfetch_stub.chunk_offset_ >= _chunk_offset) {
+                    handle_response(_rctx, _reng, _rprom, _rfetch_stub, _rsent_msg_ptr, _rrecv_msg_ptr);
+                }
+                else if (!_rfetch_stub.response_ptr_[0]) {
+                    _rfetch_stub.response_ptr_[0] = _rrecv_msg_ptr;
+                }
+                else {
+                    solid_check(!_rfetch_stub.response_ptr_[1]);
+                    _rfetch_stub.response_ptr_[1] = _rrecv_msg_ptr;
                 }
             }else{
                 _rprom.set_value(_rrecv_msg_ptr->error_);
@@ -1147,12 +1282,29 @@ bool fetch_remote_file(Engine &_reng, promise<uint32_t> &_rprom, ofstream &_rofs
             _rprom.set_value(-1);
         }
     };
-    
-    auto err = _reng.rpcService().sendRequest(_reng.serverEndpoint().c_str(), _rreq_msg_ptr, lambda);
-    if(err){
-        _rprom.set_value(-1);
+
+    if (_pctx) {
+        std::shared_ptr<main::FetchStoreRequest> req_ptr;
+        if (_rfetch_stub.request_ptr_) {
+            req_ptr = std::move(_rfetch_stub.request_ptr_);
+        }
+        else {
+            req_ptr = make_shared<main::FetchStoreRequest>();
+            req_ptr->storage_id_ = _rreq_msg_ptr->storage_id_;
+            req_ptr->path_ = _rreq_msg_ptr->path_;
+        }
+        req_ptr->chunk_index_ = _chunk_index;
+        req_ptr->chunk_offset_ = _chunk_offset;
+        const auto err = _pctx->service().sendRequest(_pctx->recipientId(), req_ptr, lambda);
+        if (err) {
+            _rprom.set_value(-1);
+        }
+    }else{
+        const auto err = _reng.rpcService().sendRequest(_reng.serverEndpoint().c_str(), _rreq_msg_ptr, lambda);
+        if (err) {
+            _rprom.set_value(-1);
+        }
     }
-    return true;
 }
 
 void handle_fetch_store(istream& _ris, Engine &_reng){
@@ -1165,18 +1317,63 @@ void handle_fetch_store(istream& _ris, Engine &_reng){
     
     req_ptr->storage_id_ = utility::base64_decode(req_ptr->storage_id_);
     
-    ofstream ofs(local_path);
-    
-    if(ofs){
+    StoreFetchStub fetch_stub;
+
+    {
+        auto lst_req_ptr = make_shared<main::ListStoreRequest>();
+
+        lst_req_ptr->path_ = req_ptr->path_;
+        lst_req_ptr->storage_id_ = req_ptr->storage_id_;
+
+
         promise<uint32_t> prom;
-        uint64_t file_size = 0;
-        fetch_remote_file(_reng, prom, ofs, req_ptr, file_size);
-        
+
+        auto lambda = [&prom, &fetch_stub](
+            frame::mprpc::ConnectionContext& _rctx,
+            std::shared_ptr<main::ListStoreRequest>& _rsent_msg_ptr,
+            std::shared_ptr<main::ListStoreResponse>& _rrecv_msg_ptr,
+            ErrorConditionT const& _rerror
+            ) {
+                if (_rrecv_msg_ptr && _rrecv_msg_ptr->error_ == 0) {
+                    solid_check(_rrecv_msg_ptr->node_dq_.size() == 1 && _rrecv_msg_ptr->node_dq_.front().name_.empty());
+                    fetch_stub.size_ = _rrecv_msg_ptr->node_dq_.front().size_;
+                    fetch_stub.compress_chunk_capacity_ = _rrecv_msg_ptr->compress_chunk_capacity_;
+                    fetch_stub.compress_algorithm_type_ = _rrecv_msg_ptr->compress_algorithm_type_;
+
+                    prom.set_value(0);
+                }
+                else if (!_rrecv_msg_ptr) {
+                    prom.set_value(-1);
+                }
+                else {
+                    prom.set_value(_rrecv_msg_ptr->error_);
+                }
+        };
+        _reng.rpcService().sendRequest(_reng.serverEndpoint().c_str(), lst_req_ptr, lambda);
+
         auto fut = prom.get_future();
         solid_check(fut.wait_for(chrono::seconds(100)) == future_status::ready, "Taking too long - waited 100 secs");
         auto err = fut.get();
+        if (err) {
+            cout << "list store failed for " << req_ptr->path_ << " error = " << err << endl;
+            return;
+        }
+
+    }
+
+    fetch_stub.ofs_.open(local_path, ofstream::binary);
+    
+    if(fetch_stub.ofs_){
+        
+        promise<uint32_t> prom;
+        fetch_remote_file(nullptr, _reng, prom, fetch_stub, req_ptr);
+        
+        auto fut = prom.get_future();
+        solid_check(fut.wait_for(chrono::seconds(100000)) == future_status::ready, "Taking too long - waited 100 secs");
+        auto err = fut.get();
         if(err == 0){
-            cout<<"File transferred: "<<file_size<<endl;
+            solid_check(fetch_stub.size_ == fetch_stub.decompressed_size_, "Decompressed size "<< fetch_stub.decompressed_size_<<" doesn't match known file size "<<fetch_stub.size_)
+            cout<<"File transferred: "<< fetch_stub.decompressed_size_<<endl;
         }else{
             cout<<"File transfer failed: "<<err<<endl; 
         }
@@ -1311,8 +1508,6 @@ void handle_create_app ( istream& _ris, Engine &_reng){
 bool load_build_config(ola::utility::Build &_rbuild_cfg, const string &_path);
 bool store_build_config(const ola::utility::Build &_rbuild_cfg, const string &_path);
 
-bool zip_create(const string &_zip_path, string _root, uint64_t &_rsize);
-
 void on_upload_receive_last_response(
     frame::mprpc::ConnectionContext& _rctx,
     std::shared_ptr<main::UploadRequest>&        _rsent_msg_ptr,
@@ -1422,7 +1617,7 @@ void handle_create_build(istream& _ris, Engine &_reng){
     string zip_path = system_path(get_temp_env() + "/ola_client_cli_" + generate_temp_name() + ".zip");
 
     
-    if(!zip_create(zip_path, path(build_path), req_ptr->size_)){
+    if(!ola::utility::archive_create(zip_path, path(build_path), req_ptr->size_)){
         return;
     }
     
@@ -1520,7 +1715,7 @@ void handle_create_media(istream& _ris, Engine &_reng){
     string zip_path = system_path(get_temp_env() + "/ola_client_cli_" + generate_temp_name() + ".zip");
 
     
-    if(!zip_create(zip_path, path(media_path), req_ptr->size_)){
+    if(!ola::utility::archive_create(zip_path, path(media_path), req_ptr->size_)){
         return;
     }
     
@@ -2418,138 +2613,6 @@ string generate_temp_name(){
     ostringstream oss;
     oss << salt;
     return oss.str();
-}
-
-//-----------------------------------------------------------------------------
-
-bool zip_add_file(zip_t *_pzip, const boost::filesystem::path &_path, size_t _base_path_len, uint64_t &_rsize){
-	string path = _path.generic_string();
-    zip_source_t *psrc = zip_source_file(_pzip, path.c_str(), 0, 0);
-    if(psrc != nullptr){
-        _rsize += file_size(_path);
-        zip_int64_t err = zip_file_add(_pzip, (path.c_str() + _base_path_len), psrc, ZIP_FL_ENC_UTF_8);
-        cout<<"zip_add_file: "<<(path.c_str() + _base_path_len)<<" rv = "<<err<<endl;
-        if(err < 0){
-            zip_source_free(psrc);
-        }
-    }
-    return true;
-}
-
-//-----------------------------------------------------------------------------
-
-bool zip_add_dir(zip_t *_pzip, const boost::filesystem::path &_path, size_t _base_path_len, uint64_t &_rsize){
-    using namespace boost::filesystem;
-    string path = _path.generic_string();
-    zip_int64_t err = zip_dir_add(_pzip, (path.c_str() + _base_path_len), ZIP_FL_ENC_UTF_8);
-    
-    cout<<"zip_add_dir: "<<(path.c_str() + _base_path_len)<<" rv = "<<err<<endl;
-    
-    for (directory_entry& x : directory_iterator(_path)){
-        auto p = x.path();
-        if(is_directory(p)){
-            zip_add_dir(_pzip, p, _base_path_len, _rsize);
-        }else{
-            zip_add_file(_pzip, p, _base_path_len, _rsize);
-        }        
-    }
-    return true;
-}
-
-//-----------------------------------------------------------------------------
-
-bool unzip(const std::string& _zip_path, const std::string& _fld, uint64_t& _total_size)
-{
-    using namespace boost::filesystem;
-    
-    int err;
-    zip_t *pzip = zip_open(_zip_path.c_str(), ZIP_RDONLY, &err);
-    zip_stat_t stat;
-    constexpr size_t bufcp = 1024 * 64;
-    char buf[bufcp];
-    
-    for (int64_t i = 0; i < zip_get_num_entries(pzip, 0); i++) {
-        if (zip_stat_index(pzip, i, 0, &stat) == 0) {
-            _total_size += stat.size;
-            cout<<stat.name<<" "<<stat.size<<endl;
-            size_t name_len = strlen(stat.name);
-            if(stat.name[name_len - 1] == '/'){
-                //folder
-                create_directory(_fld + '/' + stat.name);
-            }else{
-                zip_file *pzf = zip_fopen_index(pzip, i, 0);
-                
-                if(pzf){
-                    std::ofstream ofs(_fld + '/' + stat.name);
-                    uint64_t fsz = 0;
-                    do{
-                        auto v =  zip_fread(pzf, buf, bufcp);
-                        if(v > 0){
-                            ofs.write(buf, v);
-                            fsz += v;
-                        }else{
-                            break;
-                        }
-                    }while(true);
-                    if(fsz != stat.size){
-                        return false;
-                    }
-                }else{
-                    return false;
-                }
-            }
-        }
-    }
-    return true;
-}
-
-//-----------------------------------------------------------------------------
-
-bool zip_create(const string &_zip_path, string _root, uint64_t &_rsize){
-    using namespace boost::filesystem;
-    
-    int err;
-    zip_t *pzip = zip_open(_zip_path.c_str(), ZIP_CREATE| ZIP_EXCL, &err);
-    
-    if(pzip == nullptr){
-        zip_error_t error;
-        zip_error_init_with_code(&error, err);
-        cout<<"Failed creating zip: "<<zip_error_strerror(&error)<<endl;
-        zip_error_fini(&error);
-        return false;
-    }
-    
-    if(!_root.empty() && _root.back() != '/'){
-        _root += '/';
-    }
-    
-    cout<<"Creating zip archive: "<<_zip_path <<" from "<<_root<<endl;
-    
-    _rsize = 0;
-    
-    if(!is_directory(_root)){
-        cout<<"Path: "<<_root<<" not a directory"<<endl;
-        return false;
-    }
-    
-    for (directory_entry& x : directory_iterator(_root)){
-        auto p = x.path();
-        if(is_directory(p)){
-            zip_add_dir(pzip, p, _root.size(), _rsize);
-        }else{
-            zip_add_file(pzip, p, _root.size(), _rsize);
-        }
-        
-    }
-    zip_close(pzip);
-    if(0){
-        remove_all(get_temp_env() + "/ola_client_cli_unzip");
-        create_directory(get_temp_env() + "/ola_client_cli_unzip");
-        uint64_t total_size = 0;
-        unzip(_zip_path, get_temp_env() + "/ola_client_cli_unzip", total_size);
-        solid_check(total_size == _rsize);
-    }
-    return true;
 }
 //-----------------------------------------------------------------------------
 void uninstall_cleanup(){
