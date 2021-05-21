@@ -1167,6 +1167,9 @@ struct StoreFetchStub {
                 solid_check(snappy::Uncompress(compressed_chunk_.data(), compressed_chunk_.size(), &uncompressed_data));
                 ofs_.write(uncompressed_data.data(), uncompressed_data.size());
                 decompressed_size_ += uncompressed_data.size();
+                //size_t uncompressed_size = 0;
+                //solid_check(snappy::GetUncompressedLength(compressed_chunk_.data(), compressed_chunk_.size(), &uncompressed_size));
+                //decompressed_size_ += uncompressed_size;
                 compressed_chunk_.clear();
                 chunk_offset_ = 0;
                 ++chunk_index_;
@@ -1239,7 +1242,8 @@ void handle_response(
 
     //is there a next chunk
     if (!_rfetch_stub.isLastChunk(_rfetch_stub.chunk_index_)) {
-        fetch_remote_file(&_rctx, _reng, _rprom, _rfetch_stub, _rsent_msg_ptr, _rfetch_stub.chunk_index_ + 1);
+        const uint32_t prefetch_next = _rfetch_stub.chunk_offset_ == 0 ? 0 : 1;
+        fetch_remote_file(&_rctx, _reng, _rprom, _rfetch_stub, _rsent_msg_ptr, _rfetch_stub.chunk_index_ + prefetch_next);
     }
     else if (_rrecv_msg_ptr->isResponseLast()) {
         _rprom.set_value(0);
@@ -1325,7 +1329,6 @@ void handle_fetch_store(istream& _ris, Engine &_reng){
         lst_req_ptr->path_ = req_ptr->path_;
         lst_req_ptr->storage_id_ = req_ptr->storage_id_;
 
-
         promise<uint32_t> prom;
 
         auto lambda = [&prom, &fetch_stub](
@@ -1366,14 +1369,16 @@ void handle_fetch_store(istream& _ris, Engine &_reng){
     if(fetch_stub.ofs_){
         
         promise<uint32_t> prom;
+        const auto start_time = std::chrono::steady_clock::now();
         fetch_remote_file(nullptr, _reng, prom, fetch_stub, req_ptr);
         
         auto fut = prom.get_future();
         solid_check(fut.wait_for(chrono::seconds(100000)) == future_status::ready, "Taking too long - waited 100 secs");
         auto err = fut.get();
         if(err == 0){
+            const auto duration = chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start_time);
             solid_check(fetch_stub.size_ == fetch_stub.decompressed_size_, "Decompressed size "<< fetch_stub.decompressed_size_<<" doesn't match known file size "<<fetch_stub.size_)
-            cout<<"File transferred: "<< fetch_stub.decompressed_size_<<endl;
+            cout<<"File transferred: "<< fetch_stub.decompressed_size_<<' '<<duration.count()<<"msecs"<<endl;
         }else{
             cout<<"File transfer failed: "<<err<<endl; 
         }
