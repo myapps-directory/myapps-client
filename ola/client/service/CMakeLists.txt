@@ -6,6 +6,7 @@ if(WIN32)
     include_directories("${FUSE_INCLUDE_DIRECTORY}")
     add_executable(ola_client_service WIN32
         ola_client_service.cpp engine.hpp engine.cpp file_cache.hpp file_cache.cpp
+        file_data.hpp file_data.cpp
         shortcut_creator.hpp shortcut_creator.cpp
     )
 

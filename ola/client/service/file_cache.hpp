@@ -37,6 +37,10 @@ class File {
         {
             _a(offset_, size_);
         }
+
+        bool operator<(const Range& _r)const {
+            return (offset_ + size_) <= _r.offset_ || ( offset_ < _r.offset_ && ((offset_ + size_) < (_r.offset_ + _r.size_)));
+        }
     };
     using RangeVectorT = std::vector<Range>;
     RangeVectorT range_vec_;
@@ -54,7 +58,7 @@ public:
     void close();
 
     void write(const uint64_t _offset, std::istream& _ris);
-    bool read(char* _pbuf, uint64_t _offset, size_t _length, size_t& _rbytes_transfered);
+    bool read(char* _pbuf, uint64_t _offset, size_t _length, size_t& _rbytes_transfered_front, size_t& _rbytes_transfered_back);
 
     void write(const uint64_t _offset, const std::string& _str);
 
@@ -85,7 +89,8 @@ public:
 
 private:
     void addRange(const uint64_t _offset, const uint64_t _size);
-    bool findRange(const uint64_t _offset, size_t& _rsize) const;
+    bool findRangeFront(const uint64_t _offset, size_t& _rsize) const;
+    bool findRangeBack(const uint64_t _offset, uint64_t &_rstart_offset, size_t& _rsize) const;
 
     bool loadRanges();
     void storeRanges();
@@ -102,7 +107,7 @@ struct FileData {
 
     void writeToCache(const uint64_t _offset, std::istream& _ris);
     void writeToCache(const uint64_t _offset, const std::string& _str);
-    bool readFromCache(char* _pbuf, uint64_t _offset, size_t _length, size_t& _rbytes_transfered);
+    bool readFromCache(char* _pbuf, uint64_t _offset, size_t _length, size_t& _rbytes_transfered_front, size_t& _rbytes_transfered_back);
 
     size_t rageCount() const
     {

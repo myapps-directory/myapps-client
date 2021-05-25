@@ -637,9 +637,7 @@ void configure_service(Engine &_reng, AioSchedulerT &_rsch, frame::aio::Resolver
     frame::mprpc::Configuration cfg(_rsch, proto);
 
     cfg.client.name_resolve_fnc = frame::mprpc::InternetResolverF(_rres, ola::front::default_port());
-
     cfg.client.connection_start_state = frame::mprpc::ConnectionState::Passive;
-    
     {
 //         auto connection_stop_lambda = [&_rctx](frame::mpipc::ConnectionContext &_ctx){
 //             engine_ptr->onConnectionStop(_ctx);

@@ -722,15 +722,34 @@ void File::flush()
     }
 }
 
-bool File::read(char* _pbuf, uint64_t _offset, size_t _length, size_t& _rbytes_transfered)
+bool File::read(char* _pbuf, uint64_t _offset, size_t _length, size_t& _rbytes_transfered_front, size_t& _rbytes_transfered_back)
 {
     size_t len = _length;
-    if (findRange(_offset, len)) {
+    if (findRangeFront(_offset, len)) {
         stream_.seekg(sizeof(Header) + _offset);
         stream_.read(_pbuf, len);
         solid_assert(len == stream_.gcount());
-        _rbytes_transfered += len;
-        return len == _length;
+        _rbytes_transfered_front = len;
+        
+        if (len == _length) return true;
+
+        _offset += len;
+        _length -= len;
+        _pbuf += len;
+    }
+    else {
+        _rbytes_transfered_front = 0;
+    }
+    uint64_t read_offset = 0;
+    len = _length;
+    if (findRangeBack(_offset, read_offset, len)) {
+        stream_.seekg(sizeof(Header) + read_offset);
+        stream_.read(_pbuf, len);
+        solid_assert(len == stream_.gcount());
+        _rbytes_transfered_back = len;
+    }
+    else {
+        _rbytes_transfered_back = 0;
     }
     return false;
 }
@@ -772,19 +791,19 @@ void File::write(const uint64_t _offset, const std::string& _str)
     }
 }
 
-bool File::findRange(const uint64_t _offset, size_t& _rsize) const
+bool File::findRangeFront(const uint64_t _offset, size_t& _rsize) const
 {
-    const auto less_cmp = [](const Range& _rr, const uint64_t _o) -> bool {
+    static const auto less_cmp = [](const Range& _rr, const uint64_t _o) -> bool {
         return _rr.offset_ < _o;
     };
 
-    auto it = lower_bound(range_vec_.begin(), range_vec_.end(), _offset, less_cmp);
+    const auto it = lower_bound(range_vec_.begin(), range_vec_.end(), _offset, less_cmp);
 
     if (it != range_vec_.begin()) {
         auto prev_it = it - 1;
         solid_assert(_offset > prev_it->offset_);
         if (_offset < (prev_it->offset_ + prev_it->size_)) {
-            auto remsize = (prev_it->offset_ + prev_it->size_) - _offset;
+            const auto remsize = (prev_it->offset_ + prev_it->size_) - _offset;
             if (remsize < _rsize) {
                 _rsize = remsize;
             }
@@ -803,9 +822,43 @@ bool File::findRange(const uint64_t _offset, size_t& _rsize) const
     return false;
 }
 
+bool File::findRangeBack(const uint64_t _offset, uint64_t& _rstart_offset, size_t& _rsize) const
+{
+    static const auto less_cmp = [](const Range& _rr, const uint64_t _o) -> bool {
+        return _rr.offset_ < _o;
+    };
+
+    const auto end_offset = _offset + _rsize;
+    const auto last_offset = _offset + _rsize - 1;
+
+    const auto it = lower_bound(range_vec_.begin(), range_vec_.end(), last_offset, less_cmp);
+
+    if (it != range_vec_.begin()) {
+        auto prev_it = it - 1;
+        solid_assert(last_offset > prev_it->offset_);
+        if (last_offset < (prev_it->offset_ + prev_it->size_)) {
+            _rstart_offset = prev_it->offset_;
+            const auto remsize = end_offset - prev_it->offset_;
+            if (remsize < _rsize) {
+                _rsize = remsize;
+            }
+            return true;
+        }
+    }
+    if (it != range_vec_.end()) {
+        solid_assert(last_offset <= it->offset_);
+        if (last_offset == it->offset_) {
+            _rstart_offset = it->offset_;
+            _rsize = 1;
+            return true;
+        }
+    }
+    return false;
+}
+
 void File::addRange(const uint64_t _offset, const uint64_t _size)
 {
-    const auto less_cmp = [](const Range& _rr, const uint64_t _o) -> bool {
+    static const auto less_cmp = [](const Range& _rr, const uint64_t _o) -> bool {
         return _rr.offset_ < _o;
     };
 
@@ -918,9 +971,9 @@ void FileData::writeToCache(const uint64_t _offset, const string& _str)
     file_.write(_offset, _str);
 }
 
-bool FileData::readFromCache(char* _pbuf, uint64_t _offset, size_t _length, size_t& _rbytes_transfered)
+bool FileData::readFromCache(char* _pbuf, uint64_t _offset, size_t _length, size_t& _rbytes_transfered_front, size_t& _rbytes_transfered_back)
 {
-    return file_.read(_pbuf, _offset, _length, _rbytes_transfered);
+    return file_.read(_pbuf, _offset, _length, _rbytes_transfered_front, _rbytes_transfered_back);
 }
 
 } //namespace file_cache

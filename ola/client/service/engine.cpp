@@ -21,7 +21,7 @@
 #include "ola/client/utility/locale.hpp"
 #include "ola/client/utility/app_list_file.hpp"
 
-#include "file_cache.hpp"
+#include "file_data.hpp"
 #include "shortcut_creator.hpp"
 
 #include <boost/algorithm/string/predicate.hpp>
@@ -151,117 +151,18 @@ struct DirectoryData {
     }
 };
 
-struct ReadData {
-    size_t    bytes_transfered_ = 0;
-    char*     pbuffer_;
-    uint64_t  offset_;
-    size_t    size_;
-    ReadData* pnext_ = nullptr;
-    ReadData* pprev_ = nullptr;
-    bool      done_  = false;
-
-    ReadData(
-        char*    _pbuffer,
-        uint64_t _offset,
-        size_t   _size)
-        : pbuffer_(_pbuffer)
-        , offset_(_offset)
-        , size_(_size)
-    {
-    }
-};
-
-struct FetchStub {
-    enum StatusE {
-        NotUsedE,
-        PendingE,
-        FetchedE,
-    };
-
-    uint64_t                              offset_ = 0;
-    size_t                                size_   = 0;
-    StatusE                               status_ = NotUsedE;
-    shared_ptr<main::FetchStoreRequest>         request_ptr_;
-    shared_ptr<main::FetchStoreResponse> response_ptr_;
-};
-
-struct FileData : file_cache::FileData {
-    enum StatusE {
-        PendingE,
-        ErrorE,
-    };
-    ReadData* pfront_ = nullptr;
-    ReadData* pback_  = nullptr;
-    StatusE   status_ = PendingE;
-    FetchStub fetch_stubs_[2];
-    string    remote_path_;
-    uint64_t  prefetch_offset_;
-    size_t    contiguous_read_count_;
-
-    FileData(const string& _remote_path)
-        : remote_path_(_remote_path)
-    {
-    }
-
-    FileData(const FileData& _rfd)
-        : remote_path_(_rfd.remote_path_)
-    {
-    }
-
-    bool readFromCache(ReadData& _rdata)
-    {
-        size_t bytes_transfered = 0;
-        bool   b                = file_cache::FileData::readFromCache(_rdata.pbuffer_, _rdata.offset_, _rdata.size_, bytes_transfered);
-        _rdata.bytes_transfered_ += bytes_transfered;
-        _rdata.pbuffer_ += bytes_transfered;
-        _rdata.offset_ += bytes_transfered;
-        _rdata.size_ -= bytes_transfered;
-        return b;
-    }
-
-    bool readFromResponses(ReadData& _rdata);
-
-    bool enqueue(ReadData& _rdata)
-    {
-        _rdata.pnext_ = pback_;
-        _rdata.pprev_ = nullptr;
-        if (pback_ == nullptr) {
-            pback_ = pfront_ = &_rdata;
-            return true;
-        } else {
-            pback_->pprev_ = &_rdata;
-            pback_         = &_rdata;
-            return false;
-        }
-    }
-
-    void erase(ReadData& _rdata)
-    {
-        if (_rdata.pprev_ != nullptr) {
-            _rdata.pprev_->pnext_ = _rdata.pnext_;
-        } else {
-            pback_ = _rdata.pnext_;
-        }
-        if (_rdata.pnext_ != nullptr) {
-            _rdata.pnext_->pprev_ = _rdata.pprev_;
-        } else {
-            pfront_ = _rdata.pprev_;
-        }
-    }
-    size_t findAvailableFetchIndex() const;
-    size_t isReadHandledByPendingFetch(const ReadData& _rread_data) const;
-    bool   readFromResponse(const size_t _idx, ReadData& _rdata);
-    void   updateContiguousRead(uint64_t _offset, uint64_t _size);
-};
-
 struct ApplicationData : DirectoryData {
     std::string     app_id_; //used for updates
     std::string     app_unique_;
     std::string     build_unique_;
     EntryPtrVectorT shortcut_vec_;
     atomic<size_t>  use_count_ = 0;
+    uint32_t        compress_chunk_capacity_ = 0;
+    uint8_t         compress_algorithm_type_ = 0;
 
-    ApplicationData(const std::string& _app_unique, const std::string& _build_unique)
+    ApplicationData(
+        const std::string& _app_unique, const std::string& _build_unique
+    )
         : app_unique_(_app_unique)
         , build_unique_(_build_unique)
     {
@@ -270,6 +171,8 @@ struct ApplicationData : DirectoryData {
     ApplicationData(const ApplicationData& _rad)
         : app_unique_(_rad.app_unique_)
         , build_unique_(_rad.build_unique_)
+        , compress_chunk_capacity_(_rad.compress_chunk_capacity_)
+        , compress_algorithm_type_(_rad.compress_algorithm_type_)
     {
     }
 
@@ -826,7 +729,12 @@ public:
 
     void eraseEntryFromParent(EntryPointerT&& _uentry_ptr, unique_lock<mutex>&& _ulock);
 
-    void createEntryData(unique_lock<mutex>& _lock, EntryPointerT& _rentry_ptr, const std::string& _path_str, ListNodeDequeT& _rnode_dq);
+    void createEntryData(
+        unique_lock<mutex>& _lock, EntryPointerT& _rentry_ptr,
+        const std::string& _path_str, ListNodeDequeT& _rnode_dq,
+        const uint32_t _compress_chunk_capacity,
+        const uint8_t _compress_algorithm_type
+    );
 
     void insertDirectoryEntry(unique_lock<mutex>& _lock, EntryPointerT& _rparent_ptr, const string& _name);
     void insertFileEntry(unique_lock<mutex>& _lock, EntryPointerT& _rparent_ptr, const string& _name, uint64_t _size);
@@ -1277,7 +1185,16 @@ bool Engine::Implementation::entry(const fs::path& _path, EntryPointerT& _rentry
             unique_lock<mutex> lock{m};
             if (_rrecv_msg_ptr && _rrecv_msg_ptr->error_ == 0) {
                 entry_ptr->status_ = EntryStatusE::Fetched;
-                createEntryData(lock, entry_ptr, generic_path_str, _rrecv_msg_ptr->node_dq_);
+                if (entry_ptr->isApplication()) {
+                    auto& rad = entry_ptr->applicationData();
+                    rad.compress_chunk_capacity_ = _rrecv_msg_ptr->compress_chunk_capacity_;
+                    rad.compress_algorithm_type_ = _rrecv_msg_ptr->compress_algorithm_type_;
+                }
+                createEntryData(
+                    lock, entry_ptr, generic_path_str, _rrecv_msg_ptr->node_dq_,
+                    _rrecv_msg_ptr->compress_chunk_capacity_,
+                    _rrecv_msg_ptr->compress_algorithm_type_
+                );
             } else {
                 entry_ptr->status_ = EntryStatusE::FetchError;
             }
@@ -1458,19 +1375,6 @@ bool Engine::Implementation::list(
     return false;
 }
 
-bool FileData::readFromResponses(ReadData& _rdata)
-{
-    if (fetch_stubs_[0].offset_ < fetch_stubs_[1].offset_) {
-        if (readFromResponse(0, _rdata))
-            return true;
-        return readFromResponse(1, _rdata);
-    } else {
-        if (readFromResponse(1, _rdata))
-            return true;
-        return readFromResponse(0, _rdata);
-    }
-}
-
 bool Engine::Implementation::read(
     EntryPointerT& _rentry_ptr,
     char*          _pbuf,
@@ -1511,28 +1415,31 @@ bool Engine::Implementation::readFromFile(
 {
     FileData& rfile_data = _rentry_ptr->fileData();
     ReadData  read_data{_pbuf, _offset, _length};
+#if 0
+    //cannot read from responses because the data is in temporary buffers
+    if (rfile_data.readFromResponses(read_data)) {
+        _rbytes_transfered = read_data.bytes_transfered_;
+        solid_log(logger, Verbose, "READ: " << _rentry_ptr.get() << " read from responses " << _rbytes_transfered);
+        return true;
+    }
+#endif
 
     if (rfile_data.readFromCache(read_data)) {
         _rbytes_transfered = read_data.bytes_transfered_;
         solid_log(logger, Verbose, "READ: " << _rentry_ptr.get() << " read from cache " << _rbytes_transfered);
         return true;
     }
-
-    if (rfile_data.readFromResponses(read_data)) {
-        _rbytes_transfered = read_data.bytes_transfered_;
-        solid_log(logger, Verbose, "READ: " << _rentry_ptr.get() << " read from responses " << _rbytes_transfered);
-        return true;
-    }
-
-    if (rfile_data.enqueue(read_data)) {
+    
+    solid_check(_rentry_ptr->pmaster_->isApplication());
+    const auto& app_data = _rentry_ptr->pmaster_->applicationData();
+    if (rfile_data.enqueue(read_data, _rentry_ptr->size_, app_data.compress_chunk_capacity_, app_data.compress_algorithm_type_)) {
         //the queue was empty
         tryFetch(_rentry_ptr, read_data);
-        tryPreFetch(_rentry_ptr);
     }
     solid_log(logger, Verbose, _rentry_ptr.get() << " wait");
     _rentry_ptr->conditionVariable().wait(_rlock, [&read_data]() { return read_data.done_; });
 
-    if (rfile_data.status_ == FileData::ErrorE) {
+    if (!rfile_data.isOk()) {
         solid_log(logger, Verbose, "READ: " << _rentry_ptr.get() << " error reading");
         return false;
     }
@@ -1555,51 +1462,12 @@ bool Engine::Implementation::readFromShortcut(
     return true;
 }
 
-size_t FileData::isReadHandledByPendingFetch(const ReadData& _rread_data) const
-{
-    size_t fetch_index = InvalidIndex();
-
-    {
-        auto& rfetch_stub = fetch_stubs_[0];
-        if (rfetch_stub.status_ == FetchStub::PendingE) {
-            if (
-                rfetch_stub.offset_ <= _rread_data.offset_ && _rread_data.offset_ < (rfetch_stub.offset_ + rfetch_stub.size_)) {
-                return 0;
-            }
-        }
-    }
-    {
-        auto& rfetch_stub = fetch_stubs_[1];
-        if (rfetch_stub.status_ == FetchStub::PendingE) {
-            if (
-                rfetch_stub.offset_ <= _rread_data.offset_ && _rread_data.offset_ < (rfetch_stub.offset_ + rfetch_stub.size_)) {
-                return 1;
-            }
-        }
-    }
-
-    return InvalidIndex();
-}
-
-size_t FileData::findAvailableFetchIndex() const
-{
-    auto& rfetch_stub0 = fetch_stubs_[0];
-    auto& rfetch_stub1 = fetch_stubs_[1];
-
-    if (rfetch_stub0.status_ == FetchStub::NotUsedE)
-        return 0;
-    if (rfetch_stub1.status_ == FetchStub::NotUsedE)
-        return 1;
-
-    if (rfetch_stub0.status_ == FetchStub::FetchedE)
-        return 0;
-    if (rfetch_stub1.status_ == FetchStub::FetchedE)
-        return 1;
-    return InvalidIndex();
-}
-
 void Engine::Implementation::tryFetch(EntryPointerT& _rentry_ptr, ReadData& _rread_data)
 {
+#if 1
+    FileData& rfile_data = _rentry_ptr->fileData();
+
+#else
     FileData& rfile_data = _rentry_ptr->fileData();
 
     //try to avoid double prefetching
@@ -1628,6 +1496,7 @@ void Engine::Implementation::tryFetch(EntryPointerT& _rentry_ptr, ReadData& _rre
             asyncFetch(_rentry_ptr, second_fetch_index, next_offset, config_.max_stream_size_);
         }
     }
+#endif
 }
 
 void copy_stream(ReadData& _rread_data, const uint64_t _offset, istream& _ris, uint64_t _size)
@@ -1643,55 +1512,33 @@ void copy_stream(ReadData& _rread_data, const uint64_t _offset, istream& _ris, u
     _rread_data.size_ -= sz;
 }
 
-bool FileData::readFromResponse(const size_t _idx, ReadData& _rdata)
+//TODO: update
+bool Engine::Implementation::canPreFetch(const EntryPointerT& _rentry_ptr) const
 {
-    FetchStub& rfetch_stub = fetch_stubs_[_idx];
-    if (rfetch_stub.status_ != FetchStub::FetchedE) {
-        return false;
-    }
-
-    if (rfetch_stub.offset_ <= _rdata.offset_ && _rdata.offset_ < (rfetch_stub.offset_ + rfetch_stub.size_)) {
-        uint64_t tocopy = (rfetch_stub.offset_ + rfetch_stub.size_) - _rdata.offset_;
-        if (tocopy > _rdata.size_) {
-            tocopy = _rdata.size_;
-        }
-
-        copy_stream(_rdata, rfetch_stub.offset_, rfetch_stub.response_ptr_->ioss_, tocopy);
-
-        return _rdata.size_ == 0;
-    }
+    //const FileData& rfile_data = _rentry_ptr->fileData();
+    //return (rfile_data.contiguous_read_count_ >= config_.min_contiguous_read_count_) && rfile_data.prefetch_offset_ < _rentry_ptr->size_;
     return false;
 }
 
-void FileData::updateContiguousRead(uint64_t _offset, uint64_t _size)
-{
-    if (_offset == prefetch_offset_) {
-        ++contiguous_read_count_;
-    } else {
-        contiguous_read_count_ = 0;
-    }
-    prefetch_offset_ = _offset + _size;
-}
-
-bool Engine::Implementation::canPreFetch(const EntryPointerT& _rentry_ptr) const
-{
-    const FileData& rfile_data = _rentry_ptr->fileData();
-    return (rfile_data.contiguous_read_count_ >= config_.min_contiguous_read_count_) && rfile_data.prefetch_offset_ < _rentry_ptr->size_;
-}
-
+//TODO: dele
 void Engine::Implementation::tryPreFetch(EntryPointerT& _rentry_ptr)
 {
+#if 1
+#else
     FileData& rfile_data = _rentry_ptr->fileData();
     size_t    fetch_index;
     if (canPreFetch(_rentry_ptr) && ((fetch_index = rfile_data.findAvailableFetchIndex()) != InvalidIndex())) {
         solid_log(logger, Verbose, _rentry_ptr.get() << " " << fetch_index << " " << rfile_data.prefetch_offset_);
         asyncFetch(_rentry_ptr, fetch_index, rfile_data.prefetch_offset_, 0);
     }
+#endif
 }
 
 void Engine::Implementation::asyncFetch(EntryPointerT& _rentry_ptr, const size_t _fetch_index, const uint64_t _offset, uint64_t _size)
 {
     solid_log(logger, Verbose, _rentry_ptr.get() << " " << _fetch_index << " " << _offset << " " << _size);
+#if 1
+#else
     FileData& rfile_data  = _rentry_ptr->fileData();
     auto&     rfetch_stub = rfile_data.fetch_stubs_[_fetch_index];
 
@@ -1750,6 +1597,7 @@ void Engine::Implementation::asyncFetch(EntryPointerT& _rentry_ptr, const size_t
     rfetch_stub.request_ptr_->size_       = rfetch_stub.size_;
 
     front_rpc_service_.sendRequest(config_.auth_endpoint_.c_str(), rfetch_stub.request_ptr_, lambda);
+#endif
 }
 
 //-----------------------------------------------------------------------------
@@ -2302,7 +2150,7 @@ void Engine::Implementation::insertDirectoryEntry(unique_lock<mutex>& _lock, Ent
     }
 }
 
-void Engine::Implementation::insertFileEntry(unique_lock<mutex>& _lock, EntryPointerT& _rparent_ptr, const string& _name, uint64_t _size)
+void Engine::Implementation::insertFileEntry(unique_lock<mutex>& _lock, EntryPointerT& _rparent_ptr, const string& _name, const uint64_t _size)
 {
     solid_log(logger, Info, _rparent_ptr->name_ << " " << _name << " " << _size);
 
@@ -2364,7 +2212,12 @@ void Engine::Implementation::eraseEntryFromParent(EntryPointerT&& _uentry_ptr, u
     }
 }
 
-void Engine::Implementation::createEntryData(unique_lock<mutex>& _lock, EntryPointerT& _rentry_ptr, const std::string& _path_str, ListNodeDequeT& _rnode_dq)
+void Engine::Implementation::createEntryData(
+    unique_lock<mutex>& _lock, EntryPointerT& _rentry_ptr,
+    const std::string& _path_str, ListNodeDequeT& _rnode_dq,
+    const uint32_t _compress_chunk_capacity,
+    const uint8_t _compress_algorithm_type
+)
 {
     solid_log(logger, Info, _path_str);
     if (_rnode_dq.size() == 1 && _rnode_dq.front().name_.empty()) {
@@ -2377,6 +2230,10 @@ void Engine::Implementation::createEntryData(unique_lock<mutex>& _lock, EntryPoi
 
     if (_rentry_ptr->directoryDataPtr() == nullptr) {
         _rentry_ptr->data_any_ = DirectoryData();
+    }
+    else if (_rentry_ptr->isApplication()) {
+        _rentry_ptr->applicationData().compress_chunk_capacity_ = _compress_chunk_capacity;
+        _rentry_ptr->applicationData().compress_algorithm_type_ = _compress_algorithm_type;
     }
 
     for (const auto& n : _rnode_dq) {
