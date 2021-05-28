@@ -41,40 +41,115 @@ namespace {
         return size;
     }
 }
-uint32_t FileFetchStub::copy(istream& _ris, const uint64_t _chunk_size, const bool _is_compressed) {
+uint32_t FileData::copy(istream& _ris, const uint64_t _chunk_size, const bool _is_compressed, bool &_rshould_wake_readers) {
     uint32_t size = 0;
+    auto& rstub = *fetch_stub_ptr_;
     if (_is_compressed) {
-        size = stream_copy(compressed_chunk_, _ris);
-        chunk_offset_ += size;
-        solid_check(chunk_offset_ <= _chunk_size);
-        if (chunk_offset_ == _chunk_size) {
+        size = stream_copy(rstub.compressed_chunk_, _ris);
+        rstub.current_chunk_offset_ += size;
+        solid_check(rstub.current_chunk_offset_ <= _chunk_size);
+        if (rstub.current_chunk_offset_ == _chunk_size) {
             string uncompressed_data;
-            uncompressed_data.reserve(compress_chunk_capacity_);
-            solid_check(snappy::Uncompress(compressed_chunk_.data(), compressed_chunk_.size(), &uncompressed_data));
-            //TODO:
-            //ofs_.write(uncompressed_data.data(), uncompressed_data.size());
-            decompressed_size_ += uncompressed_data.size();
-            //size_t uncompressed_size = 0;
-            //solid_check(snappy::GetUncompressedLength(compressed_chunk_.data(), compressed_chunk_.size(), &uncompressed_size));
-            //decompressed_size_ += uncompressed_size;
-            compressed_chunk_.clear();
-            chunk_offset_ = 0;
-            ++chunk_index_;
+            uncompressed_data.reserve(rstub.compress_chunk_capacity_);
+            
+            solid_check(snappy::Uncompress(rstub.compressed_chunk_.data(), rstub.compressed_chunk_.size(), &uncompressed_data));
+            
+            this->writeToCache(rstub.chunkIndexToOffset(rstub.current_chunk_index_), uncompressed_data);
+            
+            _rshould_wake_readers = tryFillReads(uncompressed_data, rstub.chunkIndexToOffset(rstub.current_chunk_index_));
+
+            rstub.decompressed_size_ += uncompressed_data.size();
+            rstub.compressed_chunk_.clear();
+            rstub.current_chunk_offset_ = 0;
+            ++rstub.current_chunk_index_;
         }
     }
     else {
-        //TODO:
-        //size = stream_copy(ofs_, _ris);
-        chunk_offset_ += size;
-        solid_check(chunk_offset_ <= _chunk_size);
-        if (chunk_offset_ == _chunk_size) {
-            decompressed_size_ += size;
-            chunk_offset_ = 0;
-            ++chunk_index_;
+        size = this->writeToCache(rstub.chunkIndexToOffset(rstub.current_chunk_index_), _ris);
+        _rshould_wake_readers = tryFillReads(string(), rstub.chunkIndexToOffset(rstub.current_chunk_index_));
+        rstub.current_chunk_offset_ += size;
+        solid_check(rstub.current_chunk_offset_ <= _chunk_size);
+        if (rstub.current_chunk_offset_ == _chunk_size) {
+            rstub.decompressed_size_ += size;
+            rstub.current_chunk_offset_ = 0;
+            ++rstub.current_chunk_index_;
         }
     }
 
     return size;
+}
+
+bool FileData::readFromCache(ReadData& _rdata)
+{
+    size_t bytes_transfered_front = 0;
+    size_t bytes_transfered_back = 0;
+    const bool   b = file_cache::FileData::readFromCache(_rdata.pbuffer_, _rdata.offset_, _rdata.size_, bytes_transfered_front, bytes_transfered_back);
+    _rdata.bytes_transfered_ += (bytes_transfered_front + bytes_transfered_back);
+    _rdata.pbuffer_ += bytes_transfered_front;
+    _rdata.offset_ += bytes_transfered_front;
+    _rdata.size_ -= bytes_transfered_front;
+    _rdata.size_ -= bytes_transfered_back;
+    return b;
+}
+
+bool FileData::readFromMemory(ReadData& _rdata, const std::string& _data, const uint64_t _offset) {
+    if (!_data.empty()) {
+        uint64_t end_offset = _offset + _data.size();
+        if (_rdata.offset_ >= _offset && _rdata.offset_ < end_offset) {
+            //we can copy the front part
+            size_t to_copy = _data.size() - (_rdata.offset_ - _offset);
+            if (to_copy > _rdata.size_) {
+                to_copy = _rdata.size_;
+            }
+            
+            memcpy(_rdata.pbuffer_, _data.data() + _rdata.offset_ - _offset, to_copy);
+            
+            _rdata.bytes_transfered_ += to_copy;
+            _rdata.offset_ += to_copy;
+            _rdata.pbuffer_ += to_copy;
+            _rdata.size_ -= to_copy;
+        }
+
+        if (_rdata.size_ != 0 && _offset < (_rdata.offset_ + _rdata.size_) && _offset >= _rdata.offset_) {
+            size_t to_copy = (_rdata.offset_ + _rdata.size_) - _offset;
+            if (to_copy > _rdata.size_) {
+                to_copy = _rdata.size_;
+            }
+
+            memcpy(_rdata.pbuffer_ + _rdata.size_ - to_copy, _data.data(), to_copy);
+            
+            _rdata.bytes_transfered_ += to_copy;
+            _rdata.offset_ += to_copy;
+            _rdata.pbuffer_ += to_copy;
+            _rdata.size_ -= to_copy;
+        }
+    }
+    return _rdata.size_ == 0;
+}
+
+bool FileData::tryFillReads(const std::string& _data, const uint64_t _offset)
+{
+    bool ret_val = false;
+    auto& rstub = *fetch_stub_ptr_;
+    for (auto* prd = rstub.pfront_; prd != nullptr;) {
+
+        if (readFromMemory(*prd, _data, _offset)) {
+        }
+        else {
+            readFromCache(*prd);
+        }
+        if (prd->size_ == 0) {
+            auto tmp = prd;
+            prd = prd->pprev_;
+            rstub.erase(*tmp);
+            tmp->done_ = true;
+            ret_val = true;
+        }
+        else {
+            prd = prd->pprev_;
+        }
+    }
+    return ret_val;
 }
 
 } // namespace service

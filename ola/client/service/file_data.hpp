@@ -36,8 +36,8 @@ struct FileFetchStub {
     ReadData* pback_ = nullptr;
     uint64_t decompressed_size_ = 0;
     std::string   compressed_chunk_;
-    uint32_t chunk_index_ = 0;
-    uint32_t chunk_offset_ = 0;
+    uint32_t current_chunk_index_ = -1;
+    uint32_t current_chunk_offset_ = 0;
     const uint32_t compress_chunk_capacity_ = 0;
     const uint8_t  compress_algorithm_type_ = 0;
     std::shared_ptr<front::main::FetchStoreRequest> request_ptr_;
@@ -76,12 +76,8 @@ struct FileFetchStub {
         uint32_t chunk_index = offsetToChunkIndex(_offset);
 
         do {
-            if (!chunk_set_.empty()) {
-                chunk_index_ = chunk_index;
-            }
-
             auto rv = chunk_set_.insert(chunk_index);
-            if (rv.second) {//insertion took place
+            if (rv.second) {//insertion happened
                 if (chunk_index != last_chunk_index_) {
                     if (chunk_index == (last_chunk_index_ + 1)) {
                         ++contiguous_chunk_count_;
@@ -119,12 +115,33 @@ struct FileFetchStub {
         }
     }
 
-    uint32_t copy(std::istream& _ris, const uint64_t _chunk_size, const bool _is_compressed);
+    void prepareFetchingChunk() {
+        solid_check(!chunk_set_.empty());
+        current_chunk_index_ = *chunk_set_.begin();
+        current_chunk_offset_ = 0;
+    }
+
+    void wakeAllReaderThreads() {
+        while (pfront_ != nullptr) {
+            pfront_->done_ = true;
+            erase(*pfront_);
+        }
+    }
+    void storeResponse(std::shared_ptr<front::main::FetchStoreResponse>& _rres_ptr) {
+        if (!response_ptr_[0]) {
+            response_ptr_[0] = _rres_ptr;
+        }
+        else {
+            solid_check(!response_ptr_[1]);
+            response_ptr_[1] = _rres_ptr;
+        }
+    }
 };
 
 struct FileData : file_cache::FileData {
     std::string               remote_path_;
     std::unique_ptr<FileFetchStub> fetch_stub_ptr_;
+    uint32_t                   error_;
     
     FileData(const std::string& _remote_path)
         : remote_path_(_remote_path)
@@ -136,22 +153,17 @@ struct FileData : file_cache::FileData {
     {
     }
 
-    bool readFromCache(ReadData& _rdata)
-    {
-        size_t bytes_transfered_front = 0;
-        size_t bytes_transfered_back = 0;
-        const bool   b          = file_cache::FileData::readFromCache(_rdata.pbuffer_, _rdata.offset_, _rdata.size_, bytes_transfered_front, bytes_transfered_back);
-        _rdata.bytes_transfered_ += (bytes_transfered_front + bytes_transfered_back);
-        _rdata.pbuffer_ += bytes_transfered_front;
-        _rdata.offset_ += bytes_transfered_front;
-        _rdata.size_ -= bytes_transfered_front;
-        _rdata.size_ -= bytes_transfered_back;
-        return b;
-    }
+    uint32_t copy(std::istream& _ris, const uint64_t _chunk_size, const bool _is_compressed, bool& _rshould_wake_readers);
+
+    bool readFromCache(ReadData& _rdata);
+
+    bool readFromMemory(ReadData& _rdata, const std::string& _data, const uint64_t _offset);
+
 
     bool enqueue(ReadData& _rdata, const uint64_t _size, const uint32_t _compress_chunk_capacity, const uint8_t _compress_algorithm_type)
     {
         if (!fetch_stub_ptr_) {
+            //lazy initialization
             fetch_stub_ptr_ = std::make_unique<FileFetchStub>(_compress_chunk_capacity, _compress_algorithm_type);
         }
         
@@ -160,12 +172,55 @@ struct FileData : file_cache::FileData {
         return fetch_stub_ptr_->enqueue(_rdata);
     }
 
-    bool isOk()const {
-        return true;
+    void prepareFetchingChunk() {
+        fetch_stub_ptr_->prepareFetchingChunk();
     }
 
-    size_t findAvailableFetchIndex() const;
-    size_t isReadHandledByPendingFetch(const ReadData& _rread_data) const;
+    uint32_t error()const {
+        return error_;
+    }
+
+    void error(uint32_t _error) {
+        error_ = _error;
+        fetch_stub_ptr_->wakeAllReaderThreads();
+    }
+
+    bool isExpectedResponse(const uint32_t _chunk_index, const uint32_t _chunk_offset) const {
+        return fetch_stub_ptr_->current_chunk_index_ == _chunk_index && fetch_stub_ptr_->current_chunk_offset_ == _chunk_offset;
+    }
+
+    void storeResponse(std::shared_ptr<front::main::FetchStoreResponse>& _rres_ptr) {
+        fetch_stub_ptr_->storeResponse(_rres_ptr);
+    }
+    
+    void storeRequest(std::shared_ptr<front::main::FetchStoreRequest>&& _rres_ptr)
+    {
+        fetch_stub_ptr_->request_ptr_ = std::move(_rres_ptr);
+    }
+
+    uint32_t currentChunkOffset()const {
+        return fetch_stub_ptr_->current_chunk_offset_;
+    }
+    uint32_t currentChunkIndex()const {
+        return fetch_stub_ptr_->current_chunk_index_;
+    }
+
+    auto& responsePointer(const size_t _index) {
+        return fetch_stub_ptr_->response_ptr_[_index];
+    }
+    auto& requestPointer() {
+        return fetch_stub_ptr_->request_ptr_;
+    }
+
+    uint64_t decompressedSize()const {
+        return fetch_stub_ptr_->decompressed_size_;
+    }
+
+    bool isLastChunk(const uint64_t _size)const {
+        return fetch_stub_ptr_->isLastChunk(_size, currentChunkIndex());
+    }
+
+    bool tryFillReads(const std::string& _data, const uint64_t _offset);
 };
 
 

@@ -747,7 +747,15 @@ public:
         const fs::path& _path, EntryPointerT& _rentry_ptr, unique_lock<mutex>& _rlock, std::string& _remote_path,
         const string*& _rpapp_unique, const string*& _rpbuild_unique);
 
-    void asyncFetch(EntryPointerT& _rentry_ptr, const size_t _fetch_index, const uint64_t _offset, uint64_t _size);
+    void asyncFetchStoreFileHandleResponse(
+        frame::mprpc::ConnectionContext& _rctx, EntryPointerT& _rentry_ptr,
+        std::shared_ptr<main::FetchStoreRequest>& _rsent_msg_ptr,
+        std::shared_ptr<main::FetchStoreResponse>& _rrecv_msg_ptr
+    );
+    void asyncFetchStoreFile(
+        frame::mprpc::ConnectionContext* _pctx, EntryPointerT& _rentry_ptr,
+        std::shared_ptr<main::FetchStoreRequest>& _rreq_msg_ptr,
+        const uint32_t _chunk_index, const uint32_t _chunk_offset);
 
     bool list(
         EntryPointerT& _rentry_ptr,
@@ -757,8 +765,7 @@ public:
         EntryPointerT& _rentry_ptr,
         char*          _pbuf,
         uint64_t _offset, unsigned long _length, unsigned long& _rbytes_transfered);
-    void tryFetch(EntryPointerT& _rentry_ptr, ReadData& _rread_data);
-    void tryPreFetch(EntryPointerT& _rentry_ptr);
+    void tryFetch(EntryPointerT& _rentry_ptr);
 
     fs::path cachePath() const
     {
@@ -771,27 +778,12 @@ public:
 
 private:
     void tryAuthenticate(frame::mprpc::ConnectionContext& _ctx);
-#if 0
-    fs::path authDataDirectoryPath() const
-    {
-        fs::path p = config_.path_prefix_;
-        p /= "config";
-        return p;
-    }
-
-
-    fs::path authDataFilePath() const
-    {
-        return authDataDirectoryPath() / "auth.data";
-    }
-#endif
 
     void insertApplicationEntry(
         std::shared_ptr<main::FetchBuildConfigurationResponse>& _rrecv_msg_ptr,
         const ola::utility::ApplicationListItem &_app
     );
     void insertMountEntry(EntryPointerT& _rparent_ptr, const fs::path& _local, const string& _remote);
-    bool canPreFetch(const EntryPointerT& _rentry_ptr) const;
 
     bool readFromFile(
         EntryPointerT&      _rentry_ptr,
@@ -1434,13 +1426,13 @@ bool Engine::Implementation::readFromFile(
     const auto& app_data = _rentry_ptr->pmaster_->applicationData();
     if (rfile_data.enqueue(read_data, _rentry_ptr->size_, app_data.compress_chunk_capacity_, app_data.compress_algorithm_type_)) {
         //the queue was empty
-        tryFetch(_rentry_ptr, read_data);
+        tryFetch(_rentry_ptr);
     }
     solid_log(logger, Verbose, _rentry_ptr.get() << " wait");
     _rentry_ptr->conditionVariable().wait(_rlock, [&read_data]() { return read_data.done_; });
 
-    if (!rfile_data.isOk()) {
-        solid_log(logger, Verbose, "READ: " << _rentry_ptr.get() << " error reading");
+    if (rfile_data.error() != 0) {
+        solid_log(logger, Verbose, "READ: " << _rentry_ptr.get() << " error reading "<<rfile_data.error());
         return false;
     }
 
@@ -1462,142 +1454,142 @@ bool Engine::Implementation::readFromShortcut(
     return true;
 }
 
-void Engine::Implementation::tryFetch(EntryPointerT& _rentry_ptr, ReadData& _rread_data)
+void Engine::Implementation::tryFetch(EntryPointerT& _rentry_ptr)
 {
-#if 1
     FileData& rfile_data = _rentry_ptr->fileData();
+    rfile_data.prepareFetchingChunk();
+    auto req_ptr = make_shared<main::FetchStoreRequest>();
+    
+    req_ptr->path_ = rfile_data.remote_path_;
+    req_ptr->storage_id_ = _rentry_ptr->pmaster_->remote_;
+    req_ptr->chunk_index_ = 0;
+    req_ptr->chunk_offset_ = 0;
 
-#else
+    asyncFetchStoreFile(nullptr, _rentry_ptr, req_ptr, rfile_data.currentChunkIndex(), 0);
+}
+
+void Engine::Implementation::asyncFetchStoreFileHandleResponse(
+    frame::mprpc::ConnectionContext& _rctx, EntryPointerT& _rentry_ptr,
+    std::shared_ptr<main::FetchStoreRequest>& _rsent_msg_ptr,
+    std::shared_ptr<main::FetchStoreResponse>& _rrecv_msg_ptr
+) {
     FileData& rfile_data = _rentry_ptr->fileData();
+    bool should_wake_readers = false;
+    const uint32_t received_size = rfile_data.copy(_rrecv_msg_ptr->ioss_, _rrecv_msg_ptr->chunk_.size_, _rrecv_msg_ptr->chunk_.isCompressed(), should_wake_readers);
 
-    //try to avoid double prefetching
-    if (auto fetch_index = rfile_data.isReadHandledByPendingFetch(_rread_data); fetch_index != InvalidIndex() && rfile_data.fetch_stubs_[fetch_index].size_ != 0) {
-        solid_log(logger, Verbose, _rentry_ptr.get() << " read handled by pending " << fetch_index);
-        //check if we can use the secondary buffer to speed-up fetching
-        auto&  rfs         = rfile_data.fetch_stubs_[fetch_index];
-        auto   next_offset = rfs.offset_ + rfs.size_;
-        size_t second_fetch_index;
-        if (canPreFetch(_rentry_ptr) && next_offset < _rentry_ptr->size_ && (second_fetch_index = rfile_data.findAvailableFetchIndex()) != InvalidIndex()) {
-            solid_log(logger, Verbose, _rentry_ptr.get() << " prefetch " << second_fetch_index << " " << next_offset);
-            asyncFetch(_rentry_ptr, second_fetch_index, next_offset, config_.max_stream_size_ /*_rread_data.size_*/);
+    solid_log(logger, Warning, "Received " << received_size << " offset " << rfile_data.currentChunkOffset() << " cid " << rfile_data.currentChunkIndex() << " totalsz " << _rrecv_msg_ptr->chunk_.size_);
+
+    if (should_wake_readers) {
+        _rentry_ptr->conditionVariable().notify_all();
+    }
+
+    if (rfile_data.responsePointer(0)) {
+        auto res_ptr1 = std::move(rfile_data.responsePointer(0));
+        auto res_ptr2 = std::move(rfile_data.responsePointer(1));
+        asyncFetchStoreFileHandleResponse(_rctx, _rentry_ptr, _rsent_msg_ptr, res_ptr1);
+        if (res_ptr2) {
+            asyncFetchStoreFileHandleResponse(_rctx, _rentry_ptr, _rsent_msg_ptr, res_ptr2);
         }
         return;
     }
 
-    if (auto fetch_index = rfile_data.findAvailableFetchIndex(); fetch_index != InvalidIndex()) {
-        solid_log(logger, Verbose, _rentry_ptr.get() << " read " << fetch_index << " " << _rread_data.offset_);
-        asyncFetch(_rentry_ptr, fetch_index, _rread_data.offset_, canPreFetch(_rentry_ptr) ? config_.max_stream_size_ : _rread_data.size_);
-
-        auto&  rfetch_stub = rfile_data.fetch_stubs_[fetch_index];
-        auto   next_offset = rfetch_stub.offset_ + rfetch_stub.size_;
-        size_t second_fetch_index;
-
-        if (canPreFetch(_rentry_ptr) && next_offset < _rentry_ptr->size_ && (second_fetch_index = rfile_data.findAvailableFetchIndex()) != InvalidIndex()) {
-            asyncFetch(_rentry_ptr, second_fetch_index, next_offset, config_.max_stream_size_);
-        }
-    }
-#endif
-}
-
-void copy_stream(ReadData& _rread_data, const uint64_t _offset, istream& _ris, uint64_t _size)
-{
-    solid_check(_offset <= _rread_data.offset_);
-    _ris.clear();
-    _ris.seekg(_rread_data.offset_ - _offset);
-    _ris.read(_rread_data.pbuffer_, _size);
-    uint64_t sz = _ris.gcount();
-    _rread_data.offset_ += sz;
-    _rread_data.pbuffer_ += sz;
-    _rread_data.bytes_transfered_ += sz;
-    _rread_data.size_ -= sz;
-}
-
-//TODO: update
-bool Engine::Implementation::canPreFetch(const EntryPointerT& _rentry_ptr) const
-{
-    //const FileData& rfile_data = _rentry_ptr->fileData();
-    //return (rfile_data.contiguous_read_count_ >= config_.min_contiguous_read_count_) && rfile_data.prefetch_offset_ < _rentry_ptr->size_;
-    return false;
-}
-
-//TODO: dele
-void Engine::Implementation::tryPreFetch(EntryPointerT& _rentry_ptr)
-{
-#if 1
-#else
-    FileData& rfile_data = _rentry_ptr->fileData();
-    size_t    fetch_index;
-    if (canPreFetch(_rentry_ptr) && ((fetch_index = rfile_data.findAvailableFetchIndex()) != InvalidIndex())) {
-        solid_log(logger, Verbose, _rentry_ptr.get() << " " << fetch_index << " " << rfile_data.prefetch_offset_);
-        asyncFetch(_rentry_ptr, fetch_index, rfile_data.prefetch_offset_, 0);
-    }
-#endif
-}
-
-void Engine::Implementation::asyncFetch(EntryPointerT& _rentry_ptr, const size_t _fetch_index, const uint64_t _offset, uint64_t _size)
-{
-    solid_log(logger, Verbose, _rentry_ptr.get() << " " << _fetch_index << " " << _offset << " " << _size);
-#if 1
-#else
-    FileData& rfile_data  = _rentry_ptr->fileData();
-    auto&     rfetch_stub = rfile_data.fetch_stubs_[_fetch_index];
-
-    rfetch_stub.status_ = FetchStub::PendingE;
-    rfetch_stub.offset_ = _offset;
-    rfetch_stub.size_   = _size;
-
-    auto lambda = [entry_ptr = _rentry_ptr, this, _fetch_index](
-                      frame::mprpc::ConnectionContext&            _rctx,
-                      std::shared_ptr<main::FetchStoreRequest>&  _rsent_msg_ptr,
-                      std::shared_ptr<main::FetchStoreResponse>& _rrecv_msg_ptr,
-                      ErrorConditionT const&                      _rerror) mutable {
-        solid_check(_rrecv_msg_ptr, _rerror.message());
-        solid_log(logger, Verbose, "recv data: " << _rsent_msg_ptr->offset_ << " " << _rrecv_msg_ptr->size_);
-        auto&             m = entry_ptr->mutex();
-        lock_guard<mutex> lock{m};
-        FileData*         pfd = entry_ptr->fileDataPtr();
-        if (pfd == nullptr) {
+    if (_rrecv_msg_ptr->isResponsePart()) {
+        //do we need to request more data for current chunk:
+        if ((_rrecv_msg_ptr->chunk_.size_ - rfile_data.currentChunkOffset()) > received_size) {
+            asyncFetchStoreFile(&_rctx, _rentry_ptr, _rsent_msg_ptr, rfile_data.currentChunkIndex(), rfile_data.currentChunkOffset() + received_size);
             return;
         }
-        FileData& rfile_data  = (*pfd);
-        auto&     rfetch_stub = rfile_data.fetch_stubs_[_fetch_index];
-
-        rfetch_stub.status_       = FetchStub::FetchedE;
-        rfetch_stub.response_ptr_ = std::move(_rrecv_msg_ptr);
-        rfetch_stub.size_         = rfetch_stub.response_ptr_->size_ >= 0 ? rfetch_stub.response_ptr_->size_ : -rfetch_stub.response_ptr_->size_;
-
-        rfile_data.writeToCache(_rsent_msg_ptr->offset_, rfetch_stub.response_ptr_->ioss_);
-
-        for (auto* prd = rfile_data.pfront_; prd != nullptr;) {
-            rfile_data.readFromResponses(*prd);
-
-            if (prd->size_ == 0) {
-                auto tmp = prd;
-                prd      = prd->pprev_;
-                rfile_data.erase(*tmp);
-                tmp->done_ = true;
-                entry_ptr->conditionVariable().notify_all();
-            } else {
-                prd = prd->pprev_;
-            }
-        }
-
-        for (auto* prd = rfile_data.pfront_; prd != nullptr; prd = prd->pprev_) {
-            tryFetch(entry_ptr, *prd);
-        }
-        tryPreFetch(entry_ptr);
-    };
-
-    if (!rfetch_stub.request_ptr_) {
-        rfetch_stub.request_ptr_ = make_shared<main::FetchStoreRequest>();
     }
-    rfetch_stub.request_ptr_->path_       = rfile_data.remote_path_;
-    rfetch_stub.request_ptr_->storage_id_ = _rentry_ptr->pmaster_->remote_;
-    rfetch_stub.request_ptr_->offset_     = rfetch_stub.offset_;
-    rfetch_stub.request_ptr_->size_       = rfetch_stub.size_;
+    else if (
+        received_size == _rrecv_msg_ptr->chunk_.size_ ||
+        (rfile_data.currentChunkOffset() == 0 && rfile_data.decompressedSize() == _rentry_ptr->size_) ||
+        (rfile_data.currentChunkOffset() != 0 && (_rrecv_msg_ptr->chunk_.size_ - rfile_data.currentChunkOffset()) < received_size)
+        ) {
+        rfile_data.storeRequest(std::move(_rsent_msg_ptr));
+    }
+    else {
+        rfile_data.storeRequest(std::move(_rsent_msg_ptr));
+        return;
+    }
 
-    front_rpc_service_.sendRequest(config_.auth_endpoint_.c_str(), rfetch_stub.request_ptr_, lambda);
-#endif
+    //is there a next chunk
+    if (!rfile_data.isLastChunk(_rentry_ptr->size_)) {
+        const uint32_t prefetch_next = rfile_data.currentChunkOffset() == 0 ? 0 : 1;
+        asyncFetchStoreFile(&_rctx, _rentry_ptr, _rsent_msg_ptr, rfile_data.currentChunkIndex() + prefetch_next, 0);
+    }
+    else if (_rrecv_msg_ptr->isResponseLast()) {
+        solid_log(logger, Warning, "Done receiving: " << _rentry_ptr->name_);
+    }
+}
+
+void Engine::Implementation::asyncFetchStoreFile(
+    frame::mprpc::ConnectionContext* _pctx, EntryPointerT& _rentry_ptr,
+    std::shared_ptr<main::FetchStoreRequest>& _rreq_msg_ptr,
+    const uint32_t _chunk_index, const uint32_t _chunk_offset)
+{
+    solid_log(logger, Verbose, _rentry_ptr.get() << " " << _chunk_index << " " << _chunk_offset);
+    auto lambda = [entry_ptr = _rentry_ptr, this, _chunk_index, _chunk_offset](
+        frame::mprpc::ConnectionContext& _rctx,
+        std::shared_ptr<main::FetchStoreRequest>& _rsent_msg_ptr,
+        std::shared_ptr<main::FetchStoreResponse>& _rrecv_msg_ptr,
+        ErrorConditionT const& _rerror
+        )mutable {
+            
+            FileData& rfile_data = entry_ptr->fileData();
+            auto& m = entry_ptr->mutex();
+            unique_lock<mutex> lock(m);
+
+            if (_rrecv_msg_ptr) {
+                if (_rrecv_msg_ptr->error_ == 0) {
+                    _rrecv_msg_ptr->ioss_.seekg(0);
+
+                    //if (_rfetch_stub.chunk_index_ == _chunk_index && _rfetch_stub.chunk_offset_ >= _chunk_offset) {
+                    if(rfile_data.isExpectedResponse(_chunk_index, _chunk_offset)){
+                        asyncFetchStoreFileHandleResponse(_rctx, entry_ptr, _rsent_msg_ptr, _rrecv_msg_ptr);
+                    }
+                    else {
+                        rfile_data.storeResponse(_rrecv_msg_ptr);
+                    }
+                }
+                else {
+                    rfile_data.error(_rrecv_msg_ptr->error_);
+                    entry_ptr->conditionVariable().notify_all();
+                }
+            }
+            else {
+                rfile_data.error(-1);
+                entry_ptr->conditionVariable().notify_all();
+            }
+    };
+    
+    FileData& rfile_data = _rentry_ptr->fileData();
+
+    if (_pctx) {
+
+        std::shared_ptr<main::FetchStoreRequest> req_ptr;
+        if (rfile_data.requestPointer()) {
+            req_ptr = std::move(rfile_data.requestPointer());
+        }
+        else {
+            req_ptr = make_shared<main::FetchStoreRequest>();
+            req_ptr->storage_id_ = _rreq_msg_ptr->storage_id_;
+            req_ptr->path_ = _rreq_msg_ptr->path_;
+        }
+        req_ptr->chunk_index_ = _chunk_index;
+        req_ptr->chunk_offset_ = _chunk_offset;
+        const auto err = _pctx->service().sendRequest(_pctx->recipientId(), req_ptr, lambda);
+        if (err) {
+            rfile_data.error(-1);
+            _rentry_ptr->conditionVariable().notify_all();
+        }
+    }
+    else {
+        const auto err = front_rpc_service_.sendRequest(config_.auth_endpoint_.c_str(), _rreq_msg_ptr, lambda);
+        if (err) {
+            rfile_data.error(-1);
+            _rentry_ptr->conditionVariable().notify_all();
+        }
+    }
 }
 
 //-----------------------------------------------------------------------------

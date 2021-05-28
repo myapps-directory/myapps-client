@@ -754,12 +754,12 @@ bool File::read(char* _pbuf, uint64_t _offset, size_t _length, size_t& _rbytes_t
     return false;
 }
 
-void File::write(const uint64_t _offset, std::istream& _ris)
+uint64_t File::write(const uint64_t _offset, std::istream& _ris)
 {
     constexpr size_t buffer_capacity = 4096;
+    uint64_t read_count = 0;
     if (stream_.is_open()) {
         char     buffer[buffer_capacity];
-        uint64_t read_count = 0;
 
         stream_.seekp(sizeof(Header) + _offset);
 
@@ -776,6 +776,7 @@ void File::write(const uint64_t _offset, std::istream& _ris)
         flush();
         solid_log(logger, Info, this << " " << range_vec_.size());
     }
+    return read_count;
 }
 
 void File::write(const uint64_t _offset, const std::string& _str)
@@ -961,9 +962,9 @@ string denamefy(const std::string& _path)
 
 //-----------------------------------------------------------------------------
 
-void FileData::writeToCache(const uint64_t _offset, istream& _ris)
+uint64_t FileData::writeToCache(const uint64_t _offset, istream& _ris)
 {
-    file_.write(_offset, _ris);
+    return file_.write(_offset, _ris);
 }
 
 void FileData::writeToCache(const uint64_t _offset, const string& _str)
