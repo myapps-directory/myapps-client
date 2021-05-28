@@ -61,18 +61,18 @@ uint32_t FileData::copy(istream& _ris, const uint64_t _chunk_size, const bool _i
             rstub.decompressed_size_ += uncompressed_data.size();
             rstub.compressed_chunk_.clear();
             rstub.current_chunk_offset_ = 0;
-            ++rstub.current_chunk_index_;
+            rstub.nextChunk();
         }
     }
     else {
-        size = this->writeToCache(rstub.chunkIndexToOffset(rstub.current_chunk_index_), _ris);
-        _rshould_wake_readers = tryFillReads(string(), rstub.chunkIndexToOffset(rstub.current_chunk_index_));
+        size = this->writeToCache(rstub.chunkIndexToOffset(rstub.current_chunk_index_) + rstub.current_chunk_offset_, _ris);
         rstub.current_chunk_offset_ += size;
         solid_check(rstub.current_chunk_offset_ <= _chunk_size);
         if (rstub.current_chunk_offset_ == _chunk_size) {
-            rstub.decompressed_size_ += size;
+            _rshould_wake_readers = tryFillReads(string(), rstub.chunkIndexToOffset(rstub.current_chunk_index_));
+            rstub.decompressed_size_ += _chunk_size;
             rstub.current_chunk_offset_ = 0;
-            ++rstub.current_chunk_index_;
+            rstub.nextChunk();
         }
     }
 

@@ -53,8 +53,20 @@ struct FileFetchStub {
         : compress_chunk_capacity_(_compress_chunk_capacity)
         , compress_algorithm_type_(_compress_algorithm_type){}
 
-    bool isLastChunk(const uint64_t _size, const uint64_t chunk_index_)const {
-        return ((chunk_index_ + 1) * compress_chunk_capacity_) >= _size;
+    bool isLastChunk()const {
+        return chunk_set_.size() <= 1;
+    }
+
+    void nextChunk(){
+        chunk_set_.erase(current_chunk_index_);
+        if (!chunk_set_.empty()) {
+            current_chunk_index_ = *chunk_set_.begin();
+        }
+    }
+
+    uint32_t peekNextChunk()const {
+        solid_assert(chunk_set_.size() > 1);
+        return *(++chunk_set_.begin());
     }
 
     bool enqueue(ReadData& _rdata)
@@ -141,7 +153,7 @@ struct FileFetchStub {
 struct FileData : file_cache::FileData {
     std::string               remote_path_;
     std::unique_ptr<FileFetchStub> fetch_stub_ptr_;
-    uint32_t                   error_;
+    uint32_t                   error_ = 0;
     
     FileData(const std::string& _remote_path)
         : remote_path_(_remote_path)
@@ -186,7 +198,7 @@ struct FileData : file_cache::FileData {
     }
 
     bool isExpectedResponse(const uint32_t _chunk_index, const uint32_t _chunk_offset) const {
-        return fetch_stub_ptr_->current_chunk_index_ == _chunk_index && fetch_stub_ptr_->current_chunk_offset_ == _chunk_offset;
+        return fetch_stub_ptr_->current_chunk_index_ == _chunk_index && fetch_stub_ptr_->current_chunk_offset_ >= _chunk_offset;
     }
 
     void storeResponse(std::shared_ptr<front::main::FetchStoreResponse>& _rres_ptr) {
@@ -216,8 +228,12 @@ struct FileData : file_cache::FileData {
         return fetch_stub_ptr_->decompressed_size_;
     }
 
-    bool isLastChunk(const uint64_t _size)const {
-        return fetch_stub_ptr_->isLastChunk(_size, currentChunkIndex());
+    bool isLastChunk()const {
+        return fetch_stub_ptr_->isLastChunk();
+    }
+
+    uint32_t peekNextChunk()const {
+        return fetch_stub_ptr_->peekNextChunk();
     }
 
     bool tryFillReads(const std::string& _data, const uint64_t _offset);

@@ -1407,14 +1407,6 @@ bool Engine::Implementation::readFromFile(
 {
     FileData& rfile_data = _rentry_ptr->fileData();
     ReadData  read_data{_pbuf, _offset, _length};
-#if 0
-    //cannot read from responses because the data is in temporary buffers
-    if (rfile_data.readFromResponses(read_data)) {
-        _rbytes_transfered = read_data.bytes_transfered_;
-        solid_log(logger, Verbose, "READ: " << _rentry_ptr.get() << " read from responses " << _rbytes_transfered);
-        return true;
-    }
-#endif
 
     if (rfile_data.readFromCache(read_data)) {
         _rbytes_transfered = read_data.bytes_transfered_;
@@ -1462,7 +1454,7 @@ void Engine::Implementation::tryFetch(EntryPointerT& _rentry_ptr)
     
     req_ptr->path_ = rfile_data.remote_path_;
     req_ptr->storage_id_ = _rentry_ptr->pmaster_->remote_;
-    req_ptr->chunk_index_ = 0;
+    req_ptr->chunk_index_ = rfile_data.currentChunkIndex();
     req_ptr->chunk_offset_ = 0;
 
     asyncFetchStoreFile(nullptr, _rentry_ptr, req_ptr, rfile_data.currentChunkIndex(), 0);
@@ -1513,12 +1505,11 @@ void Engine::Implementation::asyncFetchStoreFileHandleResponse(
     }
 
     //is there a next chunk
-    if (!rfile_data.isLastChunk(_rentry_ptr->size_)) {
-        const uint32_t prefetch_next = rfile_data.currentChunkOffset() == 0 ? 0 : 1;
-        asyncFetchStoreFile(&_rctx, _rentry_ptr, _rsent_msg_ptr, rfile_data.currentChunkIndex() + prefetch_next, 0);
+    if (!rfile_data.isLastChunk()) {
+        asyncFetchStoreFile(&_rctx, _rentry_ptr, _rsent_msg_ptr, rfile_data.peekNextChunk(), 0);
     }
-    else if (_rrecv_msg_ptr->isResponseLast()) {
-        solid_log(logger, Warning, "Done receiving: " << _rentry_ptr->name_);
+    else {
+        solid_log(logger, Warning, "");
     }
 }
 
@@ -1563,7 +1554,7 @@ void Engine::Implementation::asyncFetchStoreFile(
     };
     
     FileData& rfile_data = _rentry_ptr->fileData();
-
+    
     if (_pctx) {
 
         std::shared_ptr<main::FetchStoreRequest> req_ptr;
