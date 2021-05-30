@@ -42,9 +42,10 @@ struct FileFetchStub {
     const uint8_t  compress_algorithm_type_ = 0;
     std::shared_ptr<front::main::FetchStoreRequest> request_ptr_;
     std::shared_ptr<front::main::FetchStoreResponse>   response_ptr_[2];
-    std::set<uint32_t>  chunk_set_;
+    std::deque<uint32_t>  chunk_dq_;
     uint32_t            contiguous_chunk_count_ = 0;//used for prefetching
     uint32_t            last_chunk_index_ = 0;
+    bool                pending_request_ = false;
 
     FileFetchStub(
         uint32_t _compress_chunk_capacity,
@@ -54,19 +55,22 @@ struct FileFetchStub {
         , compress_algorithm_type_(_compress_algorithm_type){}
 
     bool isLastChunk()const {
-        return chunk_set_.size() <= 1;
+        return chunk_dq_.size() <= 1;
     }
 
     void nextChunk(){
-        chunk_set_.erase(current_chunk_index_);
-        if (!chunk_set_.empty()) {
-            current_chunk_index_ = *chunk_set_.begin();
+        chunk_dq_.pop_front();
+        if (!chunk_dq_.empty()) {
+            current_chunk_index_ = chunk_dq_.front();
+        }
+        else {
+            current_chunk_index_ = -1;
         }
     }
 
     uint32_t peekNextChunk()const {
-        solid_assert(chunk_set_.size() > 1);
-        return *(++chunk_set_.begin());
+        solid_assert(chunk_dq_.size() > 1);
+        return *(chunk_dq_.begin() + 1);
     }
 
     bool enqueue(ReadData& _rdata)
@@ -84,19 +88,32 @@ struct FileFetchStub {
         }
     }
 
+    bool insertChunk(const uint32_t _index) {
+        for (const auto& i : chunk_dq_) {
+            if (i == _index) {
+                return false;
+            }
+        }
+        chunk_dq_.push_back(_index);
+        return true;
+    }
+
     void enqueueChunks(const uint64_t _offset, const uint64_t _size) {
         uint32_t chunk_index = offsetToChunkIndex(_offset);
 
         do {
-            auto rv = chunk_set_.insert(chunk_index);
-            if (rv.second) {//insertion happened
+            auto inserted = insertChunk(chunk_index);
+            if (inserted) {//insertion happened
                 if (chunk_index != last_chunk_index_) {
                     if (chunk_index == (last_chunk_index_ + 1)) {
                         ++contiguous_chunk_count_;
                     }
                     else {
                         contiguous_chunk_count_ = 0;
+
                     }
+
+                    last_chunk_index_ = chunk_index;
                 }
             }
 
@@ -128,8 +145,8 @@ struct FileFetchStub {
     }
 
     void prepareFetchingChunk() {
-        solid_check(!chunk_set_.empty());
-        current_chunk_index_ = *chunk_set_.begin();
+        solid_check(!chunk_dq_.empty());
+        current_chunk_index_ = chunk_dq_.front();
         current_chunk_offset_ = 0;
     }
 
@@ -237,6 +254,18 @@ struct FileData : file_cache::FileData {
     }
 
     bool tryFillReads(const std::string& _data, const uint64_t _offset);
+
+    void pendingRequest(const bool _b) {
+        fetch_stub_ptr_->pending_request_ = _b;
+    }
+
+    bool pendingRequest()const {
+        return fetch_stub_ptr_->pending_request_;
+    }
+
+    void tryClearFetchStub() {
+        
+    }
 };
 
 

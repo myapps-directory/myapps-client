@@ -1450,6 +1450,8 @@ void Engine::Implementation::tryFetch(EntryPointerT& _rentry_ptr)
 {
     FileData& rfile_data = _rentry_ptr->fileData();
     rfile_data.prepareFetchingChunk();
+    rfile_data.pendingRequest(true);
+
     auto req_ptr = make_shared<main::FetchStoreRequest>();
     
     req_ptr->path_ = rfile_data.remote_path_;
@@ -1469,7 +1471,7 @@ void Engine::Implementation::asyncFetchStoreFileHandleResponse(
     bool should_wake_readers = false;
     const uint32_t received_size = rfile_data.copy(_rrecv_msg_ptr->ioss_, _rrecv_msg_ptr->chunk_.size_, _rrecv_msg_ptr->chunk_.isCompressed(), should_wake_readers);
 
-    solid_log(logger, Warning, "Received " << received_size << " offset " << rfile_data.currentChunkOffset() << " cid " << rfile_data.currentChunkIndex() << " totalsz " << _rrecv_msg_ptr->chunk_.size_);
+    solid_log(logger, Warning, _rentry_ptr->name_ <<" Received " << received_size << " offset " << rfile_data.currentChunkOffset() << " crt_idx " << rfile_data.currentChunkIndex()<< " idx "<< _rsent_msg_ptr->chunk_index_ << " off " << _rsent_msg_ptr->chunk_offset_ << " totalsz " << _rrecv_msg_ptr->chunk_.size_);
 
     if (should_wake_readers) {
         _rentry_ptr->conditionVariable().notify_all();
@@ -1488,28 +1490,36 @@ void Engine::Implementation::asyncFetchStoreFileHandleResponse(
     if (_rrecv_msg_ptr->isResponsePart()) {
         //do we need to request more data for current chunk:
         if ((_rrecv_msg_ptr->chunk_.size_ - rfile_data.currentChunkOffset()) > received_size) {
+            rfile_data.pendingRequest(true);
             asyncFetchStoreFile(&_rctx, _rentry_ptr, _rsent_msg_ptr, rfile_data.currentChunkIndex(), rfile_data.currentChunkOffset() + received_size);
             return;
         }
+        else {
+            rfile_data.pendingRequest(false);
+        }
     }
-    else if (
-        received_size == _rrecv_msg_ptr->chunk_.size_ ||
-        (rfile_data.currentChunkOffset() == 0 && rfile_data.decompressedSize() == _rentry_ptr->size_) ||
-        (rfile_data.currentChunkOffset() != 0 && (_rrecv_msg_ptr->chunk_.size_ - rfile_data.currentChunkOffset()) < received_size)
-        ) {
+    else if (rfile_data.currentChunkOffset() == 0 && !rfile_data.pendingRequest()) {//should try send another request
         rfile_data.storeRequest(std::move(_rsent_msg_ptr));
     }
     else {
         rfile_data.storeRequest(std::move(_rsent_msg_ptr));
+        solid_log(logger, Warning, _rentry_ptr->name_ << "");
+        rfile_data.pendingRequest(false);
         return;
     }
 
     //is there a next chunk
-    if (!rfile_data.isLastChunk()) {
+    
+    if (rfile_data.currentChunkIndex() != -1 && rfile_data.currentChunkOffset() == 0) {
+        rfile_data.pendingRequest(true);
+        asyncFetchStoreFile(&_rctx, _rentry_ptr, _rsent_msg_ptr, rfile_data.currentChunkIndex(), 0);
+    }
+    else if (!rfile_data.isLastChunk()) {
+        rfile_data.pendingRequest(true);
         asyncFetchStoreFile(&_rctx, _rentry_ptr, _rsent_msg_ptr, rfile_data.peekNextChunk(), 0);
     }
     else {
-        solid_log(logger, Warning, "");
+        solid_log(logger, Warning, _rentry_ptr->name_ << "");
     }
 }
 
@@ -1518,14 +1528,15 @@ void Engine::Implementation::asyncFetchStoreFile(
     std::shared_ptr<main::FetchStoreRequest>& _rreq_msg_ptr,
     const uint32_t _chunk_index, const uint32_t _chunk_offset)
 {
-    solid_log(logger, Verbose, _rentry_ptr.get() << " " << _chunk_index << " " << _chunk_offset);
-    auto lambda = [entry_ptr = _rentry_ptr, this, _chunk_index, _chunk_offset](
+    solid_log(logger, Warning, _rentry_ptr->name_ << " " << _chunk_index << " " << _chunk_offset);
+    auto lambda = [entry_ptr = _rentry_ptr, this/*, _chunk_index, _chunk_offset*/](
         frame::mprpc::ConnectionContext& _rctx,
         std::shared_ptr<main::FetchStoreRequest>& _rsent_msg_ptr,
         std::shared_ptr<main::FetchStoreResponse>& _rrecv_msg_ptr,
         ErrorConditionT const& _rerror
         )mutable {
-            
+            //solid_check(_chunk_index == _rsent_msg_ptr->chunk_index_ && _chunk_offset == _rsent_msg_ptr->chunk_offset_);
+
             FileData& rfile_data = entry_ptr->fileData();
             auto& m = entry_ptr->mutex();
             unique_lock<mutex> lock(m);
@@ -1535,8 +1546,9 @@ void Engine::Implementation::asyncFetchStoreFile(
                     _rrecv_msg_ptr->ioss_.seekg(0);
 
                     //if (_rfetch_stub.chunk_index_ == _chunk_index && _rfetch_stub.chunk_offset_ >= _chunk_offset) {
-                    if(rfile_data.isExpectedResponse(_chunk_index, _chunk_offset)){
+                    if(rfile_data.isExpectedResponse(_rsent_msg_ptr->chunk_index_, _rsent_msg_ptr->chunk_offset_)){
                         asyncFetchStoreFileHandleResponse(_rctx, entry_ptr, _rsent_msg_ptr, _rrecv_msg_ptr);
+                        rfile_data.tryClearFetchStub();
                     }
                     else {
                         rfile_data.storeResponse(_rrecv_msg_ptr);
@@ -1554,7 +1566,6 @@ void Engine::Implementation::asyncFetchStoreFile(
     };
     
     FileData& rfile_data = _rentry_ptr->fileData();
-    
     if (_pctx) {
 
         std::shared_ptr<main::FetchStoreRequest> req_ptr;
