@@ -87,6 +87,10 @@ public:
         return size_;
     }
 
+    bool isComplete()const {
+        return range_vec_.size() == 1 && range_vec_.front().size_ == size_;
+    }
+
 private:
     void addRange(const uint64_t _offset, const uint64_t _size);
     bool findRangeFront(const uint64_t _offset, size_t& _rsize) const;
@@ -112,6 +116,9 @@ struct FileData {
     size_t rageCount() const
     {
         return file_.rangeCount();
+    }
+    bool isComplete()const {
+        return file_.isComplete();
     }
 };
 

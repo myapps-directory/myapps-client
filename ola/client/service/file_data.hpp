@@ -264,7 +264,9 @@ struct FileData : file_cache::FileData {
     }
 
     void tryClearFetchStub() {
-        
+        if (this->isComplete()) {//the file is cached entirely
+            fetch_stub_ptr_.reset();
+        }
     }
 };
 

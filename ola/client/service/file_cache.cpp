@@ -678,7 +678,7 @@ void File::storeRanges()
         try {
             cereal::BinaryOutputArchive a(stream_);
 
-            size_t s = range_vec_.size();
+            const size_t s = range_vec_.size();
             a(range_vec_, s);
 
             solid_log(logger, Info, this << " " << range_vec_.size() << " " << s);

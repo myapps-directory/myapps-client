@@ -2123,7 +2123,7 @@ EntryPointerT Engine::Implementation::createEntry(EntryPointerT& _rparent_ptr, c
     return make_shared<Entry>(_type, _rparent_ptr, mutex_dq_[index % mutex_dq_.size()], cv_dq_[index % cv_dq_.size()], _name, _size);
 }
 
-void Engine::Implementation::insertDirectoryEntry(unique_lock<mutex>& _lock, EntryPointerT& _rparent_ptr, const string& _name)
+void Engine::Implementation::insertDirectoryEntry(unique_lock<mutex>& _rlock, EntryPointerT& _rparent_ptr, const string& _name)
 {
     solid_log(logger, Info, _rparent_ptr->name_ << " " << _name);
 
@@ -2132,19 +2132,22 @@ void Engine::Implementation::insertDirectoryEntry(unique_lock<mutex>& _lock, Ent
     if (!entry_ptr) {
         _rparent_ptr->directoryData().insertEntry(createEntry(_rparent_ptr, _name, EntryTypeE::Directory));
     } else {
-        _lock.unlock();
-        //make sure the entry is directory
-        auto&             rm = entry_ptr->mutex();
-        lock_guard<mutex> lock{rm};
-        entry_ptr->type_ = EntryTypeE::Directory;
+        _rlock.unlock();
+        {
+            //make sure the entry is directory
+            auto& rm = entry_ptr->mutex();
+            lock_guard<mutex> lock{ rm };
+            entry_ptr->type_ = EntryTypeE::Directory;
 
-        if (entry_ptr->directoryDataPtr() == nullptr) {
-            entry_ptr->data_any_ = DirectoryData();
+            if (entry_ptr->directoryDataPtr() == nullptr) {
+                entry_ptr->data_any_ = DirectoryData();
+            }
         }
+        _rlock.lock();
     }
 }
 
-void Engine::Implementation::insertFileEntry(unique_lock<mutex>& _lock, EntryPointerT& _rparent_ptr, const string& _name, const uint64_t _size)
+void Engine::Implementation::insertFileEntry(unique_lock<mutex>& _rlock, EntryPointerT& _rparent_ptr, const string& _name, const uint64_t _size)
 {
     solid_log(logger, Info, _rparent_ptr->name_ << " " << _name << " " << _size);
 
@@ -2153,12 +2156,15 @@ void Engine::Implementation::insertFileEntry(unique_lock<mutex>& _lock, EntryPoi
     if (!entry_ptr) {
         _rparent_ptr->directoryData().insertEntry(createEntry(_rparent_ptr, _name, EntryTypeE::File));
     } else {
-        _lock.unlock();
-        //make sure the entry is file
-        auto&             rm = entry_ptr->mutex();
-        lock_guard<mutex> lock{rm};
-        entry_ptr->type_ = EntryTypeE::File;
-        entry_ptr->size_ = _size;
+        _rlock.unlock();
+        {
+            //make sure the entry is file
+            auto& rm = entry_ptr->mutex();
+            lock_guard<mutex> lock{ rm };
+            entry_ptr->type_ = EntryTypeE::File;
+            entry_ptr->size_ = _size;
+        }
+        _rlock.lock();
     }
 }
 
