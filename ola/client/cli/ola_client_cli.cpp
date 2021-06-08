@@ -33,6 +33,8 @@
 
 #include "yaml-cpp/yaml.h"
 
+#include "lz4.h"
+
 #include <fstream>
 #include <future>
 #include <iostream>
@@ -1141,19 +1143,109 @@ struct StoreFetchStub {
     uint64_t size_ = 0;
     uint64_t decompressed_size_ = 0;
     string   compressed_chunk_;
-    uint32_t chunk_index_ = 0;
-    uint32_t chunk_offset_ = 0;
+    uint32_t current_chunk_index_ = 0;
+    uint32_t current_chunk_offset_ = 0;
     uint32_t compress_chunk_capacity_ = 0;
     uint8_t  compress_algorithm_type_ = 0;
     std::shared_ptr<main::FetchStoreRequest> request_ptr_;
     std::shared_ptr<main::FetchStoreResponse>   response_ptr_[2];
+    bool pending_request_ = false;
 
 
-    bool isLastChunk(uint64_t chunk_index_)const{
-        return ((chunk_index_ + 1) * compress_chunk_capacity_) >= size_;
+    bool isLastChunk()const{
+        return ((current_chunk_index_ + 1) * compress_chunk_capacity_) >= size_;
+    }
+
+    void pendingRequest(const bool _b) {
+        pending_request_ = _b;
+    }
+
+    bool pendingRequest()const {
+        return pending_request_;
+    }
+
+    uint32_t currentChunkOffset()const {
+        return current_chunk_offset_;
+    }
+    uint32_t currentChunkIndex()const {
+        return current_chunk_index_;
+    }
+
+    bool isExpectedResponse(const uint32_t _chunk_index, const uint32_t _chunk_offset) const {
+        return current_chunk_index_ == _chunk_index && current_chunk_offset_ >= _chunk_offset;
+    }
+
+    void nextChunk() {
+        if (!isLastChunk()) {
+            ++current_chunk_index_;
+        }
+        else {
+            current_chunk_index_ = -1;
+        }
+    }
+
+    uint32_t peekNextChunk()const {
+        solid_assert(current_chunk_index_ != -1);
+        return current_chunk_index_ + 1;
+    }
+
+    void storeResponse(std::shared_ptr<front::main::FetchStoreResponse>& _rres_ptr) {
+        if (!response_ptr_[0]) {
+            response_ptr_[0] = _rres_ptr;
+        }
+        else {
+            solid_check(!response_ptr_[1]);
+            response_ptr_[1] = _rres_ptr;
+        }
+    }
+
+    void storeRequest(std::shared_ptr<front::main::FetchStoreRequest>&& _rres_ptr)
+    {
+        request_ptr_ = std::move(_rres_ptr);
     }
 
     uint32_t copy(istream& _ris, const uint64_t _chunk_size, const bool _is_compressed) {
+        uint32_t size = 0;
+        if (_is_compressed) {
+            size = stream_copy(compressed_chunk_, _ris);
+            current_chunk_offset_ += size;
+            solid_check(current_chunk_offset_ <= _chunk_size);
+            if (current_chunk_offset_ == _chunk_size) {
+                string uncompressed_data;
+                uncompressed_data.reserve(compress_chunk_capacity_);
+                if (compress_algorithm_type_ == 1) {
+                    const auto rv = LZ4_decompress_safe(compressed_chunk_.data(), uncompressed_data.data(), compressed_chunk_.size(), compress_chunk_capacity_);
+                    solid_check(rv > 0);
+                    uncompressed_data.resize(rv);
+                }
+                else if(compress_algorithm_type_ == 0){
+                    solid_check(snappy::Uncompress(compressed_chunk_.data(), compressed_chunk_.size(), &uncompressed_data));
+                }
+                else {
+                    solid_throw("Unkown compress algorithm type: " << (int)compress_algorithm_type_);
+                }
+
+                ofs_.write(uncompressed_data.data(), uncompressed_data.size());
+                
+                decompressed_size_ += uncompressed_data.size();
+                compressed_chunk_.clear();
+                current_chunk_offset_ = 0;
+                nextChunk();
+            }
+        }
+        else {
+            size = stream_copy(ofs_, _ris);
+            current_chunk_offset_ += size;
+            solid_check(current_chunk_offset_ <= _chunk_size);
+            if (current_chunk_offset_ == _chunk_size) {
+                decompressed_size_ += _chunk_size;
+                current_chunk_offset_ = 0;
+                nextChunk();
+            }
+    }
+
+        return size;
+#if 0
         uint32_t size = 0;
         if (_is_compressed) {
             size = stream_copy(compressed_chunk_, _ris);
@@ -1185,6 +1277,7 @@ struct StoreFetchStub {
         }
 
         return size;
+#endif
     }
 };
 
@@ -1206,7 +1299,7 @@ void handle_response(
 ) {
     const uint32_t received_size = _rfetch_stub.copy(_rrecv_msg_ptr->ioss_, _rrecv_msg_ptr->chunk_.size_, _rrecv_msg_ptr->chunk_.isCompressed());
 
-    solid_log(logger, Warning, "Received " << received_size << " offset " << _rfetch_stub.chunk_offset_ << " cid " << _rfetch_stub.chunk_index_ << " totalsz " << _rrecv_msg_ptr->chunk_.size_);
+    solid_log(logger, Warning, "Received " << received_size << " offset " << _rfetch_stub.current_chunk_offset_ << " cid " << _rfetch_stub.current_chunk_index_ << " totalsz " << _rrecv_msg_ptr->chunk_.size_);
 
     if (_rfetch_stub.response_ptr_[0]) {
         auto res_ptr1 = std::move(_rfetch_stub.response_ptr_[0]);
@@ -1218,6 +1311,46 @@ void handle_response(
         return;
     }
 
+    if (_rrecv_msg_ptr->isResponsePart()) {
+        //do we need to request more data for current chunk:
+        if ((_rrecv_msg_ptr->chunk_.size_ - _rfetch_stub.currentChunkOffset()) > received_size) {
+            _rfetch_stub.pendingRequest(true);
+            //asyncFetchStoreFile(&_rctx, _rentry_ptr, _rsent_msg_ptr, rfile_data.currentChunkIndex(), rfile_data.currentChunkOffset() + received_size);
+            fetch_remote_file(&_rctx, _reng, _rprom, _rfetch_stub, _rsent_msg_ptr, _rfetch_stub.currentChunkIndex(), _rfetch_stub.currentChunkOffset() + received_size);
+            return;
+        }
+        else {
+            _rfetch_stub.pendingRequest(false);
+        }
+    }
+    else if (_rfetch_stub.currentChunkOffset() == 0 && !_rfetch_stub.pendingRequest()) {//should try send another request
+        _rfetch_stub.storeRequest(std::move(_rsent_msg_ptr));
+    }
+    else {
+        _rfetch_stub.storeRequest(std::move(_rsent_msg_ptr));
+        //solid_log(logger, Warning, _rentry_ptr->name_ << "");
+        _rfetch_stub.pendingRequest(false);
+        return;
+    }
+
+    //is there a next chunk
+
+    if (_rfetch_stub.currentChunkIndex() != -1 && _rfetch_stub.currentChunkOffset() == 0) {
+        _rfetch_stub.pendingRequest(true);
+        //asyncFetchStoreFile(&_rctx, _rentry_ptr, _rsent_msg_ptr, rfile_data.currentChunkIndex(), 0);
+        fetch_remote_file(&_rctx, _reng, _rprom, _rfetch_stub, _rsent_msg_ptr, _rfetch_stub.currentChunkIndex());
+    }
+    else if (!_rfetch_stub.isLastChunk()) {
+        _rfetch_stub.pendingRequest(true);
+        //asyncFetchStoreFile(&_rctx, _rentry_ptr, _rsent_msg_ptr, rfile_data.peekNextChunk(), 0);
+        fetch_remote_file(&_rctx, _reng, _rprom, _rfetch_stub, _rsent_msg_ptr, _rfetch_stub.peekNextChunk());
+    }
+    else {
+        solid_log(logger, Warning, "");
+        _rprom.set_value(0);
+    }
+
+#if 0
     if (_rrecv_msg_ptr->isResponsePart()) {
         //_rchunk_offset += received_size;
         //do we need to request more data for current chunk:
@@ -1246,6 +1379,7 @@ void handle_response(
     else if (_rrecv_msg_ptr->isResponseLast()) {
         _rprom.set_value(0);
     }
+#endif
 }
 
 void fetch_remote_file(
@@ -1267,16 +1401,13 @@ void fetch_remote_file(
             if(_rrecv_msg_ptr->error_ == 0){
                 _rrecv_msg_ptr->ioss_.seekg(0);
 
-                if (_rfetch_stub.chunk_index_ == _chunk_index && _rfetch_stub.chunk_offset_ >= _chunk_offset) {
+                if (_rfetch_stub.isExpectedResponse(_rsent_msg_ptr->chunk_index_, _rsent_msg_ptr->chunk_offset_)) {
                     handle_response(_rctx, _reng, _rprom, _rfetch_stub, _rsent_msg_ptr, _rrecv_msg_ptr);
                 }
-                else if (!_rfetch_stub.response_ptr_[0]) {
-                    _rfetch_stub.response_ptr_[0] = _rrecv_msg_ptr;
-                }
                 else {
-                    solid_check(!_rfetch_stub.response_ptr_[1]);
-                    _rfetch_stub.response_ptr_[1] = _rrecv_msg_ptr;
+                    _rfetch_stub.storeResponse(_rrecv_msg_ptr);
                 }
+            
             }else{
                 _rprom.set_value(_rrecv_msg_ptr->error_);
             }

@@ -94,11 +94,15 @@ include(cmake/build-cereal.cmake)
 
 include(cmake/build-snappy.cmake)
 
+include(cmake/build-lz4.cmake)
+
 include(cmake/build-yaml.cmake)
 
 include(cmake/build-libzip.cmake)
 
 include(cmake/build-replxx.cmake)
+
+
 
 if(UNIX AND NOT APPLE)
     set(LINUX TRUE)

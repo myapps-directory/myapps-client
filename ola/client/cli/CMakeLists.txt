@@ -16,6 +16,7 @@ target_link_libraries (ola_client_cli
     Boost::system
     Boost::filesystem
     ${SNAPPY_LIB}
+    ${LZ4_LIB}
     ${SYSTEM_BASIC_LIBRARIES}
     ${SYSTEM_DYNAMIC_LOAD_LIBRARY}
     ${LIBREPLXX_LIBRARIES}
@@ -27,7 +28,7 @@ set_target_properties(
     ola_client_cli PROPERTIES
         VS_DEBUGGER_WORKING_DIRECTORY $<TARGET_FILE_DIR:ola_client_cli>)
 
-add_dependencies(ola_client_cli build-snappy build-yaml build-replxx build-cereal)
+add_dependencies(ola_client_cli build-snappy build-lz4 build-yaml build-replxx build-cereal)
 install(TARGETS ola_client_cli RUNTIME DESTINATION bin)
 install(DIRECTORY $<TARGET_FILE_DIR:ola_client_cli>/certs DESTINATION "bin")
 
