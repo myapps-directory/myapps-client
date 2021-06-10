@@ -27,10 +27,13 @@ if(WIN32)
         SolidFrame::solid_frame_aio_openssl
         SolidFrame::solid_serialization_v3
         ${SNAPPY_LIB}
+        ${LZ4_LIB}
         Boost::program_options
         Boost::system
         Boost::filesystem
     )
+
+    add_dependencies(ola_client_service build-snappy build-lz4)
 
     set_target_properties(
         ola_client_service PROPERTIES

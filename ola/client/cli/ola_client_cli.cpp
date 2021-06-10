@@ -1153,7 +1153,7 @@ struct StoreFetchStub {
 
 
     bool isLastChunk()const{
-        return ((current_chunk_index_ + 1) * compress_chunk_capacity_) >= size_;
+        return current_chunk_index_ == -1 || ((current_chunk_index_ + 1) * compress_chunk_capacity_) >= size_;
     }
 
     void pendingRequest(const bool _b) {
@@ -1212,22 +1212,25 @@ struct StoreFetchStub {
             solid_check(current_chunk_offset_ <= _chunk_size);
             if (current_chunk_offset_ == _chunk_size) {
                 string uncompressed_data;
+                size_t uncompressed_size;
                 uncompressed_data.reserve(compress_chunk_capacity_);
+                
                 if (compress_algorithm_type_ == 1) {
                     const auto rv = LZ4_decompress_safe(compressed_chunk_.data(), uncompressed_data.data(), compressed_chunk_.size(), compress_chunk_capacity_);
                     solid_check(rv > 0);
-                    uncompressed_data.resize(rv);
+                    uncompressed_size = rv;
                 }
                 else if(compress_algorithm_type_ == 0){
                     solid_check(snappy::Uncompress(compressed_chunk_.data(), compressed_chunk_.size(), &uncompressed_data));
+                    uncompressed_size = uncompressed_data.size();
                 }
                 else {
                     solid_throw("Unkown compress algorithm type: " << (int)compress_algorithm_type_);
                 }
 
-                ofs_.write(uncompressed_data.data(), uncompressed_data.size());
+                ofs_.write(uncompressed_data.data(), uncompressed_size);
                 
-                decompressed_size_ += uncompressed_data.size();
+                decompressed_size_ += uncompressed_size;
                 compressed_chunk_.clear();
                 current_chunk_offset_ = 0;
                 nextChunk();
@@ -1245,39 +1248,6 @@ struct StoreFetchStub {
     }
 
         return size;
-#if 0
-        uint32_t size = 0;
-        if (_is_compressed) {
-            size = stream_copy(compressed_chunk_, _ris);
-            chunk_offset_ += size;
-            solid_check(chunk_offset_ <= _chunk_size);
-            if (chunk_offset_ == _chunk_size) {
-                string uncompressed_data;
-                uncompressed_data.reserve(compress_chunk_capacity_);
-                solid_check(snappy::Uncompress(compressed_chunk_.data(), compressed_chunk_.size(), &uncompressed_data));
-                ofs_.write(uncompressed_data.data(), uncompressed_data.size());
-                decompressed_size_ += uncompressed_data.size();
-                //size_t uncompressed_size = 0;
-                //solid_check(snappy::GetUncompressedLength(compressed_chunk_.data(), compressed_chunk_.size(), &uncompressed_size));
-                //decompressed_size_ += uncompressed_size;
-                compressed_chunk_.clear();
-                chunk_offset_ = 0;
-                ++chunk_index_;
-            }
-        }
-        else {
-            size = stream_copy(ofs_, _ris);
-            chunk_offset_ += size;
-            solid_check(chunk_offset_ <= _chunk_size);
-            if (chunk_offset_ == _chunk_size) {
-                decompressed_size_ += size;
-                chunk_offset_ = 0;
-                ++chunk_index_;
-            }
-        }
-
-        return size;
-#endif
     }
 };
 
@@ -1345,41 +1315,10 @@ void handle_response(
         //asyncFetchStoreFile(&_rctx, _rentry_ptr, _rsent_msg_ptr, rfile_data.peekNextChunk(), 0);
         fetch_remote_file(&_rctx, _reng, _rprom, _rfetch_stub, _rsent_msg_ptr, _rfetch_stub.peekNextChunk());
     }
-    else {
+    else if(_rfetch_stub.decompressed_size_ == _rfetch_stub.size_){
         solid_log(logger, Warning, "");
         _rprom.set_value(0);
     }
-
-#if 0
-    if (_rrecv_msg_ptr->isResponsePart()) {
-        //_rchunk_offset += received_size;
-        //do we need to request more data for current chunk:
-        if ((_rrecv_msg_ptr->chunk_.size_ - _rfetch_stub.chunk_offset_) > received_size) {
-            fetch_remote_file(&_rctx, _reng, _rprom, _rfetch_stub, _rsent_msg_ptr, _rfetch_stub.chunk_index_, _rfetch_stub.chunk_offset_ + received_size);
-            return;
-        }
-    }
-    else if (
-        received_size == _rrecv_msg_ptr->chunk_.size_ ||
-        (_rfetch_stub.chunk_offset_ == 0 && _rfetch_stub.decompressed_size_ == _rfetch_stub.size_) ||
-        (_rfetch_stub.chunk_offset_ != 0 && (_rrecv_msg_ptr->chunk_.size_ - _rfetch_stub.chunk_offset_) < received_size)
-        ) {
-        _rfetch_stub.request_ptr_ = std::move(_rsent_msg_ptr);
-    }
-    else {
-        _rfetch_stub.request_ptr_ = std::move(_rsent_msg_ptr);
-        return;
-    }
-
-    //is there a next chunk
-    if (!_rfetch_stub.isLastChunk(_rfetch_stub.chunk_index_)) {
-        const uint32_t prefetch_next = _rfetch_stub.chunk_offset_ == 0 ? 0 : 1;
-        fetch_remote_file(&_rctx, _reng, _rprom, _rfetch_stub, _rsent_msg_ptr, _rfetch_stub.chunk_index_ + prefetch_next);
-    }
-    else if (_rrecv_msg_ptr->isResponseLast()) {
-        _rprom.set_value(0);
-    }
-#endif
 }
 
 void fetch_remote_file(
@@ -1827,7 +1766,7 @@ void handle_create_build(istream& _ris, Engine &_reng){
     _reng.rpcService().sendRequest(_reng.serverEndpoint().c_str(), req_ptr, lambda);
     
     auto fut = prom.get_future();
-    solid_check(fut.wait_for(chrono::seconds(100)) == future_status::ready, "Taking too long - waited 100 secs");
+    solid_check(fut.wait_for(chrono::seconds(600)) == future_status::ready, "Taking too long - waited 600 secs");
     fut.get();
 }
 

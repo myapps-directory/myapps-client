@@ -60,7 +60,7 @@ public:
     uint64_t write(const uint64_t _offset, std::istream& _ris);
     bool read(char* _pbuf, uint64_t _offset, size_t _length, size_t& _rbytes_transfered_front, size_t& _rbytes_transfered_back);
 
-    void write(const uint64_t _offset, const std::string& _str);
+    void write(const uint64_t _offset, const char *_pbuf, size_t _size);
 
     void flush();
 
@@ -110,7 +110,7 @@ struct FileData {
     virtual ~FileData() = default;
 
     uint64_t writeToCache(const uint64_t _offset, std::istream& _ris);
-    void writeToCache(const uint64_t _offset, const std::string& _str);
+    void writeToCache(const uint64_t _offset, const char *_pdata, size_t _size);
     bool readFromCache(char* _pbuf, uint64_t _offset, size_t _length, size_t& _rbytes_transfered_front, size_t& _rbytes_transfered_back);
 
     size_t rageCount() const

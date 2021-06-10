@@ -1,6 +1,7 @@
 #include "file_data.hpp"
 #include "solid/system/exception.hpp"
 #include "snappy.h"
+#include "lz4.h"
 
 using namespace std;
 
@@ -50,15 +51,28 @@ uint32_t FileData::copy(istream& _ris, const uint64_t _chunk_size, const bool _i
         solid_check(rstub.current_chunk_offset_ <= _chunk_size);
         if (rstub.current_chunk_offset_ == _chunk_size) {
             string uncompressed_data;
+            size_t uncompressed_size;
             uncompressed_data.reserve(rstub.compress_chunk_capacity_);
+
+            if (rstub.compress_algorithm_type_ == 1) {
+                const auto rv = LZ4_decompress_safe(rstub.compressed_chunk_.data(), uncompressed_data.data(), rstub.compressed_chunk_.size(), rstub.compress_chunk_capacity_);
+                solid_check(rv > 0);
+                uncompressed_size = rv;
+            }
+            else if (rstub.compress_algorithm_type_ == 0) {
+                solid_check(snappy::Uncompress(rstub.compressed_chunk_.data(), rstub.compressed_chunk_.size(), &uncompressed_data));
+                uncompressed_size = uncompressed_data.size();
+            }
+            else {
+                solid_throw("Unkown compress algorithm type: " << (int)rstub.compress_algorithm_type_);
+            }
             
-            solid_check(snappy::Uncompress(rstub.compressed_chunk_.data(), rstub.compressed_chunk_.size(), &uncompressed_data));
             
-            this->writeToCache(rstub.chunkIndexToOffset(rstub.current_chunk_index_), uncompressed_data);
+            this->writeToCache(rstub.chunkIndexToOffset(rstub.current_chunk_index_), uncompressed_data.data(), uncompressed_size);
             
             _rshould_wake_readers = tryFillReads(uncompressed_data, rstub.chunkIndexToOffset(rstub.current_chunk_index_));
 
-            rstub.decompressed_size_ += uncompressed_data.size();
+            rstub.decompressed_size_ += uncompressed_size;
             rstub.compressed_chunk_.clear();
             rstub.current_chunk_offset_ = 0;
             rstub.nextChunk();

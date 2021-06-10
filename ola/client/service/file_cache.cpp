@@ -779,13 +779,13 @@ uint64_t File::write(const uint64_t _offset, std::istream& _ris)
     return read_count;
 }
 
-void File::write(const uint64_t _offset, const std::string& _str)
+void File::write(const uint64_t _offset, const char* _pbuf, size_t _size)
 {
     if (stream_.is_open()) {
         stream_.seekp(sizeof(Header) + _offset);
-        stream_.write(_str.data(), _str.size());
+        stream_.write(_pbuf, _size);
 
-        addRange(_offset, _str.size());
+        addRange(_offset, _size);
         modified_range_ = true;
         flush();
         solid_log(logger, Info, this << " " << range_vec_.size());
@@ -967,9 +967,9 @@ uint64_t FileData::writeToCache(const uint64_t _offset, istream& _ris)
     return file_.write(_offset, _ris);
 }
 
-void FileData::writeToCache(const uint64_t _offset, const string& _str)
+void FileData::writeToCache(const uint64_t _offset, const char* _pdata, size_t _size)
 {
-    file_.write(_offset, _str);
+    file_.write(_offset, _pdata, _size);
 }
 
 bool FileData::readFromCache(char* _pbuf, uint64_t _offset, size_t _length, size_t& _rbytes_transfered_front, size_t& _rbytes_transfered_back)
