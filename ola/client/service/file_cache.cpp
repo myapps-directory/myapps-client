@@ -83,7 +83,7 @@ struct FileStub {
 };
 
 struct FileStubLess {
-    bool operator()(const FileStub* _p1, const FileStub* _p2) const
+    bool operator()(const FileStub* const _p1, const FileStub* const _p2) const
     {
         if (_p1->usage_ < _p2->usage_)
             return true;

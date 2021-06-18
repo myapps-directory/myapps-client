@@ -186,7 +186,7 @@ struct FileData : file_cache::FileData {
 
     bool readFromCache(ReadData& _rdata);
 
-    bool readFromMemory(ReadData& _rdata, const std::string& _data, const uint64_t _offset);
+    bool readFromMemory(ReadData& _rdata, const std::string& _data, const uint64_t _offset, const size_t _size);
 
 
     bool enqueue(ReadData& _rdata, const uint64_t _size, const uint32_t _compress_chunk_capacity, const uint8_t _compress_algorithm_type)
@@ -253,7 +253,7 @@ struct FileData : file_cache::FileData {
         return fetch_stub_ptr_->peekNextChunk();
     }
 
-    bool tryFillReads(const std::string& _data, const uint64_t _offset);
+    bool tryFillReads(const std::string& _data, const uint64_t _offset, const size_t _size);
 
     void pendingRequest(const bool _b) {
         fetch_stub_ptr_->pending_request_ = _b;

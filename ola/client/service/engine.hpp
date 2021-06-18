@@ -76,7 +76,7 @@ public:
 
     void appListUpdate();
 
-    Descriptor* open(const fs::path& _path, uint32_t _create_flags);
+    Descriptor* open(const fs::path& _path, uint32_t _create_flags, uint32_t _granted_access);
 
     void cleanup(Descriptor* _pdesc);
 

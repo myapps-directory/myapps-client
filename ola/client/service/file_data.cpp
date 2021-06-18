@@ -2,6 +2,7 @@
 #include "solid/system/exception.hpp"
 #include "snappy.h"
 #include "lz4.h"
+#include <istream>
 
 using namespace std;
 
@@ -42,7 +43,7 @@ namespace {
         return size;
     }
 }
-uint32_t FileData::copy(istream& _ris, const uint64_t _chunk_size, const bool _is_compressed, bool &_rshould_wake_readers) {
+uint32_t FileData::copy(std::istream& _ris, const uint64_t _chunk_size, const bool _is_compressed, bool &_rshould_wake_readers) {
     uint32_t size = 0;
     auto& rstub = *fetch_stub_ptr_;
     if (_is_compressed) {
@@ -70,7 +71,7 @@ uint32_t FileData::copy(istream& _ris, const uint64_t _chunk_size, const bool _i
             
             this->writeToCache(rstub.chunkIndexToOffset(rstub.current_chunk_index_), uncompressed_data.data(), uncompressed_size);
             
-            _rshould_wake_readers = tryFillReads(uncompressed_data, rstub.chunkIndexToOffset(rstub.current_chunk_index_));
+            _rshould_wake_readers = tryFillReads(uncompressed_data, rstub.chunkIndexToOffset(rstub.current_chunk_index_), uncompressed_size);
 
             rstub.decompressed_size_ += uncompressed_size;
             rstub.compressed_chunk_.clear();
@@ -80,10 +81,11 @@ uint32_t FileData::copy(istream& _ris, const uint64_t _chunk_size, const bool _i
     }
     else {
         size = this->writeToCache(rstub.chunkIndexToOffset(rstub.current_chunk_index_) + rstub.current_chunk_offset_, _ris);
+        solid_check(size, "size should not be zero");
         rstub.current_chunk_offset_ += size;
         solid_check(rstub.current_chunk_offset_ <= _chunk_size);
         if (rstub.current_chunk_offset_ == _chunk_size) {
-            _rshould_wake_readers = tryFillReads(string(), rstub.chunkIndexToOffset(rstub.current_chunk_index_));
+            _rshould_wake_readers = tryFillReads(string(), rstub.chunkIndexToOffset(rstub.current_chunk_index_), 0);
             rstub.decompressed_size_ += _chunk_size;
             rstub.current_chunk_offset_ = 0;
             rstub.nextChunk();
@@ -106,12 +108,12 @@ bool FileData::readFromCache(ReadData& _rdata)
     return b;
 }
 
-bool FileData::readFromMemory(ReadData& _rdata, const std::string& _data, const uint64_t _offset) {
-    if (!_data.empty()) {
-        uint64_t end_offset = _offset + _data.size();
+bool FileData::readFromMemory(ReadData& _rdata, const std::string& _data, const uint64_t _offset, const size_t _size) {
+    if (_size) {
+        uint64_t end_offset = _offset + _size;
         if (_rdata.offset_ >= _offset && _rdata.offset_ < end_offset) {
             //we can copy the front part
-            size_t to_copy = _data.size() - (_rdata.offset_ - _offset);
+            size_t to_copy = _size - (_rdata.offset_ - _offset);
             if (to_copy > _rdata.size_) {
                 to_copy = _rdata.size_;
             }
@@ -141,13 +143,13 @@ bool FileData::readFromMemory(ReadData& _rdata, const std::string& _data, const 
     return _rdata.size_ == 0;
 }
 
-bool FileData::tryFillReads(const std::string& _data, const uint64_t _offset)
+bool FileData::tryFillReads(const std::string& _data, const uint64_t _offset, const size_t _size)
 {
     bool ret_val = false;
     auto& rstub = *fetch_stub_ptr_;
     for (auto* prd = rstub.pfront_; prd != nullptr;) {
 
-        if (readFromMemory(*prd, _data, _offset)) {
+        if (readFromMemory(*prd, _data, _offset, _size)) {
         }
         else {
             readFromCache(*prd);

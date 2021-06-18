@@ -125,9 +125,9 @@ struct FileData {
 struct Configuration {
     fs::path base_path_;
 
-    uint64_t max_size_      = 5 * 1024 * 1024 * 1024;
-    uint64_t max_file_size_ = 200 * 1024 * 1024;
-    size_t   max_count_     = 10 * 1024;
+    uint64_t max_size_      = 100ULL * 1024 * 1024 * 1024;
+    uint64_t max_file_size_ = 10ULL * 1024 * 1024 * 1024;
+    size_t   max_count_     = 100 * 1024;
 };
 
 using UniqueIdT = solid::frame::UniqueId;
