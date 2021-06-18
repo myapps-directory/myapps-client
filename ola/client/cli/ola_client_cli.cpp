@@ -1296,6 +1296,10 @@ void handle_response(
     else if (_rfetch_stub.currentChunkOffset() == 0 && !_rfetch_stub.pendingRequest()) {//should try send another request
         _rfetch_stub.storeRequest(std::move(_rsent_msg_ptr));
     }
+    else if (_rfetch_stub.currentChunkOffset() == 0 && _rfetch_stub.pendingRequest() && (received_size == _rrecv_msg_ptr->chunk_.size_)) {//should try send another request
+        _rfetch_stub.storeRequest(std::move(_rsent_msg_ptr));
+        _rfetch_stub.pendingRequest(false);
+    }
     else {
         _rfetch_stub.storeRequest(std::move(_rsent_msg_ptr));
         //solid_log(logger, Warning, _rentry_ptr->name_ << "");
