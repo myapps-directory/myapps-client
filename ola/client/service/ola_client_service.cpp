@@ -1193,18 +1193,11 @@ NTSTATUS FileSystem::GetSecurityByName(
 		++FileName;
         NodeFlagsT node_flags;
 	    uint64_t size = 0;
-        try {
-            if (engine().info(FileName, node_flags, size)) {
-
-                *PFileAttributes = FILE_ATTRIBUTE_READONLY | FILE_ATTRIBUTE_NOT_CONTENT_INDEXED | node_flags_to_attributes(node_flags);
-
-            }
-            else {
-                return NtStatusFromWin32(ERROR_PATH_NOT_FOUND);
-            }
+        if (engine().info(FileName, node_flags, size)) {
+            *PFileAttributes = FILE_ATTRIBUTE_READONLY | FILE_ATTRIBUTE_NOT_CONTENT_INDEXED | node_flags_to_attributes(node_flags);
         }
-        catch (...) {
-            terminate();
+        else {
+            return NtStatusFromWin32(ERROR_PATH_NOT_FOUND);
         }
     }
     

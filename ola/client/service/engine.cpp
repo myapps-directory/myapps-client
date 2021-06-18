@@ -962,21 +962,28 @@ void Engine::appListUpdate() {
 
 bool Engine::info(const fs::path& _path, NodeFlagsT& _rnode_flags, uint64_t& _rsize)
 {
-    EntryPointerT      entry_ptr = atomic_load(&pimpl_->root_entry_ptr_);
-    mutex&             rmutex    = entry_ptr->mutex();
-    unique_lock<mutex> lock{rmutex};
+    try {
+        EntryPointerT      entry_ptr = atomic_load(&pimpl_->root_entry_ptr_);
+        mutex& rmutex = entry_ptr->mutex();
+        unique_lock<mutex> lock{ rmutex };
 
-    if (pimpl_->entry(_path, entry_ptr, lock)) {
-        entry_ptr->info(_rnode_flags, _rsize);
+        if (pimpl_->entry(_path, entry_ptr, lock)) {
+            entry_ptr->info(_rnode_flags, _rsize);
 
-        Entry* papp_entry = nullptr;
-        if (entry_ptr && entry_ptr->pmaster_ && entry_ptr->pmaster_->isApplication()) {
-            papp_entry = entry_ptr->pmaster_;
-            pimpl_->releaseApplication(*papp_entry);
+            Entry* papp_entry = nullptr;
+            if (entry_ptr && entry_ptr->pmaster_ && entry_ptr->pmaster_->isApplication()) {
+                papp_entry = entry_ptr->pmaster_;
+                pimpl_->releaseApplication(*papp_entry);
+            }
+
+            solid_log(logger, Verbose, "INFO: " << _path.generic_path() << " " << static_cast<int>(_rnode_flags) << " " << _rsize);
+            return true;
         }
-
-        solid_log(logger, Verbose, "INFO: " << _path.generic_path() << " " << static_cast<int>(_rnode_flags) << " " << _rsize);
-        return true;
+    }
+    catch (std::exception &e) {
+        solid_log(logger, Error, _path.generic_path() << " Exception caught: "<<e.what());
+    }catch(...){
+        solid_log(logger, Error, _path.generic_path()<<" Unknown Exception caught");
     }
     solid_log(logger, Verbose, "INFO: FAIL " << _path.generic_path());
     return false;
@@ -994,15 +1001,23 @@ const string app_name = "LibreOffice";
 
 Descriptor* Engine::open(const fs::path& _path, uint32_t _create_flags, uint32_t _granted_access)
 {
-    EntryPointerT      entry_ptr = atomic_load(&pimpl_->root_entry_ptr_);
-    mutex&             rmutex    = entry_ptr->mutex();
-    unique_lock<mutex> lock{rmutex};
+    try{
+        EntryPointerT      entry_ptr = atomic_load(&pimpl_->root_entry_ptr_);
+        mutex&             rmutex    = entry_ptr->mutex();
+        unique_lock<mutex> lock{rmutex};
 
-    if (pimpl_->entry(_path, entry_ptr, lock)) {
-        auto pdesc = new Descriptor(std::move(entry_ptr));
-        ++pimpl_->open_count_;
-        solid_log(logger, Verbose, "OPEN: " << _create_flags << ' ' << _path.generic_path() << " -> " << pdesc << " entry: " << pdesc->entry_ptr_.get() << " open_count = " << pimpl_->open_count_);
-        return pdesc;
+        if (pimpl_->entry(_path, entry_ptr, lock)) {
+            auto pdesc = new Descriptor(std::move(entry_ptr));
+            ++pimpl_->open_count_;
+            solid_log(logger, Verbose, "OPEN: " << _create_flags << ' ' << _path.generic_path() << " -> " << pdesc << " entry: " << pdesc->entry_ptr_.get() << " open_count = " << pimpl_->open_count_);
+            return pdesc;
+        }
+    }
+    catch (std::exception& e) {
+        solid_log(logger, Error, _path.generic_path() << " Exception caught: " << e.what());
+    }
+    catch (...) {
+        solid_log(logger, Error, _path.generic_path() << " Unknown Exception caught");
     }
     return nullptr;
 }
@@ -1251,20 +1266,46 @@ bool Engine::Implementation::entry(const fs::path& _path, EntryPointerT& _rentry
 
 void Engine::info(Descriptor* _pdesc, NodeFlagsT& _rnode_flags, uint64_t& _rsize)
 {
-    auto&             m = _pdesc->entry_ptr_->mutex();
-    lock_guard<mutex> lock(m);
+    try {
+        auto& m = _pdesc->entry_ptr_->mutex();
+        lock_guard<mutex> lock(m);
 
-    _pdesc->entry_ptr_->info(_rnode_flags, _rsize);
+        _pdesc->entry_ptr_->info(_rnode_flags, _rsize);
+    }
+    catch (std::exception& e) {
+        solid_log(logger, Error, " Exception caught: " << e.what());
+    }
+    catch (...) {
+        solid_log(logger, Error, " Unknown Exception caught");
+    }
 }
 
 bool Engine::list(Descriptor* _pdesc, void*& _rpctx, std::wstring& _rname, NodeFlagsT& _rnode_flags, uint64_t& _rsize)
 {
-    return pimpl_->list(_pdesc->entry_ptr_, _rpctx, _rname, _rnode_flags, _rsize);
+    try {
+        return pimpl_->list(_pdesc->entry_ptr_, _rpctx, _rname, _rnode_flags, _rsize);
+    }
+    catch (std::exception& e) {
+        solid_log(logger, Error, " Exception caught: " << e.what());
+    }
+    catch (...) {
+        solid_log(logger, Error, " Unknown Exception caught");
+    }
+    return false;
 }
 
 bool Engine::read(Descriptor* _pdesc, void* _pbuf, uint64_t _offset, unsigned long _length, unsigned long& _rbytes_transfered)
 {
-    return pimpl_->read(_pdesc, static_cast<char*>(_pbuf), _offset, _length, _rbytes_transfered);
+    try {
+        return pimpl_->read(_pdesc, static_cast<char*>(_pbuf), _offset, _length, _rbytes_transfered);
+    }
+    catch (std::exception& e) {
+        solid_log(logger, Error, " Exception caught: " << e.what());
+    }
+    catch (...) {
+        solid_log(logger, Error, " Unknown Exception caught");
+    }
+    return false;
 }
 
 // -- Implementation --------------------------------------------------------------------
