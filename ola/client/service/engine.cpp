@@ -116,9 +116,8 @@ struct Hash {
         std::size_t seed = 0;
         std::locale locale;
 
-        for (std::string::const_iterator it = _rrw.get().begin();
-             it != _rrw.get().end(); ++it) {
-            boost::hash_combine(seed, std::toupper(*it, locale));
+        for (const auto &c: _rrw.get()) {
+            boost::hash_combine(seed, std::toupper(c, locale));
         }
 
         return seed;
