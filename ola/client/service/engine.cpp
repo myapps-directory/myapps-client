@@ -863,7 +863,7 @@ void Engine::start(const Configuration& _rcfg)
 
         {
             auto connection_start_lambda = [this](frame::mprpc::ConnectionContext& _rctx) {
-                _rctx.anyTuple() = std::make_tuple(front::core::version, front::main::version, ola::utility::version);
+                _rctx.any() = std::make_tuple(front::core::version, front::main::version, ola::utility::version);
                 pimpl_->onFrontConnectionStart(_rctx);
             };
             auto connection_stop_lambda = [this](frame::mprpc::ConnectionContext& _ctx) {
