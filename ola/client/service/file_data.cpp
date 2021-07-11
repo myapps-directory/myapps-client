@@ -77,6 +77,7 @@ uint32_t FileData::copy(std::istream& _ris, const uint64_t _chunk_size, const bo
             rstub.compressed_chunk_.clear();
             rstub.current_chunk_offset_ = 0;
             rstub.nextChunk();
+            solid_check(rstub.empty() == rstub.chunk_dq_.empty());
         }
     }
     else {
@@ -89,6 +90,7 @@ uint32_t FileData::copy(std::istream& _ris, const uint64_t _chunk_size, const bo
             rstub.decompressed_size_ += _chunk_size;
             rstub.current_chunk_offset_ = 0;
             rstub.nextChunk();
+            solid_check(rstub.empty() == rstub.chunk_dq_.empty());
         }
     }
 
@@ -135,8 +137,6 @@ bool FileData::readFromMemory(ReadData& _rdata, const std::string& _data, const 
             memcpy(_rdata.pbuffer_ + _rdata.size_ - to_copy, _data.data(), to_copy);
             
             _rdata.bytes_transfered_ += to_copy;
-            _rdata.offset_ += to_copy;
-            _rdata.pbuffer_ += to_copy;
             _rdata.size_ -= to_copy;
         }
     }

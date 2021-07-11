@@ -439,7 +439,7 @@ struct Entry {
 
     void info(NodeFlagsT& _rnode_flags, uint64_t& _rsize) const
     {
-        solid_log(logger, Info, ""<<this->name_);
+        solid_log(logger, Info, ""<<this->name_<< " "<<size_);
         _rnode_flags = 0;
         _rsize       = size_;
         switch (type_) {
@@ -992,8 +992,8 @@ bool Engine::info(const fs::path& _path, NodeFlagsT& _rnode_flags, uint64_t& _rs
 
 #ifdef OLA_VALIDATE_READ
 
-string base_path = "C:\\Users\\vipal\\builds\\apps\\LibreOffice\\";
-const string app_name = "LibreOffice";
+string base_path = "C:\\Users\\vipal\\builds\\apps\\Mozilla Firefox\\";
+const string app_name = "Firefox";
 #define FULLPATH_SIZE (MAX_PATH + FSP_FSCTL_TRANSACT_PATH_SIZEMAX / sizeof(WCHAR))
 
 #endif
@@ -1465,7 +1465,7 @@ bool Engine::Implementation::read(
     }
     solid_check_log(_length == _rbytes_transfered, logger, _length<<" vs "<< _rbytes_transfered);
 #ifdef OLA_VALIDATE_READ
-    if(should_validate){
+    if (should_validate) {
         ifstream ifs(file_path, ifstream::binary);
         solid_check(ifs);
         char* pbuf = new char[_length];
@@ -1473,7 +1473,16 @@ bool Engine::Implementation::read(
         ifs.seekg(_offset);
         ifs.read(pbuf, _length);
         solid_check(ifs.gcount() == _length);
-        solid_check(memcmp(pbuf, _pbuf, _length) == 0);
+        //solid_check(memcmp(pbuf, _pbuf, _length) == 0);
+        if (memcmp(pbuf, _pbuf, _length) != 0) {
+            size_t i = 0;
+            for (; i < _length; ++i) {
+                if (pbuf[i] != _pbuf[i]) {
+                    break;
+                }
+            }
+            solid_check(i == _length);
+        }
 
         delete[]pbuf;
     }
@@ -1492,7 +1501,7 @@ bool Engine::Implementation::readFromFile(
 
     if (rfile_data.readFromCache(read_data)) {
         _rbytes_transfered = read_data.bytes_transfered_;
-        solid_log(logger, Verbose, "READ: " << _rentry_ptr.get() << " read from cache " << _rbytes_transfered);
+        solid_log(logger, Verbose, "READ: " << _rentry_ptr.get() << " " << _offset << " " << _length << " " << _rbytes_transfered);
         return true;
     }
     
@@ -1560,6 +1569,7 @@ void Engine::Implementation::asyncFetchStoreFileHandleResponse(
     }
 
     if (rfile_data.responsePointer(0)) {
+        solid_log(logger, Warning, _rentry_ptr->name_ << " response pointer");
         auto res_ptr1 = std::move(rfile_data.responsePointer(0));
         auto res_ptr2 = std::move(rfile_data.responsePointer(1));
         asyncFetchStoreFileHandleResponse(_rctx, _rentry_ptr, _rsent_msg_ptr, res_ptr1);
@@ -1598,9 +1608,11 @@ void Engine::Implementation::asyncFetchStoreFileHandleResponse(
     
     if (rfile_data.currentChunkIndex() != -1 && rfile_data.currentChunkOffset() == 0) {
         rfile_data.pendingRequest(true);
+        solid_log(logger, Warning, _rentry_ptr->name_ << "");
         asyncFetchStoreFile(&_rctx, _rentry_ptr, _rsent_msg_ptr, rfile_data.currentChunkIndex(), 0);
     }
     else if (!rfile_data.isLastChunk()) {
+        solid_log(logger, Warning, _rentry_ptr->name_ << " not last chunk ");
         rfile_data.pendingRequest(true);
         asyncFetchStoreFile(&_rctx, _rentry_ptr, _rsent_msg_ptr, rfile_data.peekNextChunk(), 0);
     }
@@ -1635,6 +1647,7 @@ void Engine::Implementation::asyncFetchStoreFile(
                         rfile_data.tryClearFetchStub();
                     }
                     else {
+                        solid_log(logger, Warning, entry_ptr->name_ << " store response for " << _rsent_msg_ptr->chunk_index_ << " " << _rsent_msg_ptr->chunk_offset_);
                         rfile_data.storeResponse(_rrecv_msg_ptr);
                     }
                 }

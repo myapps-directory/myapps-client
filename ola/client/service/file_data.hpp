@@ -58,6 +58,10 @@ struct FileFetchStub {
         return chunk_dq_.size() <= 1;
     }
 
+    bool empty()const {
+        return pback_ == nullptr;
+    }
+
     void nextChunk(){
         chunk_dq_.pop_front();
         if (!chunk_dq_.empty()) {
@@ -110,9 +114,7 @@ struct FileFetchStub {
                     }
                     else {
                         contiguous_chunk_count_ = 0;
-
                     }
-
                     last_chunk_index_ = chunk_index;
                 }
             }
@@ -124,7 +126,7 @@ struct FileFetchStub {
     uint32_t offsetToChunkIndex(const uint64_t _offset)const {
         return _offset / compress_chunk_capacity_;
     }
-    uint64_t chunkIndexToOffset(const uint32_t _chunk_index)const {
+    uint64_t chunkIndexToOffset(const uint64_t _chunk_index)const {
         return _chunk_index * compress_chunk_capacity_;
     }
 

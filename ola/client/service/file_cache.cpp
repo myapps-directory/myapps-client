@@ -740,11 +740,12 @@ bool File::read(char* _pbuf, uint64_t _offset, size_t _length, size_t& _rbytes_t
     else {
         _rbytes_transfered_front = 0;
     }
+    
     uint64_t read_offset = 0;
     len = _length;
     if (findRangeBack(_offset, read_offset, len)) {
         stream_.seekg(sizeof(Header) + read_offset);
-        stream_.read(_pbuf, len);
+        stream_.read(_pbuf + (_length - len), len);
         solid_assert(len == stream_.gcount());
         _rbytes_transfered_back = len;
     }
