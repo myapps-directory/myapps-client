@@ -170,9 +170,9 @@ struct FileFetchStub {
 };
 
 struct FileData : file_cache::FileData {
-    std::string               remote_path_;
-    std::unique_ptr<FileFetchStub> fetch_stub_ptr_;
-    uint32_t                   error_ = 0;
+    std::string                     remote_path_;
+    std::unique_ptr<FileFetchStub>  fetch_stub_ptr_;
+    uint32_t                        error_ = 0;
     
     FileData(const std::string& _remote_path)
         : remote_path_(_remote_path)
@@ -191,16 +191,22 @@ struct FileData : file_cache::FileData {
     bool readFromMemory(ReadData& _rdata, const std::string& _data, const uint64_t _offset, const size_t _size);
 
 
-    bool enqueue(ReadData& _rdata, const uint64_t _size, const uint32_t _compress_chunk_capacity, const uint8_t _compress_algorithm_type)
+    bool enqueue(ReadData& _rdata, const uint64_t _size)
     {
+        fetch_stub_ptr_->enqueueChunks(_rdata.offset_, _rdata.size_);
+
+        return fetch_stub_ptr_->enqueue(_rdata);
+    }
+
+    void init(const uint32_t _compress_chunk_capacity, const uint8_t _compress_algorithm_type) {
         if (!fetch_stub_ptr_) {
             //lazy initialization
             fetch_stub_ptr_ = std::make_unique<FileFetchStub>(_compress_chunk_capacity, _compress_algorithm_type);
         }
-        
-        fetch_stub_ptr_->enqueueChunks(_rdata.offset_, _rdata.size_);
+    }
 
-        return fetch_stub_ptr_->enqueue(_rdata);
+    bool isInitiated()const {
+        return fetch_stub_ptr_.get() != nullptr;
     }
 
     void prepareFetchingChunk() {

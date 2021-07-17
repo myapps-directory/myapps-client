@@ -68,7 +68,6 @@ uint32_t FileData::copy(std::istream& _ris, const uint64_t _chunk_size, const bo
                 solid_throw("Unkown compress algorithm type: " << (int)rstub.compress_algorithm_type_);
             }
             
-            
             this->writeToCache(rstub.chunkIndexToOffset(rstub.current_chunk_index_), uncompressed_data.data(), uncompressed_size);
             
             _rshould_wake_readers = tryFillReads(uncompressed_data, rstub.chunkIndexToOffset(rstub.current_chunk_index_), uncompressed_size);

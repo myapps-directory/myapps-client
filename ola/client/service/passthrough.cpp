@@ -322,7 +322,7 @@ NTSTATUS Ptfs::GetFileInfoInternal(HANDLE Handle, FileInfo* FileInfo)
         FileInfo->FileSize =
             ((UINT64)ByHandleFileInfo.nFileSizeHigh << 32) | (UINT64)ByHandleFileInfo.nFileSizeLow;
     }
-    wcout << "GetFileInfoInternal "<<Handle<<" " << FileInfo->FileAttributes << endl;
+    //wcout << "GetFileInfoInternal "<<Handle<<" " << FileInfo->FileAttributes << endl;
     FileInfo->AllocationSize = (FileInfo->FileSize + ALLOCATION_UNIT - 1)
         / ALLOCATION_UNIT * ALLOCATION_UNIT;
     FileInfo->CreationTime = base_time_;// ((PLARGE_INTEGER)&ByHandleFileInfo.ftCreationTime)->QuadPart;
@@ -409,10 +409,10 @@ NTSTATUS Ptfs::GetSecurityByName(
         AttributeTagInfo.FileAttributes = AttributeTagInfo.FileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_NORMAL);
         *PFileAttributes = FILE_ATTRIBUTE_READONLY | FILE_ATTRIBUTE_NOT_CONTENT_INDEXED | FILE_ATTRIBUTE_HIDDEN |  AttributeTagInfo.FileAttributes ;
 
-        wcout << "GetSecurityByName " << FileName << " " << *PFileAttributes << endl;
+        //wcout << "GetSecurityByName " << FileName << " " << *PFileAttributes << endl;
     }
     else {
-        wcout << "GetSecurityByName " << FileName << endl;
+        //wcout << "GetSecurityByName " << FileName << endl;
     }
 #if 0
     if (0 != PSecurityDescriptorSize)
@@ -429,7 +429,7 @@ NTSTATUS Ptfs::GetSecurityByName(
         *PSecurityDescriptorSize = SecurityDescriptorSizeNeeded;
     }
 #else
-    wcout << "GetSecurityByName " << FileName << endl;
+    //wcout << "GetSecurityByName " << FileName << endl;
     if (PSecurityDescriptorSize != nullptr) {
 
         if (this->security_size_ > *PSecurityDescriptorSize)
@@ -529,7 +529,7 @@ NTSTATUS Ptfs::Open(
     PtfsFileDesc* FileDesc;
 
     if (!ConcatPath(FileName, FullPath)) {
-        wcout << "open - concat " << FileName << endl;
+        //wcout << "open - concat " << FileName << endl;
         return STATUS_OBJECT_NAME_INVALID;
     }
 
@@ -544,13 +544,13 @@ NTSTATUS Ptfs::Open(
         OPEN_EXISTING, CreateFlags, 0);
     if (INVALID_HANDLE_VALUE == FileDesc->Handle)
     {
-        wcout << "open - create" << FileName <<endl;
+        //wcout << "open - create" << FileName <<endl;
         delete FileDesc;
         return NtStatusFromWin32(GetLastError());
     }
 
     *PFileDesc = FileDesc;
-    wcout << "open " << FileName <<" " << FileDesc <<" "<< FileDesc->Handle << endl;
+    //wcout << "open " << FileName <<" " << FileDesc <<" "<< FileDesc->Handle << endl;
     return GetFileInfoInternal(FileDesc->Handle, &OpenFileInfo->FileInfo);
 }
 
@@ -645,7 +645,7 @@ NTSTATUS Ptfs::Read(
         return  NtStatusFromWin32(ERROR_HANDLE_EOF);
     }
 
-    //wcout << "read " << FileDesc << " " << Handle << " " << Offset << " " << Length << " "<< *PBytesTransferred << endl;
+    ////wcout << "read " << FileDesc << " " << Handle << " " << Offset << " " << Length << " "<< *PBytesTransferred << endl;
 
     return STATUS_SUCCESS;
 }
@@ -711,7 +711,7 @@ NTSTATUS Ptfs::GetFileInfo(
     FileInfo* FileInfo)
 {
     HANDLE Handle = HandleFromFileDesc(FileDesc);
-    wcout << "GetFileInfo " << FileDesc << endl;
+    //wcout << "GetFileInfo " << FileDesc << endl;
     return GetFileInfoInternal(Handle, FileInfo);
 }
 
@@ -854,7 +854,7 @@ NTSTATUS Ptfs::GetSecurity(
 
     *PSecurityDescriptorSize = SecurityDescriptorSizeNeeded;
 #else
-    wcout << "GetSecurity " << FileDesc << endl;
+    //wcout << "GetSecurity " << FileDesc << endl;
     if (PSecurityDescriptorSize != nullptr) {
 
         if (this->security_size_ > *PSecurityDescriptorSize)
@@ -897,7 +897,7 @@ NTSTATUS Ptfs::ReadDirectory(
     ULONG Length,
     PULONG PBytesTransferred)
 {
-    wcout << "ReadDirectory " << FileDesc0 << endl;
+    //wcout << "ReadDirectory " << FileDesc0 << endl;
     PtfsFileDesc* FileDesc = (PtfsFileDesc*)FileDesc0;
     return BufferedReadDirectory(&FileDesc->DirBuffer,
         FileNode, FileDesc, Pattern, Marker, Buffer, Length, PBytesTransferred);

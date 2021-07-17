@@ -63,6 +63,7 @@ enum struct EntryFlagsE : uint8_t {
     Hidden,
     Invisible,
     Volatile,
+    Media,
     Delete,
     Update,
 };
@@ -283,7 +284,7 @@ struct Entry {
         return type_ == EntryTypeE::File;
     }
 
-    bool isMedia() const
+    bool isMediaRoot() const
     {
         return type_ == EntryTypeE::Media;
     }
@@ -492,6 +493,11 @@ struct Entry {
     bool isVolatile() const
     {
         return entry_has_flag(flags_, EntryFlagsE::Volatile);
+    }
+
+    bool isMedia() const
+    {
+        return entry_has_flag(flags_, EntryFlagsE::Media);
     }
 
     bool hasDelete() const
@@ -731,7 +737,7 @@ public:
 
     void createEntryData(
         unique_lock<mutex>& _lock, EntryPointerT& _rentry_ptr,
-        const std::string& _path_str, ListNodeDequeT& _rnode_dq,
+        ListNodeDequeT& _rnode_dq,
         const uint32_t _compress_chunk_capacity,
         const uint8_t _compress_algorithm_type
     );
@@ -741,11 +747,8 @@ public:
 
     void createRootEntry();
 
+    bool fetch(EntryPointerT& _rentry_ptr, unique_lock<mutex>& _rlock, const string& _remote_path);
     bool entry(const fs::path& _path, EntryPointerT& _rentry_ptr, unique_lock<mutex>& _rlock);
-
-    bool findOrCreateEntry(
-        const fs::path& _path, EntryPointerT& _rentry_ptr, unique_lock<mutex>& _rlock, std::string& _remote_path,
-        const string*& _rpapp_unique, const string*& _rpbuild_unique);
 
     void asyncFetchStoreFileHandleResponse(
         frame::mprpc::ConnectionContext& _rctx, EntryPointerT& _rentry_ptr,
@@ -992,8 +995,8 @@ bool Engine::info(const fs::path& _path, NodeFlagsT& _rnode_flags, uint64_t& _rs
 
 #ifdef OLA_VALIDATE_READ
 
-string base_path = "C:\\Users\\vipal\\builds\\apps\\Mozilla Firefox\\";
-const string app_name = "Firefox";
+string base_path = "C:\\Users\\vipal\\builds\\apps\\Chrome\\";
+const string app_name = "Chrome Canary";
 #define FULLPATH_SIZE (MAX_PATH + FSP_FSCTL_TRANSACT_PATH_SIZEMAX / sizeof(WCHAR))
 
 #endif
@@ -1063,30 +1066,69 @@ void Engine::close(Descriptor* _pdesc)
     }
 }
 
-bool Engine::Implementation::findOrCreateEntry(
-    const fs::path& _path, EntryPointerT& _rentry_ptr, unique_lock<mutex>& _rlock, std::string& _remote_path,
-    const string*& _rpapp_unique, const string*& _rpbuild_unique)
+bool Engine::Implementation::fetch(EntryPointerT& _rentry_ptr, unique_lock<mutex>& _rlock, const string& _remote_path) {
+    if (_rentry_ptr->status_ == EntryStatusE::FetchRequired) {
+        _rentry_ptr->status_ = EntryStatusE::FetchPending;
+        auto lambda = [entry_ptr = _rentry_ptr, this](
+            frame::mprpc::ConnectionContext& _rctx,
+            std::shared_ptr<main::ListStoreRequest>& _rsent_msg_ptr,
+            std::shared_ptr<main::ListStoreResponse>& _rrecv_msg_ptr,
+            ErrorConditionT const& _rerror) mutable {
+                auto& m = entry_ptr->mutex();
+                unique_lock<mutex> lock{ m };
+                if (_rrecv_msg_ptr && _rrecv_msg_ptr->error_ == 0) {
+                    entry_ptr->status_ = EntryStatusE::Fetched;
+                    if (entry_ptr->isApplication()) {
+                        auto& rad = entry_ptr->applicationData();
+                        rad.compress_chunk_capacity_ = _rrecv_msg_ptr->compress_chunk_capacity_;
+                        rad.compress_algorithm_type_ = _rrecv_msg_ptr->compress_algorithm_type_;
+                    }
+                    createEntryData(
+                        lock, entry_ptr, _rrecv_msg_ptr->node_dq_,
+                        _rrecv_msg_ptr->compress_chunk_capacity_,
+                        _rrecv_msg_ptr->compress_algorithm_type_
+                    );
+                }
+                else {
+                    entry_ptr->status_ = EntryStatusE::FetchError;
+                }
+                entry_ptr->conditionVariable().notify_all();
+        };
+
+        auto req_ptr = make_shared<main::ListStoreRequest>();
+        req_ptr->path_ = _remote_path;
+        req_ptr->storage_id_ = _rentry_ptr->pmaster_->remote_;
+
+        front_rpc_service_.sendRequest(config_.auth_endpoint_.c_str(), req_ptr, lambda);
+    }
+
+    if (_rentry_ptr->status_ == EntryStatusE::FetchPending) {
+        _rentry_ptr->conditionVariable().wait(_rlock, [&_rentry_ptr]() { return _rentry_ptr->status_ != EntryStatusE::FetchPending; });
+    }
+
+    return _rentry_ptr->status_ == EntryStatusE::Fetched;
+}
+
+bool Engine::Implementation::entry(const fs::path& _path, EntryPointerT& _rentry_ptr, unique_lock<mutex>& _rlock)
 {
     Entry* papp_entry = nullptr;
-    auto   it         = _path.begin();
+    string remote_path;
+    const string* papp_unique = nullptr;
+    const string* pbuild_unique = nullptr;
+
+    auto   it = _path.begin();
     for (; it != _path.end(); ++it) {
-        const auto&   e     = *it;
-        string        s     = e.generic_string();
-        EntryPointerT e_ptr = _rentry_ptr->find(s);
+        const auto& path_item = *it;
+        string      path_item_string = path_item.generic_string();
 
-        solid_log(logger, Verbose, "\t" << s);
+        fetch(_rentry_ptr, _rlock, remote_path);
 
-        if (!e_ptr) {
-            _rentry_ptr = tryInsertUnknownEntry(_rentry_ptr, s);
-            if (_rentry_ptr) {
-                _remote_path += '/';
-                _remote_path += s;
+        EntryPointerT path_entry_ptr = _rentry_ptr->find(path_item_string);
 
-            } else {
-                break;
-            }
-        } else {
-            _rentry_ptr = std::move(e_ptr);
+        if (path_entry_ptr) {
+            solid_log(logger, Verbose, "\t" << path_item_string);
+
+            _rentry_ptr = std::move(path_entry_ptr);
 
             if (_rentry_ptr->isApplication()) {
                 papp_entry = _rentry_ptr.get();
@@ -1101,41 +1143,46 @@ bool Engine::Implementation::findOrCreateEntry(
             mutex& rmutex = _rentry_ptr->mutex();
             _rlock.unlock(); //no overlapping locks
             {
-                unique_lock<mutex> tlock{rmutex};
+                unique_lock<mutex> tlock{ rmutex };
                 _rlock.swap(tlock);
             }
 
             if (_rentry_ptr->isApplication()) {
-                _remote_path.clear();
+                remote_path.clear();
                 //_rpstorage_id = &_rentry_ptr->remote_;
 
-                auto& rad       = _rentry_ptr->applicationData();
-                _rpapp_unique   = &rad.app_unique_;
-                _rpbuild_unique = &rad.build_unique_;
-            } else if (_rentry_ptr->isMedia()) {
+                auto& rad = _rentry_ptr->applicationData();
+                papp_unique = &rad.app_unique_;
+                pbuild_unique = &rad.build_unique_;
+            }
+            else if (_rentry_ptr->isMediaRoot()) {
                 break;
-            } else if (!_rentry_ptr->remote_.empty()) {
-                _remote_path += '/';
-                _remote_path += _rentry_ptr->remote_;
-            } else {
-                _remote_path += '/';
-                _remote_path += _rentry_ptr->name_;
+            }
+            else if (!_rentry_ptr->remote_.empty()) {
+                remote_path += '/';
+                remote_path += _rentry_ptr->remote_;
+            }
+            else {
+                remote_path += '/';
+                remote_path += _rentry_ptr->name_;
             }
         }
-    }
-
-    if (!_rentry_ptr) {
-        if (_rlock.owns_lock()) {
-            _rlock.unlock();
+        else {
+            if (papp_entry != nullptr) {
+                releaseApplication(*papp_entry);
+            }
+            return false;
         }
-        if (papp_entry != nullptr) {
-            //no lock
-            releaseApplication(*papp_entry);
-        }
-        return false;
-    }
+    }//for
 
-    if (_rentry_ptr->isMedia()) {
+    if (_rentry_ptr->isFile()) {
+        if (_rentry_ptr->data_any_.empty()) {
+            _rentry_ptr->data_any_ = FileData(remote_path);
+            if (papp_unique != nullptr) {
+                file_cache_engine_.open(_rentry_ptr->fileData(), _rentry_ptr->size_, *papp_unique, *pbuild_unique, remote_path);
+            }
+        }
+    }else if (_rentry_ptr->isMediaRoot()) {
         solid_check_log(papp_entry == nullptr, logger, "papp_entry is null");
         ++it;
         if (it == _path.end()) {
@@ -1145,122 +1192,45 @@ bool Engine::Implementation::findOrCreateEntry(
         string encoded_storage_id = it->generic_string();
         ++it;
         while (it != _path.end()) {
-            _remote_path += it->generic_string();
+            remote_path += it->generic_string();
             ++it;
             if (it != _path.end()) {
-                _remote_path += '/';
+                remote_path += '/';
             }
         }
 
-        string name      = encoded_storage_id + '/' + _remote_path;
+        string name = encoded_storage_id + '/' + remote_path;
         auto   entry_ptr = _rentry_ptr->find(name);
         if (entry_ptr) {
             _rentry_ptr = std::move(entry_ptr);
-            return true;
+        }
+        else {
+
+            string storage_id = ola::utility::hex_decode(encoded_storage_id);
+
+            entry_ptr = createEntry(_rentry_ptr, name);
+            entry_ptr->pmaster_ = entry_ptr.get();
+            entry_ptr->remote_ = std::move(storage_id);
+            entry_ptr->status_ = EntryStatusE::FetchRequired;
+            entry_ptr->flagSet(EntryFlagsE::Volatile);
+            entry_ptr->flagSet(EntryFlagsE::Media);
+
+            _rentry_ptr->mediaData().insertEntry(config_, EntryPointerT(entry_ptr));
+
+            _rentry_ptr = std::move(entry_ptr);
         }
 
-        string storage_id = ola::utility::hex_decode(encoded_storage_id);
-
-        entry_ptr           = createEntry(_rentry_ptr, name);
-        entry_ptr->pmaster_ = entry_ptr.get();
-        entry_ptr->remote_  = std::move(storage_id);
-        entry_ptr->status_  = EntryStatusE::FetchRequired;
-        entry_ptr->flagSet(EntryFlagsE::Volatile);
-
-        _rentry_ptr->mediaData().insertEntry(config_, EntryPointerT(entry_ptr));
-
-        _rentry_ptr = std::move(entry_ptr);
-    }
-    return true;
-}
-
-bool Engine::Implementation::entry(const fs::path& _path, EntryPointerT& _rentry_ptr, unique_lock<mutex>& _rlock)
-{
-    string        remote_path;
-    const string* papp_unique   = nullptr;
-    const string* pbuild_unique = nullptr;
-
-    if (!findOrCreateEntry(_path, _rentry_ptr, _rlock, remote_path, papp_unique, pbuild_unique)) {
-        solid_log(logger, Info, "failed findOrCreateEntry");
-        return false;
-    }
-
-    auto generic_path_str = _path.generic_string();
-
-    solid_log(logger, Info, "Open (generic_path = " << generic_path_str << " remote_path = " << remote_path << ")");
-
-    if (_rentry_ptr->status_ == EntryStatusE::FetchRequired) {
-        _rentry_ptr->status_ = EntryStatusE::FetchPending;
-
-        auto lambda = [entry_ptr = _rentry_ptr, &generic_path_str, this](
-                          frame::mprpc::ConnectionContext&           _rctx,
-                          std::shared_ptr<main::ListStoreRequest>&  _rsent_msg_ptr,
-                          std::shared_ptr<main::ListStoreResponse>& _rrecv_msg_ptr,
-                          ErrorConditionT const&                     _rerror) mutable {
-            auto&              m = entry_ptr->mutex();
-            unique_lock<mutex> lock{m};
-            if (_rrecv_msg_ptr && _rrecv_msg_ptr->error_ == 0) {
-                entry_ptr->status_ = EntryStatusE::Fetched;
-                if (entry_ptr->isApplication()) {
-                    auto& rad = entry_ptr->applicationData();
-                    rad.compress_chunk_capacity_ = _rrecv_msg_ptr->compress_chunk_capacity_;
-                    rad.compress_algorithm_type_ = _rrecv_msg_ptr->compress_algorithm_type_;
-                }
-                createEntryData(
-                    lock, entry_ptr, generic_path_str, _rrecv_msg_ptr->node_dq_,
-                    _rrecv_msg_ptr->compress_chunk_capacity_,
-                    _rrecv_msg_ptr->compress_algorithm_type_
-                );
-            } else {
-                entry_ptr->status_ = EntryStatusE::FetchError;
+        if (fetch(_rentry_ptr, _rlock, remote_path)) {
+            if (_rentry_ptr->isFile()) {
+                _rentry_ptr->fileData().remote_path_ = std::move(remote_path);
             }
-            entry_ptr->conditionVariable().notify_all();
-        };
-
-        auto req_ptr         = make_shared<main::ListStoreRequest>();
-        req_ptr->path_       = remote_path;
-        req_ptr->storage_id_ = _rentry_ptr->pmaster_->remote_;
-
-        front_rpc_service_.sendRequest(config_.auth_endpoint_.c_str(), req_ptr, lambda);
-    }
-
-    if (_rentry_ptr->status_ == EntryStatusE::FetchPending) {
-        _rentry_ptr->conditionVariable().wait(_rlock, [&_rentry_ptr]() { return _rentry_ptr->status_ != EntryStatusE::FetchPending; });
-    }
-
-    if (_rentry_ptr->status_ == EntryStatusE::FetchError) {
-        if (_rentry_ptr->type_ == EntryTypeE::Unknown) {
-            Entry* papp_entry = nullptr;
-            if (_rentry_ptr->pmaster_ && _rentry_ptr->pmaster_->isApplication()) {
-                papp_entry = _rentry_ptr->pmaster_;
-            }
+        }else{
             eraseEntryFromParent(std::move(_rentry_ptr), std::move(_rlock));
             solid_check_log(!_rlock.owns_lock(), logger, "not owning lock");
-            //papp_entry cannot be invalidated because we have not release it yet
-            if (papp_entry != nullptr) {
-                releaseApplication(*papp_entry);
-            }
+            return false;
         }
-        solid_log(logger, Verbose, "Fail open: " << _path.generic_path());
-
-        return false;
-    } else {
-        solid_check_log(_rentry_ptr->type_ > EntryTypeE::Unknown, logger, "entry type unkown");
-        //NOTE: the app_entry, if any, remains under use
-        if (_rentry_ptr->type_ == EntryTypeE::File) {
-            if (_rentry_ptr->data_any_.empty()) {
-                _rentry_ptr->data_any_ = FileData(remote_path);
-                if (papp_unique != nullptr) {
-                    file_cache_engine_.open(_rentry_ptr->fileData(), _rentry_ptr->size_, *papp_unique, *pbuild_unique, remote_path);
-                }
-            }
-        }
-
-        solid_log(logger, Verbose, "Open " << _rentry_ptr.get() << " " << _path.generic_path() << " type: " << static_cast<uint16_t>(_rentry_ptr->type_) << " remote: " << remote_path);
-
-        //success
-        return true;
     }
+    return true;
 }
 
 void Engine::info(Descriptor* _pdesc, NodeFlagsT& _rnode_flags, uint64_t& _rsize)
@@ -1505,9 +1475,13 @@ bool Engine::Implementation::readFromFile(
         return true;
     }
     
-    solid_check_log(_rentry_ptr->pmaster_->isApplication(), logger, "not an application");
-    const auto& app_data = _rentry_ptr->pmaster_->applicationData();
-    if (rfile_data.enqueue(read_data, _rentry_ptr->size_, app_data.compress_chunk_capacity_, app_data.compress_algorithm_type_)) {
+    if (!rfile_data.isInitiated()) {
+        solid_check_log(_rentry_ptr->pmaster_->isApplication(), logger, "not an application");
+        const auto& app_data = _rentry_ptr->pmaster_->applicationData();
+        rfile_data.init(app_data.compress_chunk_capacity_, app_data.compress_algorithm_type_);
+    }
+
+    if (rfile_data.enqueue(read_data, _rentry_ptr->size_)) {
         //the queue was empty
         tryFetch(_rentry_ptr);
     }
@@ -2251,7 +2225,7 @@ void Engine::Implementation::insertFileEntry(unique_lock<mutex>& _rlock, EntryPo
     auto entry_ptr = _rparent_ptr->directoryData().find(_name);
 
     if (!entry_ptr) {
-        _rparent_ptr->directoryData().insertEntry(createEntry(_rparent_ptr, _name, EntryTypeE::File));
+        _rparent_ptr->directoryData().insertEntry(createEntry(_rparent_ptr, _name, EntryTypeE::File, _size));
     } else {
         _rlock.unlock();
         {
@@ -2311,17 +2285,23 @@ void Engine::Implementation::eraseEntryFromParent(EntryPointerT&& _uentry_ptr, u
 
 void Engine::Implementation::createEntryData(
     unique_lock<mutex>& _lock, EntryPointerT& _rentry_ptr,
-    const std::string& _path_str, ListNodeDequeT& _rnode_dq,
+    ListNodeDequeT& _rnode_dq,
     const uint32_t _compress_chunk_capacity,
     const uint8_t _compress_algorithm_type
 )
 {
-    solid_log(logger, Info, _path_str);
+    solid_log(logger, Info, _rentry_ptr->name_);
+
     if (_rnode_dq.size() == 1 && _rnode_dq.front().name_.empty()) {
         _rentry_ptr->type_ = EntryTypeE::File;
         _rentry_ptr->size_ = _rnode_dq.front().size_;
-
-        _rentry_ptr->data_any_.clear();
+        if (_rentry_ptr->isMedia()) {
+            _rentry_ptr->data_any_ = FileData("");
+            _rentry_ptr->fileData().init(_compress_chunk_capacity, _compress_algorithm_type);
+        }
+        else {
+            _rentry_ptr->data_any_.clear();
+        }
         return;
     }
 
