@@ -80,13 +80,16 @@ uint32_t FileData::copy(std::istream& _ris, const uint64_t _chunk_size, const bo
         }
     }
     else {
-        size = this->writeToCache(rstub.chunkIndexToOffset(rstub.current_chunk_index_) + rstub.current_chunk_offset_, _ris);
-        solid_check(size, "size should not be zero");
+        size = stream_copy(rstub.compressed_chunk_, _ris);
         rstub.current_chunk_offset_ += size;
         solid_check(rstub.current_chunk_offset_ <= _chunk_size);
         if (rstub.current_chunk_offset_ == _chunk_size) {
-            _rshould_wake_readers = tryFillReads(string(), rstub.chunkIndexToOffset(rstub.current_chunk_index_), 0);
-            rstub.decompressed_size_ += _chunk_size;
+            this->writeToCache(rstub.chunkIndexToOffset(rstub.current_chunk_index_), rstub.compressed_chunk_.data(), rstub.compressed_chunk_.size());
+
+            _rshould_wake_readers = tryFillReads(rstub.compressed_chunk_, rstub.chunkIndexToOffset(rstub.current_chunk_index_), rstub.compressed_chunk_.size());
+
+            rstub.decompressed_size_ += rstub.compressed_chunk_.size();
+            rstub.compressed_chunk_.clear();
             rstub.current_chunk_offset_ = 0;
             rstub.nextChunk();
             solid_check(rstub.empty() == rstub.chunk_dq_.empty());

@@ -777,6 +777,9 @@ uint64_t File::write(const uint64_t _offset, std::istream& _ris)
         flush();
         solid_log(logger, Info, this << " " << range_vec_.size());
     }
+    else {
+        solid_log(logger, Warning, this << " stream not open!");
+    }
     return read_count;
 }
 

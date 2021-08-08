@@ -1133,9 +1133,7 @@ bool Engine::Implementation::entry(const fs::path& _path, EntryPointerT& _rentry
             if (_rentry_ptr->isApplication()) {
                 papp_entry = _rentry_ptr.get();
                 papp_entry->applicationData().useApplication(); //under root mutex
-            }
-
-            if (_rentry_ptr->isShortcut()) {
+            }else if (_rentry_ptr->isShortcut()) {
                 papp_entry = _rentry_ptr->pmaster_;
                 papp_entry->applicationData().useApplication(); //under root mutex
             }
@@ -1182,6 +1180,8 @@ bool Engine::Implementation::entry(const fs::path& _path, EntryPointerT& _rentry
                 file_cache_engine_.open(_rentry_ptr->fileData(), _rentry_ptr->size_, *papp_unique, *pbuild_unique, remote_path);
             }
         }
+    }else if (_rentry_ptr->isDirectory()){
+        solid_check_log(fetch(_rentry_ptr, _rlock, remote_path), logger, "fetch should not failed");
     }else if (_rentry_ptr->isMediaRoot()) {
         solid_check_log(papp_entry == nullptr, logger, "papp_entry is null");
         ++it;
