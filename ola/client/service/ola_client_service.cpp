@@ -998,8 +998,12 @@ NTSTATUS FileSystemService::OnStart(ULONG argc, PWSTR *argv)
 	
 	EnableBackupRestorePrivileges();
 
-	host_.SetCaseSensitiveSearch(TRUE);
-	host_.SetFlushAndPurgeOnCleanup(TRUE);
+    solid_log(solid::generic_logger, Info, "getmaxstdio = " << _getmaxstdio());
+
+    int rv = _setmaxstdio(8192);
+    (void)rv;
+
+    solid_log(solid::generic_logger, Info, "getmaxstdio = " << _getmaxstdio());
 
 	Result = host_.Mount(const_cast<PWSTR>(params_.mount_point_.c_str()), 0, FALSE, DebugFlags);
     if (!NT_SUCCESS(Result)) {

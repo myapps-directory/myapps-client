@@ -623,7 +623,8 @@ bool File::open(const fs::path& _path, const uint64_t _size)
                     fs::remove(_path, err);
                     return false;
                 }
-            } else {
+            }
+            else {
                 size_ = h.data().size_;
             }
             if (!loadRanges()) {
@@ -632,17 +633,20 @@ bool File::open(const fs::path& _path, const uint64_t _size)
                 fs::remove(_path, err);
                 return false;
             }
-        } else {
+        }
+        else {
             stream_.clear();
             BufferWrapper<Header> h;
             h.data().size_ = _size;
             stream_.seekp(0);
             stream_.write(h.buffer(), h.size);
             modified_range_ = true;
-            modified_head_  = true;
+            modified_head_ = true;
         }
         return true;
-    } else {
+    }
+    else {
+        solid_log(logger, Error, this << " could not open file " << _path.generic_string() << ": " << strerror(errno));
         return false;
     }
 }

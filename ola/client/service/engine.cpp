@@ -748,7 +748,7 @@ public:
     void createRootEntry();
 
     bool fetch(EntryPointerT& _rentry_ptr, unique_lock<mutex>& _rlock, const string& _remote_path);
-    bool entry(const fs::path& _path, EntryPointerT& _rentry_ptr, unique_lock<mutex>& _rlock);
+    bool entry(const fs::path& _path, EntryPointerT& _rentry_ptr, unique_lock<mutex>& _rlock, const bool _open = false);
 
     void asyncFetchStoreFileHandleResponse(
         frame::mprpc::ConnectionContext& _rctx, EntryPointerT& _rentry_ptr,
@@ -1008,7 +1008,7 @@ Descriptor* Engine::open(const fs::path& _path, uint32_t _create_flags, uint32_t
         mutex&             rmutex    = entry_ptr->mutex();
         unique_lock<mutex> lock{rmutex};
 
-        if (pimpl_->entry(_path, entry_ptr, lock)) {
+        if (pimpl_->entry(_path, entry_ptr, lock, true)) {
             auto pdesc = new Descriptor(std::move(entry_ptr));
             ++pimpl_->open_count_;
             solid_log(logger, Verbose, "OPEN: " << _create_flags << ' ' << _path.generic_path() << " -> " << pdesc << " entry: " << pdesc->entry_ptr_.get() << " open_count = " << pimpl_->open_count_);
@@ -1109,7 +1109,7 @@ bool Engine::Implementation::fetch(EntryPointerT& _rentry_ptr, unique_lock<mutex
     return _rentry_ptr->status_ == EntryStatusE::Fetched;
 }
 
-bool Engine::Implementation::entry(const fs::path& _path, EntryPointerT& _rentry_ptr, unique_lock<mutex>& _rlock)
+bool Engine::Implementation::entry(const fs::path& _path, EntryPointerT& _rentry_ptr, unique_lock<mutex>& _rlock, const bool _open)
 {
     Entry* papp_entry = nullptr;
     string remote_path;
@@ -1174,7 +1174,7 @@ bool Engine::Implementation::entry(const fs::path& _path, EntryPointerT& _rentry
     }//for
 
     if (_rentry_ptr->isFile()) {
-        if (_rentry_ptr->data_any_.empty()) {
+        if (_open && _rentry_ptr->data_any_.empty()) {
             _rentry_ptr->data_any_ = FileData(remote_path);
             if (papp_unique != nullptr) {
                 file_cache_engine_.open(_rentry_ptr->fileData(), _rentry_ptr->size_, *papp_unique, *pbuild_unique, remote_path);
@@ -1536,14 +1536,14 @@ void Engine::Implementation::asyncFetchStoreFileHandleResponse(
     bool should_wake_readers = false;
     const uint32_t received_size = rfile_data.copy(_rrecv_msg_ptr->ioss_, _rrecv_msg_ptr->chunk_.size_, _rrecv_msg_ptr->chunk_.isCompressed(), should_wake_readers);
 
-    solid_log(logger, Warning, _rentry_ptr->name_ <<" Received " << received_size << " offset " << rfile_data.currentChunkOffset() << " crt_idx " << rfile_data.currentChunkIndex()<< " idx "<< _rsent_msg_ptr->chunk_index_ << " off " << _rsent_msg_ptr->chunk_offset_ << " totalsz " << _rrecv_msg_ptr->chunk_.size_);
+    solid_log(logger, Info, _rentry_ptr->name_ <<" Received " << received_size << " offset " << rfile_data.currentChunkOffset() << " crt_idx " << rfile_data.currentChunkIndex()<< " idx "<< _rsent_msg_ptr->chunk_index_ << " off " << _rsent_msg_ptr->chunk_offset_ << " totalsz " << _rrecv_msg_ptr->chunk_.size_);
 
     if (should_wake_readers) {
         _rentry_ptr->conditionVariable().notify_all();
     }
 
     if (rfile_data.responsePointer(0)) {
-        solid_log(logger, Warning, _rentry_ptr->name_ << " response pointer");
+        solid_log(logger, Info, _rentry_ptr->name_ << " response pointer");
         auto res_ptr1 = std::move(rfile_data.responsePointer(0));
         auto res_ptr2 = std::move(rfile_data.responsePointer(1));
         asyncFetchStoreFileHandleResponse(_rctx, _rentry_ptr, _rsent_msg_ptr, res_ptr1);
@@ -1573,7 +1573,7 @@ void Engine::Implementation::asyncFetchStoreFileHandleResponse(
     }
     else {
         rfile_data.storeRequest(std::move(_rsent_msg_ptr));
-        solid_log(logger, Warning, _rentry_ptr->name_ << "");
+        solid_log(logger, Info, _rentry_ptr->name_ << "");
         rfile_data.pendingRequest(false);
         return;
     }
@@ -1582,16 +1582,16 @@ void Engine::Implementation::asyncFetchStoreFileHandleResponse(
     
     if (rfile_data.currentChunkIndex() != -1 && rfile_data.currentChunkOffset() == 0) {
         rfile_data.pendingRequest(true);
-        solid_log(logger, Warning, _rentry_ptr->name_ << "");
+        solid_log(logger, Info, _rentry_ptr->name_ << "");
         asyncFetchStoreFile(&_rctx, _rentry_ptr, _rsent_msg_ptr, rfile_data.currentChunkIndex(), 0);
     }
     else if (!rfile_data.isLastChunk()) {
-        solid_log(logger, Warning, _rentry_ptr->name_ << " not last chunk ");
+        solid_log(logger, Info, _rentry_ptr->name_ << " not last chunk ");
         rfile_data.pendingRequest(true);
         asyncFetchStoreFile(&_rctx, _rentry_ptr, _rsent_msg_ptr, rfile_data.peekNextChunk(), 0);
     }
     else {
-        solid_log(logger, Warning, _rentry_ptr->name_ << "");
+        solid_log(logger, Info, _rentry_ptr->name_ << "");
     }
 }
 
@@ -1600,7 +1600,7 @@ void Engine::Implementation::asyncFetchStoreFile(
     std::shared_ptr<main::FetchStoreRequest>& _rreq_msg_ptr,
     const uint32_t _chunk_index, const uint32_t _chunk_offset)
 {
-    solid_log(logger, Warning, _rentry_ptr->name_ << " " << _chunk_index << " " << _chunk_offset);
+    solid_log(logger, Info, _rentry_ptr->name_ << " " << _chunk_index << " " << _chunk_offset);
     auto lambda = [entry_ptr = _rentry_ptr, this/*, _chunk_index, _chunk_offset*/](
         frame::mprpc::ConnectionContext& _rctx,
         std::shared_ptr<main::FetchStoreRequest>& _rsent_msg_ptr,
@@ -1621,7 +1621,7 @@ void Engine::Implementation::asyncFetchStoreFile(
                         rfile_data.tryClearFetchStub();
                     }
                     else {
-                        solid_log(logger, Warning, entry_ptr->name_ << " store response for " << _rsent_msg_ptr->chunk_index_ << " " << _rsent_msg_ptr->chunk_offset_);
+                        solid_log(logger, Info, entry_ptr->name_ << " store response for " << _rsent_msg_ptr->chunk_index_ << " " << _rsent_msg_ptr->chunk_offset_);
                         rfile_data.storeResponse(_rrecv_msg_ptr);
                     }
                 }
