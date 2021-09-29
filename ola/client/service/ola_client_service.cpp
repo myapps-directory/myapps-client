@@ -1197,7 +1197,8 @@ NTSTATUS FileSystem::GetSecurityByName(
 		++FileName;
         NodeFlagsT node_flags;
 	    uint64_t size = 0;
-        if (engine().info(FileName, node_flags, size)) {
+        int64_t  base_time = 0;
+        if (engine().info(FileName, node_flags, size, base_time)) {
             *PFileAttributes = FILE_ATTRIBUTE_READONLY | FILE_ATTRIBUTE_NOT_CONTENT_INDEXED | node_flags_to_attributes(node_flags);
         }
         else {
@@ -1336,8 +1337,8 @@ NTSTATUS FileSystem::GetFileInfo(
 	using ola::client::service::NodeFlagsT;
     NodeFlagsT node_flags;
 	uint64_t size = 0;
-    
-	engine().info(static_cast<service::Descriptor*>(pFileDesc), node_flags, size);
+    int64_t  base_time = 0;
+	engine().info(static_cast<service::Descriptor*>(pFileDesc), node_flags, size, base_time);
 
 	FileInfo->FileAttributes = FILE_ATTRIBUTE_READONLY | FILE_ATTRIBUTE_NOT_CONTENT_INDEXED | node_flags_to_attributes(node_flags);
     FileInfo->ReparseTag     = 0;
@@ -1451,12 +1452,13 @@ NTSTATUS FileSystem::ReadDirectoryEntry(
     DirInfo *DirInfo)
 {
 	using namespace ola::client::service;
-    wstring	  name;
-	uint64_t	  size = 0;
-	uint32_t  attributes = FILE_ATTRIBUTE_READONLY | FILE_ATTRIBUTE_NOT_CONTENT_INDEXED;
+    wstring	    name;
+	uint64_t	size = 0;
+    int64_t     base_time = base_time_;
+	uint32_t    attributes = FILE_ATTRIBUTE_READONLY | FILE_ATTRIBUTE_NOT_CONTENT_INDEXED;
 	NodeFlagsT	node_flags;
 
-    if(engine().list(static_cast<service::Descriptor*>(pFileDesc), *pContext, name, node_flags, size)){
+    if(engine().list(static_cast<service::Descriptor*>(pFileDesc), *pContext, name, node_flags, size, base_time)){
 		attributes |= node_flags_to_attributes(node_flags);
 	}else{
 		return STATUS_NO_MORE_FILES;
@@ -1469,9 +1471,9 @@ NTSTATUS FileSystem::ReadDirectoryEntry(
     DirInfo->FileInfo.ReparseTag = 0;
     DirInfo->FileInfo.FileSize = size;
     DirInfo->FileInfo.AllocationSize = (size + ALLOCATION_UNIT - 1) / ALLOCATION_UNIT * ALLOCATION_UNIT;
-    DirInfo->FileInfo.CreationTime = base_time_;
-    DirInfo->FileInfo.LastAccessTime = base_time_;
-    DirInfo->FileInfo.LastWriteTime = base_time_;
+    DirInfo->FileInfo.CreationTime = base_time;
+    DirInfo->FileInfo.LastAccessTime = base_time;
+    DirInfo->FileInfo.LastWriteTime = base_time;
     DirInfo->FileInfo.ChangeTime = DirInfo->FileInfo.LastWriteTime;
     DirInfo->FileInfo.IndexNumber = 0;
     DirInfo->FileInfo.HardLinks = 0;

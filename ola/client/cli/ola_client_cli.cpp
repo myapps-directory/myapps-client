@@ -1671,7 +1671,24 @@ bool load_icon(std::vector<char> &_ricon_blob, const std::string &_path){
     
     return ifs.gcount() == fsize;
 }
+namespace {
+int64_t get_file_base_time(const string& _file_path)
+{
+    int64_t retval = 0;
+    HANDLE Handle = CreateFileA(_file_path.c_str(),
+        FILE_READ_ATTRIBUTES | READ_CONTROL, 0, 0,
+        OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, 0);
+    if (Handle != INVALID_HANDLE_VALUE) {
+        BY_HANDLE_FILE_INFORMATION ByHandleFileInfo;
 
+        if (GetFileInformationByHandle(Handle, &ByHandleFileInfo)) {
+            retval = ((PLARGE_INTEGER)&ByHandleFileInfo.ftLastWriteTime)->QuadPart;
+        }
+        CloseHandle(Handle);
+    }
+    return retval;
+}
+}//namespace
 void handle_create_build(istream& _ris, Engine &_reng){
     auto req_ptr = make_shared<main::CreateBuildRequest>();
     
@@ -1693,11 +1710,17 @@ void handle_create_build(istream& _ris, Engine &_reng){
     
     string zip_path = system_path(get_temp_env() + "/ola_client_cli_" + generate_temp_name() + ".zip");
 
-    
-    if(!ola::utility::archive_create(zip_path, path(build_path), req_ptr->size_)){
-        return;
+    {
+        auto compute_base_time_lambda = [](const std::string& _path, vector<uint8_t>& _rdata) {
+            _rdata.resize(sizeof(uint64_t));
+            uint64_t base_time = get_file_base_time(_path);
+            solid::serialization::binary::store(reinterpret_cast<char*>(_rdata.data()), base_time);
+        };
+
+        if (!ola::utility::archive_create(zip_path, path(build_path), req_ptr->size_, compute_base_time_lambda)) {
+            return;
+        }
     }
-    
     {
         ifstream ifs(zip_path, std::ifstream::binary);
         if(ifs){

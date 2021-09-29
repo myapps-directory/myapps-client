@@ -247,6 +247,7 @@ struct Entry {
     std::weak_ptr<Entry>     parent_;
     Entry*                   pmaster_ = nullptr;
     uint64_t                 size_    = 0;
+    int64_t                  base_time_ = 0;
     boost::any               data_any_;
     Entry*                   pnext_ = nullptr;
     Entry*                   pprev_ = nullptr;
@@ -438,11 +439,13 @@ struct Entry {
         return rcv_;
     }
 
-    void info(NodeFlagsT& _rnode_flags, uint64_t& _rsize) const
+    void info(NodeFlagsT& _rnode_flags, uint64_t& _rsize, int64_t& _rbase_time) const
     {
         solid_log(logger, Info, ""<<this->name_<< " "<<size_);
         _rnode_flags = 0;
         _rsize       = size_;
+        _rbase_time = base_time_;
+
         switch (type_) {
         case EntryTypeE::Unknown:
             solid_throw("Unknown entry type");
@@ -743,7 +746,7 @@ public:
     );
 
     void insertDirectoryEntry(unique_lock<mutex>& _lock, EntryPointerT& _rparent_ptr, const string& _name);
-    void insertFileEntry(unique_lock<mutex>& _lock, EntryPointerT& _rparent_ptr, const string& _name, uint64_t _size);
+    void insertFileEntry(unique_lock<mutex>& _lock, EntryPointerT& _rparent_ptr, const string& _name, const uint64_t _size, const int64_t _base_time);
 
     void createRootEntry();
 
@@ -763,7 +766,7 @@ public:
     bool list(
         EntryPointerT& _rentry_ptr,
         void*&         _rpctx,
-        std::wstring& _rname, NodeFlagsT& _rnode_flags, uint64_t& _rsize);
+        std::wstring& _rname, NodeFlagsT& _rnode_flags, uint64_t& _rsize, int64_t& _rbase_time);
     bool read(
         Descriptor* _pdesc,
         char*          _pbuf,
@@ -962,7 +965,7 @@ void Engine::appListUpdate() {
     }
 }
 
-bool Engine::info(const fs::path& _path, NodeFlagsT& _rnode_flags, uint64_t& _rsize)
+bool Engine::info(const fs::path& _path, NodeFlagsT& _rnode_flags, uint64_t& _rsize, int64_t& _rbase_time)
 {
     try {
         EntryPointerT      entry_ptr = atomic_load(&pimpl_->root_entry_ptr_);
@@ -970,7 +973,7 @@ bool Engine::info(const fs::path& _path, NodeFlagsT& _rnode_flags, uint64_t& _rs
         unique_lock<mutex> lock{ rmutex };
 
         if (pimpl_->entry(_path, entry_ptr, lock)) {
-            entry_ptr->info(_rnode_flags, _rsize);
+            entry_ptr->info(_rnode_flags, _rsize, _rbase_time);
 
             Entry* papp_entry = nullptr;
             if (entry_ptr && entry_ptr->pmaster_ && entry_ptr->pmaster_->isApplication()) {
@@ -992,13 +995,33 @@ bool Engine::info(const fs::path& _path, NodeFlagsT& _rnode_flags, uint64_t& _rs
 }
 
 //#define OLA_VALIDATE_READ
+//#define OLA_VALIDATE_TIME
 
-#ifdef OLA_VALIDATE_READ
+#if defined(OLA_VALIDATE_READ) || defined(OLA_VALIDATE_TIME)
 
-string base_path = "C:\\Users\\vipal\\builds\\apps\\Chrome\\";
-const string app_name = "Chrome Canary";
+string base_path = "F:\\builds\\apps\\VLC\\";
+const string app_name = "VLC Media Player";
 #define FULLPATH_SIZE (MAX_PATH + FSP_FSCTL_TRANSACT_PATH_SIZEMAX / sizeof(WCHAR))
 
+#endif
+
+#if defined(OLA_VALIDATE_TIME)
+int64_t get_file_base_time(const string &_file_path)
+{
+    int64_t retval = 0;
+    HANDLE Handle = CreateFileA(_file_path.c_str(),
+        FILE_READ_ATTRIBUTES | READ_CONTROL, 0, 0,
+        OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, 0);
+    if (Handle != INVALID_HANDLE_VALUE) {
+        BY_HANDLE_FILE_INFORMATION ByHandleFileInfo;
+
+        if (GetFileInformationByHandle(Handle, &ByHandleFileInfo)) {
+            retval = ((PLARGE_INTEGER)&ByHandleFileInfo.ftLastWriteTime)->QuadPart;
+        }
+        CloseHandle(Handle);
+    }
+    return retval;
+}
 #endif
 
 Descriptor* Engine::open(const fs::path& _path, uint32_t _create_flags, uint32_t _granted_access)
@@ -1233,13 +1256,13 @@ bool Engine::Implementation::entry(const fs::path& _path, EntryPointerT& _rentry
     return true;
 }
 
-void Engine::info(Descriptor* _pdesc, NodeFlagsT& _rnode_flags, uint64_t& _rsize)
+void Engine::info(Descriptor* _pdesc, NodeFlagsT& _rnode_flags, uint64_t& _rsize, int64_t& _rbase_time)
 {
     try {
         auto& m = _pdesc->entry_ptr_->mutex();
         lock_guard<mutex> lock(m);
 
-        _pdesc->entry_ptr_->info(_rnode_flags, _rsize);
+        _pdesc->entry_ptr_->info(_rnode_flags, _rsize, _rbase_time);
     }
     catch (std::exception& e) {
         solid_log(logger, Error, " Exception caught: " << e.what());
@@ -1249,10 +1272,10 @@ void Engine::info(Descriptor* _pdesc, NodeFlagsT& _rnode_flags, uint64_t& _rsize
     }
 }
 
-bool Engine::list(Descriptor* _pdesc, void*& _rpctx, std::wstring& _rname, NodeFlagsT& _rnode_flags, uint64_t& _rsize)
+bool Engine::list(Descriptor* _pdesc, void*& _rpctx, std::wstring& _rname, NodeFlagsT& _rnode_flags, uint64_t& _rsize, int64_t& _rbase_time)
 {
     try {
-        return pimpl_->list(_pdesc->entry_ptr_, _rpctx, _rname, _rnode_flags, _rsize);
+        return pimpl_->list(_pdesc->entry_ptr_, _rpctx, _rname, _rnode_flags, _rsize, _rbase_time);
     }
     catch (std::exception& e) {
         solid_log(logger, Error, " Exception caught: " << e.what());
@@ -1329,7 +1352,7 @@ void Engine::Implementation::releaseApplication(Entry& _rapp_entry)
 bool Engine::Implementation::list(
     EntryPointerT& _rentry_ptr,
     void*&         _rpctx,
-    std::wstring& _rname, NodeFlagsT& _rnode_flags, uint64_t& _rsize)
+    std::wstring& _rname, NodeFlagsT& _rnode_flags, uint64_t& _rsize, int64_t& _rbase_time)
 {
     using ContextT = pair<int, EntryMapT::const_iterator>;
 
@@ -1337,7 +1360,12 @@ bool Engine::Implementation::list(
     unique_lock<mutex> lock(m);
     ContextT*          pctx = nullptr;
     DirectoryData*     pdd  = _rentry_ptr->directoryDataPtr();
-
+#ifdef OLA_VALIDATE_TIME
+    bool   should_validate = false;
+    if (_rentry_ptr->pmaster_) {
+        should_validate = _rentry_ptr->pmaster_->name_ == app_name;;
+    }
+#endif
     if (_rpctx) {
         pctx = static_cast<ContextT*>(_rpctx);
     } else {
@@ -1369,9 +1397,24 @@ bool Engine::Implementation::list(
                 continue;
             }
 
-            _rname       = utility::widen(pctx->second->second->name_);
-            _rsize       = pctx->second->second->size_;
-            const auto t = pctx->second->second->type_;
+            _rname      = utility::widen(rentry_ptr->name_);
+            _rsize      = rentry_ptr->size_;
+            _rbase_time = rentry_ptr->base_time_;
+
+            const auto t = rentry_ptr->type_;
+#ifdef OLA_VALIDATE_TIME
+            if (should_validate && t == EntryTypeE::File) {
+                string path = rentry_ptr->name_;
+                auto crt_entry = rentry_ptr->parent_.lock();
+
+                while (crt_entry && crt_entry->type_ == EntryTypeE::Directory) {
+                    path = crt_entry->name_ + '\\' + path;
+                    crt_entry = crt_entry->parent_.lock();
+                }
+                path = base_path + path;
+                _rbase_time = get_file_base_time(path);
+            }
+#endif
             _rnode_flags = node_flag(t == EntryTypeE::Application || t == EntryTypeE::Directory ? NodeFlagsE::Directory : NodeFlagsE::File);
             if (pctx->second->second->flags_ & entry_flag(EntryFlagsE::Hidden)) {
                 _rnode_flags |= node_flag(NodeFlagsE::Hidden);
@@ -1468,7 +1511,7 @@ bool Engine::Implementation::readFromFile(
 {
     FileData& rfile_data = _rentry_ptr->fileData();
     ReadData  read_data{_pbuf, _offset, _length};
-
+    
     if (rfile_data.readFromCache(read_data)) {
         _rbytes_transfered = read_data.bytes_transfered_;
         solid_log(logger, Verbose, "READ: " << _rentry_ptr.get() << " " << _offset << " " << _length << " " << _rbytes_transfered);
@@ -2218,14 +2261,19 @@ void Engine::Implementation::insertDirectoryEntry(unique_lock<mutex>& _rlock, En
     }
 }
 
-void Engine::Implementation::insertFileEntry(unique_lock<mutex>& _rlock, EntryPointerT& _rparent_ptr, const string& _name, const uint64_t _size)
+void Engine::Implementation::insertFileEntry(
+    unique_lock<mutex>& _rlock, EntryPointerT& _rparent_ptr, const string& _name,
+    const uint64_t _size, const int64_t _base_time
+)
 {
     solid_log(logger, Info, _rparent_ptr->name_ << " " << _name << " " << _size);
 
     auto entry_ptr = _rparent_ptr->directoryData().find(_name);
 
     if (!entry_ptr) {
-        _rparent_ptr->directoryData().insertEntry(createEntry(_rparent_ptr, _name, EntryTypeE::File, _size));
+        auto entry_ptr = createEntry(_rparent_ptr, _name, EntryTypeE::File, _size);
+        entry_ptr->base_time_ = _base_time;
+        _rparent_ptr->directoryData().insertEntry(std::move(entry_ptr));
     } else {
         _rlock.unlock();
         {
@@ -2234,6 +2282,7 @@ void Engine::Implementation::insertFileEntry(unique_lock<mutex>& _rlock, EntryPo
             lock_guard<mutex> lock{ rm };
             entry_ptr->type_ = EntryTypeE::File;
             entry_ptr->size_ = _size;
+            entry_ptr->base_time_ = _base_time;
         }
         _rlock.lock();
     }
@@ -2326,7 +2375,7 @@ void Engine::Implementation::createEntryData(
             name.pop_back();
             insertDirectoryEntry(_lock, _rentry_ptr, name);
         } else {
-            insertFileEntry(_lock, _rentry_ptr, n.name_, n.size_);
+            insertFileEntry(_lock, _rentry_ptr, n.name_, n.size_, n.base_time_);
         }
     }
 }

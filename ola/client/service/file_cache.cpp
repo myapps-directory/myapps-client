@@ -517,7 +517,8 @@ void Engine::Implementation::flush(FileData& _rfd)
 
     FileStub& rfs = file_dq_[_rfd.cache_index_];
     file_map_.erase(&rfs);
-    rfs.usage_      = computeUsage();
+    //TODO: find a better way to keep file usage
+    //rfs.usage_      = computeUsage();
     file_map_[&rfs] = _rfd.cache_index_;
     solid_log(logger, Info, _rfd.cache_index_ << ' ' << rfs.usage_);
 
@@ -672,7 +673,7 @@ bool File::loadRanges()
     }
     return true;
 }
-void File::storeRanges()
+bool File::storeRanges()
 {
     if (modified_range_) {
 
@@ -690,10 +691,12 @@ void File::storeRanges()
             solid_assert(false);
         }
         modified_range_ = false;
+        return true;
     }
+    return false;
 }
 
-void File::storeHead()
+bool File::storeHead()
 {
     if (modified_head_) {
 
@@ -704,15 +707,18 @@ void File::storeHead()
         stream_.seekp(0);
         stream_.write(h.buffer(), h.size);
         modified_head_ = false;
+        return true;
     }
+    return false;
 }
 
 void File::close()
 {
     solid_log(logger, Info, this << " ");
     if (stream_.is_open()) {
-        storeRanges();
-        stream_.flush();
+        if (storeRanges()) {
+            stream_.flush();
+        }
         stream_.close();
     }
 }
@@ -720,9 +726,9 @@ void File::close()
 void File::flush()
 {
     if (stream_.is_open()) {
-        storeHead();
-        storeRanges();
-        stream_.flush();
+        if (storeHead() || storeRanges()) {
+            stream_.flush();
+        }
     }
 }
 

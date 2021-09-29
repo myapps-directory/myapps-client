@@ -337,7 +337,7 @@ NTSTATUS Ptfs::GetFileInfoInternal(HANDLE Handle, FileInfo* FileInfo)
 
 NTSTATUS Ptfs::Init(PVOID Host0)
 {
-    base_time_ = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count() * 10 + 116444736000000000LL;
+    base_time_ = 132685082960000000LL;//132700000000000000LL;//std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count() * 10 + 116444736000000000LL;
 
     FileSystemHost* Host = (FileSystemHost*)Host0;
     Host->SetSectorSize(ALLOCATION_UNIT);
@@ -911,6 +911,64 @@ NTSTATUS Ptfs::ReadDirectoryEntry(
     PVOID* PContext,
     DirInfo* DirInfo)
 {
+#if 0
+    PtfsFileDesc* FileDesc = (PtfsFileDesc*)FileDesc0;
+    HANDLE Handle = FileDesc->Handle;
+    WCHAR FullPath[FULLPATH_SIZE];
+    ULONG Length, PatternLength;
+    HANDLE FindHandle;
+    WIN32_FIND_DATAW FindData;
+
+    if (0 == *PContext)
+    {
+        if (0 == Pattern)
+            Pattern = L"*";
+        PatternLength = (ULONG)wcslen(Pattern);
+
+        Length = GetFinalPathNameByHandleW(Handle, FullPath, FULLPATH_SIZE - 1, 0);
+        if (0 == Length)
+            return NtStatusFromWin32(GetLastError());
+        if (Length + 1 + PatternLength >= FULLPATH_SIZE)
+            return STATUS_OBJECT_NAME_INVALID;
+
+        if (L'\\' != FullPath[Length - 1])
+            FullPath[Length++] = L'\\';
+        memcpy(FullPath + Length, Pattern, PatternLength * sizeof(WCHAR));
+        FullPath[Length + PatternLength] = L'\0';
+
+        FindHandle = FindFirstFileW(FullPath, &FindData);
+        if (INVALID_HANDLE_VALUE == FindHandle)
+            return STATUS_NO_MORE_FILES;
+
+        *PContext = FindHandle;
+    }
+    else
+    {
+        FindHandle = *PContext;
+        if (!FindNextFileW(FindHandle, &FindData))
+        {
+            FindClose(FindHandle);
+            return STATUS_NO_MORE_FILES;
+        }
+    }
+
+    memset(DirInfo, 0, sizeof * DirInfo);
+    Length = (ULONG)wcslen(FindData.cFileName);
+    DirInfo->Size = (UINT16)(FIELD_OFFSET(Ptfs::DirInfo, FileNameBuf) + Length * sizeof(WCHAR));
+    DirInfo->FileInfo.FileAttributes = FindData.dwFileAttributes;
+    DirInfo->FileInfo.ReparseTag = 0;
+    DirInfo->FileInfo.FileSize =
+        ((UINT64)FindData.nFileSizeHigh << 32) | (UINT64)FindData.nFileSizeLow;
+    DirInfo->FileInfo.AllocationSize = (DirInfo->FileInfo.FileSize + ALLOCATION_UNIT - 1)
+        / ALLOCATION_UNIT * ALLOCATION_UNIT;
+    DirInfo->FileInfo.CreationTime = ((PLARGE_INTEGER)&FindData.ftCreationTime)->QuadPart;
+    DirInfo->FileInfo.LastAccessTime = ((PLARGE_INTEGER)&FindData.ftLastAccessTime)->QuadPart;
+    DirInfo->FileInfo.LastWriteTime = ((PLARGE_INTEGER)&FindData.ftLastWriteTime)->QuadPart;
+    DirInfo->FileInfo.ChangeTime = DirInfo->FileInfo.LastWriteTime;
+    DirInfo->FileInfo.IndexNumber = 0;
+    DirInfo->FileInfo.HardLinks = 0;
+    memcpy(DirInfo->FileNameBuf, FindData.cFileName, Length * sizeof(WCHAR));
+#else
     PtfsFileDesc* FileDesc = (PtfsFileDesc*)FileDesc0;
     HANDLE Handle = FileDesc->Handle;
     WCHAR FullPath[FULLPATH_SIZE];
@@ -966,13 +1024,14 @@ NTSTATUS Ptfs::ReadDirectoryEntry(
     }
     DirInfo->FileInfo.AllocationSize = (DirInfo->FileInfo.FileSize + ALLOCATION_UNIT - 1)
         / ALLOCATION_UNIT * ALLOCATION_UNIT;
-    DirInfo->FileInfo.CreationTime = base_time_;// ((PLARGE_INTEGER)&FindData.ftCreationTime)->QuadPart;
-    DirInfo->FileInfo.LastAccessTime = base_time_;// ((PLARGE_INTEGER)&FindData.ftLastAccessTime)->QuadPart;
-    DirInfo->FileInfo.LastWriteTime = base_time_;// ((PLARGE_INTEGER)&FindData.ftLastWriteTime)->QuadPart;
+    DirInfo->FileInfo.CreationTime = base_time_;//((PLARGE_INTEGER)&FindData.ftCreationTime)->QuadPart;
+    DirInfo->FileInfo.LastAccessTime = base_time_;//((PLARGE_INTEGER)&FindData.ftLastAccessTime)->QuadPart;
+    DirInfo->FileInfo.LastWriteTime = base_time_;//((PLARGE_INTEGER)&FindData.ftLastWriteTime)->QuadPart;//performance issue if using base_time_
     DirInfo->FileInfo.ChangeTime = DirInfo->FileInfo.LastWriteTime;
     DirInfo->FileInfo.IndexNumber = 0;
     DirInfo->FileInfo.HardLinks = 0;
     memcpy(DirInfo->FileNameBuf, FindData.cFileName, Length * sizeof(WCHAR));
+#endif
 
     return STATUS_SUCCESS;
 }

@@ -97,8 +97,8 @@ private:
     bool findRangeBack(const uint64_t _offset, uint64_t &_rstart_offset, size_t& _rsize) const;
 
     bool loadRanges();
-    void storeRanges();
-    void storeHead();
+    bool storeRanges();
+    bool storeHead();
 }; // namespace file_cache
 
 struct FileData {
