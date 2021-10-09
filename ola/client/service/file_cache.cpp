@@ -83,7 +83,7 @@ struct FileStub {
 };
 
 struct FileStubLess {
-    bool operator()(const FileStub* _p1, const FileStub* _p2) const
+    bool operator()(const FileStub* const _p1, const FileStub* const _p2) const
     {
         if (_p1->usage_ < _p2->usage_)
             return true;
@@ -517,7 +517,8 @@ void Engine::Implementation::flush(FileData& _rfd)
 
     FileStub& rfs = file_dq_[_rfd.cache_index_];
     file_map_.erase(&rfs);
-    rfs.usage_      = computeUsage();
+    //TODO: find a better way to keep file usage
+    //rfs.usage_      = computeUsage();
     file_map_[&rfs] = _rfd.cache_index_;
     solid_log(logger, Info, _rfd.cache_index_ << ' ' << rfs.usage_);
 
@@ -623,7 +624,8 @@ bool File::open(const fs::path& _path, const uint64_t _size)
                     fs::remove(_path, err);
                     return false;
                 }
-            } else {
+            }
+            else {
                 size_ = h.data().size_;
             }
             if (!loadRanges()) {
@@ -632,17 +634,20 @@ bool File::open(const fs::path& _path, const uint64_t _size)
                 fs::remove(_path, err);
                 return false;
             }
-        } else {
+        }
+        else {
             stream_.clear();
             BufferWrapper<Header> h;
             h.data().size_ = _size;
             stream_.seekp(0);
             stream_.write(h.buffer(), h.size);
             modified_range_ = true;
-            modified_head_  = true;
+            modified_head_ = true;
         }
         return true;
-    } else {
+    }
+    else {
+        solid_log(logger, Error, this << " could not open file " << _path.generic_string() << ": " << strerror(errno));
         return false;
     }
 }
@@ -668,7 +673,7 @@ bool File::loadRanges()
     }
     return true;
 }
-void File::storeRanges()
+bool File::storeRanges()
 {
     if (modified_range_) {
 
@@ -678,7 +683,7 @@ void File::storeRanges()
         try {
             cereal::BinaryOutputArchive a(stream_);
 
-            size_t s = range_vec_.size();
+            const size_t s = range_vec_.size();
             a(range_vec_, s);
 
             solid_log(logger, Info, this << " " << range_vec_.size() << " " << s);
@@ -686,10 +691,12 @@ void File::storeRanges()
             solid_assert(false);
         }
         modified_range_ = false;
+        return true;
     }
+    return false;
 }
 
-void File::storeHead()
+bool File::storeHead()
 {
     if (modified_head_) {
 
@@ -700,15 +707,18 @@ void File::storeHead()
         stream_.seekp(0);
         stream_.write(h.buffer(), h.size);
         modified_head_ = false;
+        return true;
     }
+    return false;
 }
 
 void File::close()
 {
     solid_log(logger, Info, this << " ");
     if (stream_.is_open()) {
-        storeRanges();
-        stream_.flush();
+        if (storeRanges()) {
+            stream_.flush();
+        }
         stream_.close();
     }
 }
@@ -716,31 +726,51 @@ void File::close()
 void File::flush()
 {
     if (stream_.is_open()) {
-        storeHead();
-        storeRanges();
-        stream_.flush();
+        if (storeHead() || storeRanges()) {
+            stream_.flush();
+        }
     }
 }
 
-bool File::read(char* _pbuf, uint64_t _offset, size_t _length, size_t& _rbytes_transfered)
+bool File::read(char* _pbuf, uint64_t _offset, size_t _length, size_t& _rbytes_transfered_front, size_t& _rbytes_transfered_back)
 {
     size_t len = _length;
-    if (findRange(_offset, len)) {
+    if (findRangeFront(_offset, len)) {
         stream_.seekg(sizeof(Header) + _offset);
         stream_.read(_pbuf, len);
         solid_assert(len == stream_.gcount());
-        _rbytes_transfered += len;
-        return len == _length;
+        _rbytes_transfered_front = len;
+        
+        if (len == _length) return true;
+
+        _offset += len;
+        _length -= len;
+        _pbuf += len;
+    }
+    else {
+        _rbytes_transfered_front = 0;
+    }
+    
+    uint64_t read_offset = 0;
+    len = _length;
+    if (findRangeBack(_offset, read_offset, len)) {
+        stream_.seekg(sizeof(Header) + read_offset);
+        stream_.read(_pbuf + (_length - len), len);
+        solid_assert(len == stream_.gcount());
+        _rbytes_transfered_back = len;
+    }
+    else {
+        _rbytes_transfered_back = 0;
     }
     return false;
 }
 
-void File::write(const uint64_t _offset, std::istream& _ris)
+uint64_t File::write(const uint64_t _offset, std::istream& _ris)
 {
     constexpr size_t buffer_capacity = 4096;
+    uint64_t read_count = 0;
     if (stream_.is_open()) {
         char     buffer[buffer_capacity];
-        uint64_t read_count = 0;
 
         stream_.seekp(sizeof(Header) + _offset);
 
@@ -757,34 +787,38 @@ void File::write(const uint64_t _offset, std::istream& _ris)
         flush();
         solid_log(logger, Info, this << " " << range_vec_.size());
     }
+    else {
+        solid_log(logger, Warning, this << " stream not open!");
+    }
+    return read_count;
 }
 
-void File::write(const uint64_t _offset, const std::string& _str)
+void File::write(const uint64_t _offset, const char* _pbuf, size_t _size)
 {
     if (stream_.is_open()) {
         stream_.seekp(sizeof(Header) + _offset);
-        stream_.write(_str.data(), _str.size());
+        stream_.write(_pbuf, _size);
 
-        addRange(_offset, _str.size());
+        addRange(_offset, _size);
         modified_range_ = true;
         flush();
         solid_log(logger, Info, this << " " << range_vec_.size());
     }
 }
 
-bool File::findRange(const uint64_t _offset, size_t& _rsize) const
+bool File::findRangeFront(const uint64_t _offset, size_t& _rsize) const
 {
-    const auto less_cmp = [](const Range& _rr, const uint64_t _o) -> bool {
+    static const auto less_cmp = [](const Range& _rr, const uint64_t _o) -> bool {
         return _rr.offset_ < _o;
     };
 
-    auto it = lower_bound(range_vec_.begin(), range_vec_.end(), _offset, less_cmp);
+    const auto it = lower_bound(range_vec_.begin(), range_vec_.end(), _offset, less_cmp);
 
     if (it != range_vec_.begin()) {
         auto prev_it = it - 1;
         solid_assert(_offset > prev_it->offset_);
         if (_offset < (prev_it->offset_ + prev_it->size_)) {
-            auto remsize = (prev_it->offset_ + prev_it->size_) - _offset;
+            const auto remsize = (prev_it->offset_ + prev_it->size_) - _offset;
             if (remsize < _rsize) {
                 _rsize = remsize;
             }
@@ -803,9 +837,43 @@ bool File::findRange(const uint64_t _offset, size_t& _rsize) const
     return false;
 }
 
+bool File::findRangeBack(const uint64_t _offset, uint64_t& _rstart_offset, size_t& _rsize) const
+{
+    static const auto less_cmp = [](const Range& _rr, const uint64_t _o) -> bool {
+        return _rr.offset_ < _o;
+    };
+
+    const auto end_offset = _offset + _rsize;
+    const auto last_offset = _offset + _rsize - 1;
+
+    const auto it = lower_bound(range_vec_.begin(), range_vec_.end(), last_offset, less_cmp);
+
+    if (it != range_vec_.begin()) {
+        auto prev_it = it - 1;
+        solid_assert(last_offset > prev_it->offset_);
+        if (last_offset < (prev_it->offset_ + prev_it->size_)) {
+            _rstart_offset = prev_it->offset_;
+            const auto remsize = end_offset - prev_it->offset_;
+            if (remsize < _rsize) {
+                _rsize = remsize;
+            }
+            return true;
+        }
+    }
+    if (it != range_vec_.end()) {
+        solid_assert(last_offset <= it->offset_);
+        if (last_offset == it->offset_) {
+            _rstart_offset = it->offset_;
+            _rsize = 1;
+            return true;
+        }
+    }
+    return false;
+}
+
 void File::addRange(const uint64_t _offset, const uint64_t _size)
 {
-    const auto less_cmp = [](const Range& _rr, const uint64_t _o) -> bool {
+    static const auto less_cmp = [](const Range& _rr, const uint64_t _o) -> bool {
         return _rr.offset_ < _o;
     };
 
@@ -908,19 +976,19 @@ string denamefy(const std::string& _path)
 
 //-----------------------------------------------------------------------------
 
-void FileData::writeToCache(const uint64_t _offset, istream& _ris)
+uint64_t FileData::writeToCache(const uint64_t _offset, istream& _ris)
 {
-    file_.write(_offset, _ris);
+    return file_.write(_offset, _ris);
 }
 
-void FileData::writeToCache(const uint64_t _offset, const string& _str)
+void FileData::writeToCache(const uint64_t _offset, const char* _pdata, size_t _size)
 {
-    file_.write(_offset, _str);
+    file_.write(_offset, _pdata, _size);
 }
 
-bool FileData::readFromCache(char* _pbuf, uint64_t _offset, size_t _length, size_t& _rbytes_transfered)
+bool FileData::readFromCache(char* _pbuf, uint64_t _offset, size_t _length, size_t& _rbytes_transfered_front, size_t& _rbytes_transfered_back)
 {
-    return file_.read(_pbuf, _offset, _length, _rbytes_transfered);
+    return file_.read(_pbuf, _offset, _length, _rbytes_transfered_front, _rbytes_transfered_back);
 }
 
 } //namespace file_cache

@@ -6,6 +6,7 @@ if(WIN32)
     include_directories("${FUSE_INCLUDE_DIRECTORY}")
     add_executable(ola_client_service WIN32
         ola_client_service.cpp engine.hpp engine.cpp file_cache.hpp file_cache.cpp
+        file_data.hpp file_data.cpp
         shortcut_creator.hpp shortcut_creator.cpp
     )
 
@@ -26,10 +27,13 @@ if(WIN32)
         SolidFrame::solid_frame_aio_openssl
         SolidFrame::solid_serialization_v3
         ${SNAPPY_LIB}
+        ${LZ4_LIB}
         Boost::program_options
         Boost::system
         Boost::filesystem
     )
+
+    add_dependencies(ola_client_service build-snappy build-lz4)
 
     set_target_properties(
         ola_client_service PROPERTIES

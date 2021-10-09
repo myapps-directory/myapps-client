@@ -279,7 +279,6 @@ int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR pCmdLin
 {
     int     argc;
     LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
-
     const auto m_singleInstanceMutex = CreateMutex(NULL, TRUE, L"OLA_SERVICE_SHARED_MUTEX");
     if (m_singleInstanceMutex == NULL || GetLastError() == ERROR_ALREADY_EXISTS) {
         return -1; // Exit the app. For MFC, return false from InitInstance.
@@ -288,10 +287,7 @@ int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR pCmdLin
 #else
 int wmain(int argc, wchar_t** argv)
 {
-#endif
-#if 0
-    SetWindowPos(GetConsoleWindow(), NULL, 5000, 5000, 0, 0, 0);
-    ShowWindow(GetConsoleWindow(), SW_HIDE);
+    const HANDLE m_singleInstanceMutex = INVALID_HANDLE_VALUE;
 #endif
 
     FileSystemService service;
@@ -306,8 +302,10 @@ int wmain(int argc, wchar_t** argv)
         }
         arg_vec.emplace_back(nullptr);
         GetModuleFileName(NULL, szFileName, MAX_PATH);
-        ReleaseMutex(m_singleInstanceMutex);
-        CloseHandle(m_singleInstanceMutex);
+        if (m_singleInstanceMutex != INVALID_HANDLE_VALUE) {
+            ReleaseMutex(m_singleInstanceMutex);
+            CloseHandle(m_singleInstanceMutex);
+        }
         _wexecv(szFileName, arg_vec.data());
     }
     return rv;
@@ -1000,8 +998,12 @@ NTSTATUS FileSystemService::OnStart(ULONG argc, PWSTR *argv)
 	
 	EnableBackupRestorePrivileges();
 
-	host_.SetCaseSensitiveSearch(TRUE);
-	host_.SetFlushAndPurgeOnCleanup(TRUE);
+    solid_log(solid::generic_logger, Info, "getmaxstdio = " << _getmaxstdio());
+
+    int rv = _setmaxstdio(8192);
+    (void)rv;
+
+    solid_log(solid::generic_logger, Info, "getmaxstdio = " << _getmaxstdio());
 
 	Result = host_.Mount(const_cast<PWSTR>(params_.mount_point_.c_str()), 0, FALSE, DebugFlags);
     if (!NT_SUCCESS(Result)) {
@@ -1166,6 +1168,7 @@ NTSTATUS FileSystem::Init(PVOID Host0)
     Host->SetPassQueryDirectoryPattern(TRUE);
     Host->SetVolumeCreationTime(base_time_);
     Host->SetVolumeSerialNumber(0);
+    Host->SetFlushAndPurgeOnCleanup(TRUE);
 
 	return InitSecurityDescriptor();
 }
@@ -1189,20 +1192,20 @@ NTSTATUS FileSystem::GetSecurityByName(
     SIZE_T *PSecurityDescriptorSize)
 {
     using ola::client::service::NodeFlagsT;
-
-	if(PFileAttributes != nullptr){
+    
+    if(PFileAttributes != nullptr){
 		++FileName;
         NodeFlagsT node_flags;
 	    uint64_t size = 0;
-        if(engine().info(FileName, node_flags, size)){
-
-		    *PFileAttributes = FILE_ATTRIBUTE_READONLY | FILE_ATTRIBUTE_NOT_CONTENT_INDEXED | node_flags_to_attributes(node_flags);
-
-        }else{
-            *PFileAttributes = 0;
+        int64_t  base_time = 0;
+        if (engine().info(FileName, node_flags, size, base_time)) {
+            *PFileAttributes = FILE_ATTRIBUTE_READONLY | FILE_ATTRIBUTE_NOT_CONTENT_INDEXED | node_flags_to_attributes(node_flags);
         }
-	}
-	
+        else {
+            return NtStatusFromWin32(ERROR_PATH_NOT_FOUND);
+        }
+    }
+    
 	if(PSecurityDescriptorSize != nullptr){
 
 		if (this->security_size_ > *PSecurityDescriptorSize)
@@ -1244,7 +1247,7 @@ NTSTATUS FileSystem::Open(
 {
     //skip the first separator
     ++FileName;
-    *PFileDesc = engine().open(FileName, CreateOptions);
+    *PFileDesc = engine().open(FileName, CreateOptions, GrantedAccess);
 
     if(*PFileDesc != nullptr){
         return GetFileInfo(*PFileNode, *PFileDesc, &OpenFileInfo->FileInfo);
@@ -1295,6 +1298,9 @@ NTSTATUS FileSystem::Read(
     PULONG PBytesTransferred)
 {
     if(engine().read(static_cast<service::Descriptor*>(pFileDesc), Buffer, Offset, Length, *PBytesTransferred)){
+        if (*PBytesTransferred == 0) {
+            return  NtStatusFromWin32(ERROR_HANDLE_EOF);
+        }
         return STATUS_SUCCESS;
     }else{
         return STATUS_UNSUCCESSFUL;
@@ -1331,8 +1337,8 @@ NTSTATUS FileSystem::GetFileInfo(
 	using ola::client::service::NodeFlagsT;
     NodeFlagsT node_flags;
 	uint64_t size = 0;
-    
-	engine().info(static_cast<service::Descriptor*>(pFileDesc), node_flags, size);
+    int64_t  base_time = 0;
+	engine().info(static_cast<service::Descriptor*>(pFileDesc), node_flags, size, base_time);
 
 	FileInfo->FileAttributes = FILE_ATTRIBUTE_READONLY | FILE_ATTRIBUTE_NOT_CONTENT_INDEXED | node_flags_to_attributes(node_flags);
     FileInfo->ReparseTag     = 0;
@@ -1345,7 +1351,6 @@ NTSTATUS FileSystem::GetFileInfo(
     FileInfo->ChangeTime     = FileInfo->LastWriteTime;
     FileInfo->IndexNumber    = 0;
     FileInfo->HardLinks      = 0;
-
 
     return STATUS_SUCCESS;
 }
@@ -1433,7 +1438,7 @@ NTSTATUS FileSystem::ReadDirectory(
     ULONG Length,
     PULONG PBytesTransferred)
 {
-	//return static_cast<Descriptor*>(pFileDesc)->readDirectory(*this,  FileNode, Pattern, Marker, Buffer, Length, PBytesTransferred);
+    //return static_cast<Descriptor*>(pFileDesc)->readDirectory(*this,  FileNode, Pattern, Marker, Buffer, Length, PBytesTransferred);
     return BufferedReadDirectory(&engine().buffer(*static_cast<service::Descriptor*>(pFileDesc)),
 		    pFileNode, pFileDesc, Pattern, Marker, Buffer, Length, PBytesTransferred);
 }
@@ -1447,13 +1452,13 @@ NTSTATUS FileSystem::ReadDirectoryEntry(
     DirInfo *DirInfo)
 {
 	using namespace ola::client::service;
-	
-	wstring	  name;
-	uint64_t	  size = 0;
-	uint32_t  attributes = FILE_ATTRIBUTE_READONLY | FILE_ATTRIBUTE_NOT_CONTENT_INDEXED;
+    wstring	    name;
+	uint64_t	size = 0;
+    int64_t     base_time = base_time_;
+	uint32_t    attributes = FILE_ATTRIBUTE_READONLY | FILE_ATTRIBUTE_NOT_CONTENT_INDEXED;
 	NodeFlagsT	node_flags;
 
-    if(engine().list(static_cast<service::Descriptor*>(pFileDesc), *pContext, name, node_flags, size)){
+    if(engine().list(static_cast<service::Descriptor*>(pFileDesc), *pContext, name, node_flags, size, base_time)){
 		attributes |= node_flags_to_attributes(node_flags);
 	}else{
 		return STATUS_NO_MORE_FILES;
@@ -1466,9 +1471,9 @@ NTSTATUS FileSystem::ReadDirectoryEntry(
     DirInfo->FileInfo.ReparseTag = 0;
     DirInfo->FileInfo.FileSize = size;
     DirInfo->FileInfo.AllocationSize = (size + ALLOCATION_UNIT - 1) / ALLOCATION_UNIT * ALLOCATION_UNIT;
-    DirInfo->FileInfo.CreationTime = base_time_;
-    DirInfo->FileInfo.LastAccessTime = base_time_;
-    DirInfo->FileInfo.LastWriteTime = base_time_;
+    DirInfo->FileInfo.CreationTime = base_time;
+    DirInfo->FileInfo.LastAccessTime = base_time;
+    DirInfo->FileInfo.LastWriteTime = base_time;
     DirInfo->FileInfo.ChangeTime = DirInfo->FileInfo.LastWriteTime;
     DirInfo->FileInfo.IndexNumber = 0;
     DirInfo->FileInfo.HardLinks = 0;

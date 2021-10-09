@@ -76,7 +76,7 @@ public:
 
     void appListUpdate();
 
-    Descriptor* open(const fs::path& _path, uint32_t _create_flags);
+    Descriptor* open(const fs::path& _path, uint32_t _create_flags, uint32_t _granted_access);
 
     void cleanup(Descriptor* _pdesc);
 
@@ -84,11 +84,11 @@ public:
 
     void*& buffer(Descriptor& _rdesc);
 
-    bool info(const fs::path& _path, NodeFlagsT& _rnode_type, uint64_t& _rsize);
+    bool info(const fs::path& _path, NodeFlagsT& _rnode_type, uint64_t& _rsize, int64_t& _rbase_time);
 
-    void info(Descriptor* _pdesc, NodeFlagsT& _rnode_type, uint64_t& _rsize);
+    void info(Descriptor* _pdesc, NodeFlagsT& _rnode_type, uint64_t& _rsize, int64_t& _rbase_time);
 
-    bool list(Descriptor* _pdesc, void*& _rpctx, std::wstring& _rname, NodeFlagsT& _rentry_type, uint64_t& _rsize);
+    bool list(Descriptor* _pdesc, void*& _rpctx, std::wstring& _rname, NodeFlagsT& _rentry_type, uint64_t& _rsize, int64_t &_rbase_time);
 
     bool read(Descriptor* _pdesc, void* _pbuf, uint64_t _offset, unsigned long _length, unsigned long& _rbytes_transfered);
 };

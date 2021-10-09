@@ -79,41 +79,45 @@ int test_file_cache_file(int argc, char* argv[])
     {
         constexpr size_t buf_cap = 1024 * 100;
         char             buf[buf_cap];
-        size_t           bytes_transfered = 0;
+        size_t           bytes_transfered_front = 0;
+        size_t           bytes_transfered_back = 0;
         File             f;
 
         solid_check(f.open("test.data", data_size));
 
-        solid_check(!f.read(buf, 1000, 500, bytes_transfered) && bytes_transfered == 0);
+        solid_check(!f.read(buf, 1000, 500, bytes_transfered_front, bytes_transfered_back) && bytes_transfered_front == 0);
 
         write(f, 1000, 500, ioss);
-        bytes_transfered = 0;
-        solid_check(!f.read(buf, 0, 500, bytes_transfered) && bytes_transfered == 0);
-        bytes_transfered = 0;
-        solid_check(f.read(buf, 1000, 500, bytes_transfered) && bytes_transfered == 500 && check(buf, 1000, 500, ioss));
+        
+        solid_check(!f.read(buf, 0, 500, bytes_transfered_front, bytes_transfered_back) && bytes_transfered_front == 0);
+        solid_check(f.read(buf, 1000, 500, bytes_transfered_front, bytes_transfered_back) && bytes_transfered_front == 500 && check(buf, 1000, 500, ioss));
+
+        write(f, 0, 500, ioss);
+        solid_check(f.read(buf, 0, 500, bytes_transfered_front, bytes_transfered_back) && bytes_transfered_front == 500);
+
+        solid_check(!f.read(buf, 1, 1499, bytes_transfered_front, bytes_transfered_back) && bytes_transfered_front == 499 && bytes_transfered_back == 500);
+
+        solid_check(!f.read(buf, 500, 501, bytes_transfered_front, bytes_transfered_back) && bytes_transfered_front == 0 && bytes_transfered_back == 1);
 
         write(f, 2000, 500, ioss);
-        bytes_transfered = 0;
-        solid_check(!f.read(buf, 1400, 1000, bytes_transfered) && bytes_transfered == 100 && check(buf, 1400, 100, ioss));
+        solid_check(!f.read(buf, 1400, 1000, bytes_transfered_front, bytes_transfered_back) && bytes_transfered_front == 100 && check(buf, 1400, 100, ioss));
 
         //1000-1500 2000-2500
         write(f, 1500, 500, ioss);
 
-        bytes_transfered = 0;
-        solid_check(f.read(buf, 1000, 1500, bytes_transfered) && bytes_transfered == 1500 && check(buf, 1000, 1500, ioss));
+        solid_check(f.read(buf, 1000, 1500, bytes_transfered_front, bytes_transfered_back) && bytes_transfered_front == 1500 && check(buf, 1000, 1500, ioss));
+
+
 
         //1000-2500
         write(f, 3000, 500, ioss);
 
         //1000-2500 3000-3500
-        bytes_transfered = 0;
-        solid_check(!f.read(buf, 2400, 1000, bytes_transfered) && bytes_transfered == 100 && check(buf, 2400, 100, ioss));
+        solid_check(!f.read(buf, 2400, 1000, bytes_transfered_front, bytes_transfered_back) && bytes_transfered_front == 100 && check(buf, 2400, 100, ioss));
 
-        bytes_transfered = 0;
-        solid_check(!f.read(buf, 2900, 1000, bytes_transfered) && bytes_transfered == 0);
+        solid_check(!f.read(buf, 2900, 1000, bytes_transfered_front, bytes_transfered_back) && bytes_transfered_front == 0);
 
-        bytes_transfered = 0;
-        solid_check(!f.read(buf, 3400, 1000, bytes_transfered) && bytes_transfered == 100 && check(buf, 3400, 100, ioss));
+        solid_check(!f.read(buf, 3400, 1000, bytes_transfered_front, bytes_transfered_back) && bytes_transfered_front == 100 && check(buf, 3400, 100, ioss));
 
         write(f, 4000, 500, ioss);
 
@@ -121,19 +125,16 @@ int test_file_cache_file(int argc, char* argv[])
         write(f, 3400, 200, ioss);
 
         //1000-2500 3000-3600 4000-4500
-        bytes_transfered = 0;
-        solid_check(!f.read(buf, 3500, 1000, bytes_transfered) && bytes_transfered == 100 && check(buf, 3500, 100, ioss));
+        solid_check(!f.read(buf, 3500, 1000, bytes_transfered_front, bytes_transfered_back) && bytes_transfered_front == 100 && check(buf, 3500, 100, ioss));
 
         write(f, 3900, 100, ioss);
         //1000-2500 3000-3600 3900-4500
-        bytes_transfered = 0;
-        solid_check(!f.read(buf, 3900, 1000, bytes_transfered) && bytes_transfered == 600 && check(buf, 3900, 600, ioss));
+        solid_check(!f.read(buf, 3900, 1000, bytes_transfered_front, bytes_transfered_back) && bytes_transfered_front == 600 && check(buf, 3900, 600, ioss));
 
         write(f, 2000, 2000, ioss);
 
         //1000-4500
-        bytes_transfered = 0;
-        solid_check(f.read(buf, 1000, 3500, bytes_transfered) && bytes_transfered == 3500 && check(buf, 1000, 3500, ioss));
+        solid_check(f.read(buf, 1000, 3500, bytes_transfered_front, bytes_transfered_back) && bytes_transfered_front == 3500 && check(buf, 1000, 3500, ioss));
     }
 
     fs::remove("test.data");
@@ -152,19 +153,17 @@ int test_file_cache_file(int argc, char* argv[])
     {
         constexpr size_t buf_cap = 1024 * 100;
         char             buf[buf_cap];
-        size_t           bytes_transfered = 0;
+        size_t           bytes_transfered_front = 0;
+        size_t           bytes_transfered_back = 0;
         File             f;
 
         solid_check(f.open("test.data", data_size));
 
-        bytes_transfered = 0;
-        solid_check(f.read(buf, 1000, 500, bytes_transfered) && bytes_transfered == 500 && check(buf, 1000, 500, ioss));
+        solid_check(f.read(buf, 1000, 500, bytes_transfered_front, bytes_transfered_back) && bytes_transfered_front == 500 && check(buf, 1000, 500, ioss));
 
-        bytes_transfered = 0;
-        solid_check(f.read(buf, 2000, 500, bytes_transfered) && bytes_transfered == 500 && check(buf, 2000, 500, ioss));
+        solid_check(f.read(buf, 2000, 500, bytes_transfered_front, bytes_transfered_back) && bytes_transfered_front == 500 && check(buf, 2000, 500, ioss));
 
-        bytes_transfered = 0;
-        solid_check(f.read(buf, 3000, 500, bytes_transfered) && bytes_transfered == 500 && check(buf, 3000, 500, ioss));
+        solid_check(f.read(buf, 3000, 500, bytes_transfered_front, bytes_transfered_back) && bytes_transfered_front == 500 && check(buf, 3000, 500, ioss));
     }
 
     return 0;

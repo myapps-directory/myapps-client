@@ -32,25 +32,26 @@ int test_file_cache(int argc, char* argv[])
     }
     auto file_ptr = make_unique<FileStub>();
     engine.open(*file_ptr, 1 * 1024 * 1024, "first application", "first build", "bin/1.test");
-    file_ptr->writeToCache(100, "some data");
+    const string some_data = "some data";
+    file_ptr->writeToCache(100, some_data.data(), some_data.size());
     engine.close(*file_ptr);
     file_ptr.reset();
 
     file_ptr = make_unique<FileStub>();
     engine.open(*file_ptr, 2 * 1024 * 1024, "first application", "first build", "bin/2.test");
-    file_ptr->writeToCache(100, "some data");
+    file_ptr->writeToCache(100, some_data.data(), some_data.size());
     engine.close(*file_ptr);
     file_ptr.reset();
 
     file_ptr = make_unique<FileStub>();
     engine.open(*file_ptr, 3 * 1024 * 1024, "first application", "first build", "bin/3.test");
-    file_ptr->writeToCache(100, "some data");
+    file_ptr->writeToCache(100, some_data.data(), some_data.size());
     engine.close(*file_ptr);
     file_ptr.reset();
 
     file_ptr = make_unique<FileStub>();
     engine.open(*file_ptr, 4 * 1024 * 1024, "first application", "first build", "bin/4.test");
-    file_ptr->writeToCache(100, "some data");
+    file_ptr->writeToCache(100, some_data.data(), some_data.size());
     engine.close(*file_ptr);
     file_ptr.reset();
 
@@ -82,7 +83,7 @@ int test_file_cache(int argc, char* argv[])
 
     file_ptr = make_unique<FileStub>();
     engine.open(*file_ptr, 5 * 1024 * 1024, "first application", "first build", "bin/5.test");
-    file_ptr->writeToCache(100, "some data");
+    file_ptr->writeToCache(100, some_data.data(), some_data.size());
     engine.close(*file_ptr);
     file_ptr.reset();
 
@@ -166,19 +167,19 @@ int test_file_cache(int argc, char* argv[])
 
         auto file_ptr = make_unique<FileStub>();
         engine.open(*file_ptr, 1 * 1024 * 1024, "first application", "first build", "bin/1.test");
-        file_ptr->writeToCache(100, "some data");
+        file_ptr->writeToCache(100, some_data.data(), some_data.size());
         engine.close(*file_ptr);
         file_ptr.reset();
 
         file_ptr = make_unique<FileStub>();
         engine.open(*file_ptr, 2 * 1024 * 1024, "first application", "first build", "bin/2.test");
-        file_ptr->writeToCache(100, "some data");
+        file_ptr->writeToCache(100, some_data.data(), some_data.size());
         engine.close(*file_ptr);
         file_ptr.reset();
 
         file_ptr = make_unique<FileStub>();
         engine.open(*file_ptr, 3 * 1024 * 1024, "second application", "first build", "bin/1.test");
-        file_ptr->writeToCache(100, "some data");
+        file_ptr->writeToCache(100, some_data.data(), some_data.size());
         engine.close(*file_ptr);
         file_ptr.reset();
 

@@ -37,6 +37,10 @@ class File {
         {
             _a(offset_, size_);
         }
+
+        bool operator<(const Range& _r)const {
+            return (offset_ + size_) <= _r.offset_ || ( offset_ < _r.offset_ && ((offset_ + size_) < (_r.offset_ + _r.size_)));
+        }
     };
     using RangeVectorT = std::vector<Range>;
     RangeVectorT range_vec_;
@@ -53,10 +57,10 @@ public:
 
     void close();
 
-    void write(const uint64_t _offset, std::istream& _ris);
-    bool read(char* _pbuf, uint64_t _offset, size_t _length, size_t& _rbytes_transfered);
+    uint64_t write(const uint64_t _offset, std::istream& _ris);
+    bool read(char* _pbuf, uint64_t _offset, size_t _length, size_t& _rbytes_transfered_front, size_t& _rbytes_transfered_back);
 
-    void write(const uint64_t _offset, const std::string& _str);
+    void write(const uint64_t _offset, const char *_pbuf, size_t _size);
 
     void flush();
 
@@ -83,13 +87,18 @@ public:
         return size_;
     }
 
+    bool isComplete()const {
+        return range_vec_.size() == 1 && range_vec_.front().size_ == size_;
+    }
+
 private:
     void addRange(const uint64_t _offset, const uint64_t _size);
-    bool findRange(const uint64_t _offset, size_t& _rsize) const;
+    bool findRangeFront(const uint64_t _offset, size_t& _rsize) const;
+    bool findRangeBack(const uint64_t _offset, uint64_t &_rstart_offset, size_t& _rsize) const;
 
     bool loadRanges();
-    void storeRanges();
-    void storeHead();
+    bool storeRanges();
+    bool storeHead();
 }; // namespace file_cache
 
 struct FileData {
@@ -100,22 +109,25 @@ struct FileData {
 
     virtual ~FileData() = default;
 
-    void writeToCache(const uint64_t _offset, std::istream& _ris);
-    void writeToCache(const uint64_t _offset, const std::string& _str);
-    bool readFromCache(char* _pbuf, uint64_t _offset, size_t _length, size_t& _rbytes_transfered);
+    uint64_t writeToCache(const uint64_t _offset, std::istream& _ris);
+    void writeToCache(const uint64_t _offset, const char *_pdata, size_t _size);
+    bool readFromCache(char* _pbuf, uint64_t _offset, size_t _length, size_t& _rbytes_transfered_front, size_t& _rbytes_transfered_back);
 
     size_t rageCount() const
     {
         return file_.rangeCount();
+    }
+    bool isComplete()const {
+        return file_.isComplete();
     }
 };
 
 struct Configuration {
     fs::path base_path_;
 
-    uint64_t max_size_      = 5 * 1024 * 1024 * 1024;
-    uint64_t max_file_size_ = 200 * 1024 * 1024;
-    size_t   max_count_     = 10 * 1024;
+    uint64_t max_size_      = 100ULL * 1024 * 1024 * 1024;
+    uint64_t max_file_size_ = 10ULL * 1024 * 1024 * 1024;
+    size_t   max_count_     = 100 * 1024;
 };
 
 using UniqueIdT = solid::frame::UniqueId;

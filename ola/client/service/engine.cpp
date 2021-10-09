@@ -21,7 +21,7 @@
 #include "ola/client/utility/locale.hpp"
 #include "ola/client/utility/app_list_file.hpp"
 
-#include "file_cache.hpp"
+#include "file_data.hpp"
 #include "shortcut_creator.hpp"
 
 #include <boost/algorithm/string/predicate.hpp>
@@ -63,6 +63,7 @@ enum struct EntryFlagsE : uint8_t {
     Hidden,
     Invisible,
     Volatile,
+    Media,
     Delete,
     Update,
 };
@@ -116,9 +117,8 @@ struct Hash {
         std::size_t seed = 0;
         std::locale locale;
 
-        for (std::string::const_iterator it = _rrw.get().begin();
-             it != _rrw.get().end(); ++it) {
-            boost::hash_combine(seed, std::toupper(*it, locale));
+        for (const auto &c: _rrw.get()) {
+            boost::hash_combine(seed, std::toupper(c, locale));
         }
 
         return seed;
@@ -151,117 +151,18 @@ struct DirectoryData {
     }
 };
 
-struct ReadData {
-    size_t    bytes_transfered_ = 0;
-    char*     pbuffer_;
-    uint64_t  offset_;
-    size_t    size_;
-    ReadData* pnext_ = nullptr;
-    ReadData* pprev_ = nullptr;
-    bool      done_  = false;
-
-    ReadData(
-        char*    _pbuffer,
-        uint64_t _offset,
-        size_t   _size)
-        : pbuffer_(_pbuffer)
-        , offset_(_offset)
-        , size_(_size)
-    {
-    }
-};
-
-struct FetchStub {
-    enum StatusE {
-        NotUsedE,
-        PendingE,
-        FetchedE,
-    };
-
-    uint64_t                              offset_ = 0;
-    size_t                                size_   = 0;
-    StatusE                               status_ = NotUsedE;
-    shared_ptr<main::FetchStoreRequest>         request_ptr_;
-    shared_ptr<main::FetchStoreResponse> response_ptr_;
-};
-
-struct FileData : file_cache::FileData {
-    enum StatusE {
-        PendingE,
-        ErrorE,
-    };
-    ReadData* pfront_ = nullptr;
-    ReadData* pback_  = nullptr;
-    StatusE   status_ = PendingE;
-    FetchStub fetch_stubs_[2];
-    string    remote_path_;
-    uint64_t  prefetch_offset_;
-    size_t    contiguous_read_count_;
-
-    FileData(const string& _remote_path)
-        : remote_path_(_remote_path)
-    {
-    }
-
-    FileData(const FileData& _rfd)
-        : remote_path_(_rfd.remote_path_)
-    {
-    }
-
-    bool readFromCache(ReadData& _rdata)
-    {
-        size_t bytes_transfered = 0;
-        bool   b                = file_cache::FileData::readFromCache(_rdata.pbuffer_, _rdata.offset_, _rdata.size_, bytes_transfered);
-        _rdata.bytes_transfered_ += bytes_transfered;
-        _rdata.pbuffer_ += bytes_transfered;
-        _rdata.offset_ += bytes_transfered;
-        _rdata.size_ -= bytes_transfered;
-        return b;
-    }
-
-    bool readFromResponses(ReadData& _rdata);
-
-    bool enqueue(ReadData& _rdata)
-    {
-        _rdata.pnext_ = pback_;
-        _rdata.pprev_ = nullptr;
-        if (pback_ == nullptr) {
-            pback_ = pfront_ = &_rdata;
-            return true;
-        } else {
-            pback_->pprev_ = &_rdata;
-            pback_         = &_rdata;
-            return false;
-        }
-    }
-
-    void erase(ReadData& _rdata)
-    {
-        if (_rdata.pprev_ != nullptr) {
-            _rdata.pprev_->pnext_ = _rdata.pnext_;
-        } else {
-            pback_ = _rdata.pnext_;
-        }
-        if (_rdata.pnext_ != nullptr) {
-            _rdata.pnext_->pprev_ = _rdata.pprev_;
-        } else {
-            pfront_ = _rdata.pprev_;
-        }
-    }
-    size_t findAvailableFetchIndex() const;
-    size_t isReadHandledByPendingFetch(const ReadData& _rread_data) const;
-    bool   readFromResponse(const size_t _idx, ReadData& _rdata);
-    void   updateContiguousRead(uint64_t _offset, uint64_t _size);
-};
-
 struct ApplicationData : DirectoryData {
     std::string     app_id_; //used for updates
     std::string     app_unique_;
     std::string     build_unique_;
     EntryPtrVectorT shortcut_vec_;
     atomic<size_t>  use_count_ = 0;
+    uint32_t        compress_chunk_capacity_ = 0;
+    uint8_t         compress_algorithm_type_ = 0;
 
-    ApplicationData(const std::string& _app_unique, const std::string& _build_unique)
+    ApplicationData(
+        const std::string& _app_unique, const std::string& _build_unique
+    )
         : app_unique_(_app_unique)
         , build_unique_(_build_unique)
     {
@@ -270,6 +171,8 @@ struct ApplicationData : DirectoryData {
     ApplicationData(const ApplicationData& _rad)
         : app_unique_(_rad.app_unique_)
         , build_unique_(_rad.build_unique_)
+        , compress_chunk_capacity_(_rad.compress_chunk_capacity_)
+        , compress_algorithm_type_(_rad.compress_algorithm_type_)
     {
     }
 
@@ -344,6 +247,7 @@ struct Entry {
     std::weak_ptr<Entry>     parent_;
     Entry*                   pmaster_ = nullptr;
     uint64_t                 size_    = 0;
+    int64_t                  base_time_ = 0;
     boost::any               data_any_;
     Entry*                   pnext_ = nullptr;
     Entry*                   pprev_ = nullptr;
@@ -381,7 +285,7 @@ struct Entry {
         return type_ == EntryTypeE::File;
     }
 
-    bool isMedia() const
+    bool isMediaRoot() const
     {
         return type_ == EntryTypeE::Media;
     }
@@ -535,10 +439,13 @@ struct Entry {
         return rcv_;
     }
 
-    void info(NodeFlagsT& _rnode_flags, uint64_t& _rsize) const
+    void info(NodeFlagsT& _rnode_flags, uint64_t& _rsize, int64_t& _rbase_time) const
     {
+        solid_log(logger, Info, ""<<this->name_<< " "<<size_);
         _rnode_flags = 0;
         _rsize       = size_;
+        _rbase_time = base_time_;
+
         switch (type_) {
         case EntryTypeE::Unknown:
             solid_throw("Unknown entry type");
@@ -589,6 +496,11 @@ struct Entry {
     bool isVolatile() const
     {
         return entry_has_flag(flags_, EntryFlagsE::Volatile);
+    }
+
+    bool isMedia() const
+    {
+        return entry_has_flag(flags_, EntryFlagsE::Media);
     }
 
     bool hasDelete() const
@@ -683,7 +595,7 @@ void MediaData::insertEntry(const Configuration& _rcfg, EntryPointerT&& _uentry_
 {
     while (entry_map_.size() >= _rcfg.media_cache_size_) {
         auto it = entry_map_.find(front()->name_);
-        solid_check(it != entry_map_.end() && it->second.get() == front());
+        solid_check_log(it != entry_map_.end() && it->second.get() == front(), logger, "");
         if (it->second.use_count() == 1) {
             popFront();
             entry_map_.erase(it);
@@ -826,31 +738,40 @@ public:
 
     void eraseEntryFromParent(EntryPointerT&& _uentry_ptr, unique_lock<mutex>&& _ulock);
 
-    void createEntryData(unique_lock<mutex>& _lock, EntryPointerT& _rentry_ptr, const std::string& _path_str, ListNodeDequeT& _rnode_dq);
+    void createEntryData(
+        unique_lock<mutex>& _lock, EntryPointerT& _rentry_ptr,
+        ListNodeDequeT& _rnode_dq,
+        const uint32_t _compress_chunk_capacity,
+        const uint8_t _compress_algorithm_type
+    );
 
     void insertDirectoryEntry(unique_lock<mutex>& _lock, EntryPointerT& _rparent_ptr, const string& _name);
-    void insertFileEntry(unique_lock<mutex>& _lock, EntryPointerT& _rparent_ptr, const string& _name, uint64_t _size);
+    void insertFileEntry(unique_lock<mutex>& _lock, EntryPointerT& _rparent_ptr, const string& _name, const uint64_t _size, const int64_t _base_time);
 
     void createRootEntry();
 
-    bool entry(const fs::path& _path, EntryPointerT& _rentry_ptr, unique_lock<mutex>& _rlock);
+    bool fetch(EntryPointerT& _rentry_ptr, unique_lock<mutex>& _rlock, const string& _remote_path);
+    bool entry(const fs::path& _path, EntryPointerT& _rentry_ptr, unique_lock<mutex>& _rlock, const bool _open = false);
 
-    bool findOrCreateEntry(
-        const fs::path& _path, EntryPointerT& _rentry_ptr, unique_lock<mutex>& _rlock, std::string& _remote_path,
-        const string*& _rpapp_unique, const string*& _rpbuild_unique);
-
-    void asyncFetch(EntryPointerT& _rentry_ptr, const size_t _fetch_index, const uint64_t _offset, uint64_t _size);
+    void asyncFetchStoreFileHandleResponse(
+        frame::mprpc::ConnectionContext& _rctx, EntryPointerT& _rentry_ptr,
+        std::shared_ptr<main::FetchStoreRequest>& _rsent_msg_ptr,
+        std::shared_ptr<main::FetchStoreResponse>& _rrecv_msg_ptr
+    );
+    void asyncFetchStoreFile(
+        frame::mprpc::ConnectionContext* _pctx, EntryPointerT& _rentry_ptr,
+        std::shared_ptr<main::FetchStoreRequest>& _rreq_msg_ptr,
+        const uint32_t _chunk_index, const uint32_t _chunk_offset);
 
     bool list(
         EntryPointerT& _rentry_ptr,
         void*&         _rpctx,
-        std::wstring& _rname, NodeFlagsT& _rnode_flags, uint64_t& _rsize);
+        std::wstring& _rname, NodeFlagsT& _rnode_flags, uint64_t& _rsize, int64_t& _rbase_time);
     bool read(
-        EntryPointerT& _rentry_ptr,
+        Descriptor* _pdesc,
         char*          _pbuf,
         uint64_t _offset, unsigned long _length, unsigned long& _rbytes_transfered);
-    void tryFetch(EntryPointerT& _rentry_ptr, ReadData& _rread_data);
-    void tryPreFetch(EntryPointerT& _rentry_ptr);
+    void tryFetch(EntryPointerT& _rentry_ptr);
 
     fs::path cachePath() const
     {
@@ -863,27 +784,12 @@ public:
 
 private:
     void tryAuthenticate(frame::mprpc::ConnectionContext& _ctx);
-#if 0
-    fs::path authDataDirectoryPath() const
-    {
-        fs::path p = config_.path_prefix_;
-        p /= "config";
-        return p;
-    }
-
-
-    fs::path authDataFilePath() const
-    {
-        return authDataDirectoryPath() / "auth.data";
-    }
-#endif
 
     void insertApplicationEntry(
         std::shared_ptr<main::FetchBuildConfigurationResponse>& _rrecv_msg_ptr,
         const ola::utility::ApplicationListItem &_app
     );
     void insertMountEntry(EntryPointerT& _rparent_ptr, const fs::path& _local, const string& _remote);
-    bool canPreFetch(const EntryPointerT& _rentry_ptr) const;
 
     bool readFromFile(
         EntryPointerT&      _rentry_ptr,
@@ -915,7 +821,6 @@ void complete_message(
     std::shared_ptr<M>&              _rrecv_msg_ptr,
     ErrorConditionT const&           _rerror)
 {
-    //solid_check(false); //this method should not be called
 }
 
 } //namespace
@@ -964,7 +869,7 @@ void Engine::start(const Configuration& _rcfg)
 
         {
             auto connection_start_lambda = [this](frame::mprpc::ConnectionContext& _rctx) {
-                _rctx.anyTuple() = std::make_tuple(front::core::version, front::main::version, ola::utility::version);
+                _rctx.any() = std::make_tuple(front::core::version, front::main::version, ola::utility::version);
                 pimpl_->onFrontConnectionStart(_rctx);
             };
             auto connection_stop_lambda = [this](frame::mprpc::ConnectionContext& _ctx) {
@@ -994,7 +899,7 @@ void Engine::start(const Configuration& _rcfg)
     }
 
     auto err = pimpl_->front_rpc_service_.createConnectionPool(pimpl_->config_.auth_endpoint_.c_str(), 1);
-    solid_check(!err, "creating connection pool: " << err.message());
+    solid_check_log(!err, logger, "creating connection pool: " << err.message());
 
     if (!err) {
         auto lambda = [pimpl = pimpl_.get()](
@@ -1011,7 +916,7 @@ void Engine::start(const Configuration& _rcfg)
         req_ptr->choice_ = 'a';
 
         err = pimpl_->front_rpc_service_.sendRequest(pimpl_->config_.auth_endpoint_.c_str(), req_ptr, lambda);
-        solid_check(!err);
+        solid_check_log(!err, logger, "err = "<<err.message());
         pimpl_->running_ = true;
     }
 }
@@ -1060,39 +965,84 @@ void Engine::appListUpdate() {
     }
 }
 
-bool Engine::info(const fs::path& _path, NodeFlagsT& _rnode_flags, uint64_t& _rsize)
+bool Engine::info(const fs::path& _path, NodeFlagsT& _rnode_flags, uint64_t& _rsize, int64_t& _rbase_time)
 {
-    EntryPointerT      entry_ptr = atomic_load(&pimpl_->root_entry_ptr_);
-    mutex&             rmutex    = entry_ptr->mutex();
-    unique_lock<mutex> lock{rmutex};
+    try {
+        EntryPointerT      entry_ptr = atomic_load(&pimpl_->root_entry_ptr_);
+        mutex& rmutex = entry_ptr->mutex();
+        unique_lock<mutex> lock{ rmutex };
 
-    if (pimpl_->entry(_path, entry_ptr, lock)) {
-        entry_ptr->info(_rnode_flags, _rsize);
+        if (pimpl_->entry(_path, entry_ptr, lock)) {
+            entry_ptr->info(_rnode_flags, _rsize, _rbase_time);
 
-        Entry* papp_entry = nullptr;
-        if (entry_ptr && entry_ptr->pmaster_ && entry_ptr->pmaster_->isApplication()) {
-            papp_entry = entry_ptr->pmaster_;
-            pimpl_->releaseApplication(*papp_entry);
+            Entry* papp_entry = nullptr;
+            if (entry_ptr && entry_ptr->pmaster_ && entry_ptr->pmaster_->isApplication()) {
+                papp_entry = entry_ptr->pmaster_;
+                pimpl_->releaseApplication(*papp_entry);
+            }
+
+            solid_log(logger, Verbose, "INFO: " << _path.generic_path() << " " << static_cast<int>(_rnode_flags) << " " << _rsize);
+            return true;
         }
-
-        solid_log(logger, Verbose, "INFO: " << _path.generic_path() << " " << static_cast<int>(_rnode_flags) << " " << _rsize);
-        return true;
+    }
+    catch (std::exception &e) {
+        solid_log(logger, Error, _path.generic_path() << " Exception caught: "<<e.what());
+    }catch(...){
+        solid_log(logger, Error, _path.generic_path()<<" Unknown Exception caught");
     }
     solid_log(logger, Verbose, "INFO: FAIL " << _path.generic_path());
     return false;
 }
 
-Descriptor* Engine::open(const fs::path& _path, uint32_t _create_flags)
-{
-    EntryPointerT      entry_ptr = atomic_load(&pimpl_->root_entry_ptr_);
-    mutex&             rmutex    = entry_ptr->mutex();
-    unique_lock<mutex> lock{rmutex};
+//#define OLA_VALIDATE_READ
+//#define OLA_VALIDATE_TIME
 
-    if (pimpl_->entry(_path, entry_ptr, lock)) {
-        auto pdesc = new Descriptor(std::move(entry_ptr));
-        ++pimpl_->open_count_;
-        solid_log(logger, Verbose, "OPEN: " << _create_flags << ' ' << _path.generic_path() << " -> " << pdesc << " entry: " << pdesc->entry_ptr_.get() << " open_count = " << pimpl_->open_count_);
-        return pdesc;
+#if defined(OLA_VALIDATE_READ) || defined(OLA_VALIDATE_TIME)
+
+string base_path = "F:\\builds\\apps\\VLC\\";
+const string app_name = "VLC Media Player";
+#define FULLPATH_SIZE (MAX_PATH + FSP_FSCTL_TRANSACT_PATH_SIZEMAX / sizeof(WCHAR))
+
+#endif
+
+#if defined(OLA_VALIDATE_TIME)
+int64_t get_file_base_time(const string &_file_path)
+{
+    int64_t retval = 0;
+    HANDLE Handle = CreateFileA(_file_path.c_str(),
+        FILE_READ_ATTRIBUTES | READ_CONTROL, 0, 0,
+        OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, 0);
+    if (Handle != INVALID_HANDLE_VALUE) {
+        BY_HANDLE_FILE_INFORMATION ByHandleFileInfo;
+
+        if (GetFileInformationByHandle(Handle, &ByHandleFileInfo)) {
+            retval = ((PLARGE_INTEGER)&ByHandleFileInfo.ftLastWriteTime)->QuadPart;
+        }
+        CloseHandle(Handle);
+    }
+    return retval;
+}
+#endif
+
+Descriptor* Engine::open(const fs::path& _path, uint32_t _create_flags, uint32_t _granted_access)
+{
+    try{
+        EntryPointerT      entry_ptr = atomic_load(&pimpl_->root_entry_ptr_);
+        mutex&             rmutex    = entry_ptr->mutex();
+        unique_lock<mutex> lock{rmutex};
+
+        if (pimpl_->entry(_path, entry_ptr, lock, true)) {
+            auto pdesc = new Descriptor(std::move(entry_ptr));
+            ++pimpl_->open_count_;
+            solid_log(logger, Verbose, "OPEN: " << _create_flags << ' ' << _path.generic_path() << " -> " << pdesc << " entry: " << pdesc->entry_ptr_.get() << " open_count = " << pimpl_->open_count_);
+            return pdesc;
+        }
+    }
+    catch (std::exception& e) {
+        solid_log(logger, Error, _path.generic_path() << " Exception caught: " << e.what());
+    }
+    catch (...) {
+        solid_log(logger, Error, _path.generic_path() << " Unknown Exception caught");
     }
     return nullptr;
 }
@@ -1139,153 +1089,37 @@ void Engine::close(Descriptor* _pdesc)
     }
 }
 
-bool Engine::Implementation::findOrCreateEntry(
-    const fs::path& _path, EntryPointerT& _rentry_ptr, unique_lock<mutex>& _rlock, std::string& _remote_path,
-    const string*& _rpapp_unique, const string*& _rpbuild_unique)
-{
-    Entry* papp_entry = nullptr;
-    auto   it         = _path.begin();
-    for (; it != _path.end(); ++it) {
-        const auto&   e     = *it;
-        string        s     = e.generic_string();
-        EntryPointerT e_ptr = _rentry_ptr->find(s);
-
-        solid_log(logger, Verbose, "\t" << s);
-
-        if (!e_ptr) {
-            _rentry_ptr = tryInsertUnknownEntry(_rentry_ptr, s);
-            if (_rentry_ptr) {
-                _remote_path += '/';
-                _remote_path += s;
-
-            } else {
-                break;
-            }
-        } else {
-            _rentry_ptr = std::move(e_ptr);
-
-            if (_rentry_ptr->isApplication()) {
-                papp_entry = _rentry_ptr.get();
-                papp_entry->applicationData().useApplication(); //under root mutex
-            }
-
-            if (_rentry_ptr->isShortcut()) {
-                papp_entry = _rentry_ptr->pmaster_;
-                papp_entry->applicationData().useApplication(); //under root mutex
-            }
-
-            mutex& rmutex = _rentry_ptr->mutex();
-            _rlock.unlock(); //no overlapping locks
-            {
-                unique_lock<mutex> tlock{rmutex};
-                _rlock.swap(tlock);
-            }
-
-            if (_rentry_ptr->isApplication()) {
-                _remote_path.clear();
-                //_rpstorage_id = &_rentry_ptr->remote_;
-
-                auto& rad       = _rentry_ptr->applicationData();
-                _rpapp_unique   = &rad.app_unique_;
-                _rpbuild_unique = &rad.build_unique_;
-            } else if (_rentry_ptr->isMedia()) {
-                break;
-            } else if (!_rentry_ptr->remote_.empty()) {
-                _remote_path += '/';
-                _remote_path += _rentry_ptr->remote_;
-            } else {
-                _remote_path += '/';
-                _remote_path += _rentry_ptr->name_;
-            }
-        }
-    }
-
-    if (!_rentry_ptr) {
-        if (_rlock.owns_lock()) {
-            _rlock.unlock();
-        }
-        if (papp_entry != nullptr) {
-            //no lock
-            releaseApplication(*papp_entry);
-        }
-        return false;
-    }
-
-    if (_rentry_ptr->isMedia()) {
-        solid_check(papp_entry == nullptr);
-        ++it;
-        if (it == _path.end()) {
-            return false;
-        }
-
-        string encoded_storage_id = it->generic_string();
-        ++it;
-        while (it != _path.end()) {
-            _remote_path += it->generic_string();
-            ++it;
-            if (it != _path.end()) {
-                _remote_path += '/';
-            }
-        }
-
-        string name      = encoded_storage_id + '/' + _remote_path;
-        auto   entry_ptr = _rentry_ptr->find(name);
-        if (entry_ptr) {
-            _rentry_ptr = std::move(entry_ptr);
-            return true;
-        }
-
-        string storage_id = ola::utility::hex_decode(encoded_storage_id);
-
-        entry_ptr           = createEntry(_rentry_ptr, name);
-        entry_ptr->pmaster_ = entry_ptr.get();
-        entry_ptr->remote_  = std::move(storage_id);
-        entry_ptr->status_  = EntryStatusE::FetchRequired;
-        entry_ptr->flagSet(EntryFlagsE::Volatile);
-
-        _rentry_ptr->mediaData().insertEntry(config_, EntryPointerT(entry_ptr));
-
-        _rentry_ptr = std::move(entry_ptr);
-    }
-    return true;
-}
-
-bool Engine::Implementation::entry(const fs::path& _path, EntryPointerT& _rentry_ptr, unique_lock<mutex>& _rlock)
-{
-    string        remote_path;
-    const string* papp_unique   = nullptr;
-    const string* pbuild_unique = nullptr;
-
-    if (!findOrCreateEntry(_path, _rentry_ptr, _rlock, remote_path, papp_unique, pbuild_unique)) {
-        solid_log(logger, Info, "failed findOrCreateEntry");
-        return false;
-    }
-
-    auto generic_path_str = _path.generic_string();
-
-    solid_log(logger, Info, "Open (generic_path = " << generic_path_str << " remote_path = " << remote_path << ")");
-
+bool Engine::Implementation::fetch(EntryPointerT& _rentry_ptr, unique_lock<mutex>& _rlock, const string& _remote_path) {
     if (_rentry_ptr->status_ == EntryStatusE::FetchRequired) {
         _rentry_ptr->status_ = EntryStatusE::FetchPending;
-
-        auto lambda = [entry_ptr = _rentry_ptr, &generic_path_str, this](
-                          frame::mprpc::ConnectionContext&           _rctx,
-                          std::shared_ptr<main::ListStoreRequest>&  _rsent_msg_ptr,
-                          std::shared_ptr<main::ListStoreResponse>& _rrecv_msg_ptr,
-                          ErrorConditionT const&                     _rerror) mutable {
-            auto&              m = entry_ptr->mutex();
-            unique_lock<mutex> lock{m};
-            if (_rrecv_msg_ptr && _rrecv_msg_ptr->error_ == 0) {
-                entry_ptr->status_ = EntryStatusE::Fetched;
-                createEntryData(lock, entry_ptr, generic_path_str, _rrecv_msg_ptr->node_dq_);
-            } else {
-                entry_ptr->status_ = EntryStatusE::FetchError;
-            }
-            entry_ptr->conditionVariable().notify_all();
+        auto lambda = [entry_ptr = _rentry_ptr, this](
+            frame::mprpc::ConnectionContext& _rctx,
+            std::shared_ptr<main::ListStoreRequest>& _rsent_msg_ptr,
+            std::shared_ptr<main::ListStoreResponse>& _rrecv_msg_ptr,
+            ErrorConditionT const& _rerror) mutable {
+                auto& m = entry_ptr->mutex();
+                unique_lock<mutex> lock{ m };
+                if (_rrecv_msg_ptr && _rrecv_msg_ptr->error_ == 0) {
+                    entry_ptr->status_ = EntryStatusE::Fetched;
+                    if (entry_ptr->isApplication()) {
+                        auto& rad = entry_ptr->applicationData();
+                        rad.compress_chunk_capacity_ = _rrecv_msg_ptr->compress_chunk_capacity_;
+                        rad.compress_algorithm_type_ = _rrecv_msg_ptr->compress_algorithm_type_;
+                    }
+                    createEntryData(
+                        lock, entry_ptr, _rrecv_msg_ptr->node_dq_,
+                        _rrecv_msg_ptr->compress_chunk_capacity_,
+                        _rrecv_msg_ptr->compress_algorithm_type_
+                    );
+                }
+                else {
+                    entry_ptr->status_ = EntryStatusE::FetchError;
+                }
+                entry_ptr->conditionVariable().notify_all();
         };
 
-        auto req_ptr         = make_shared<main::ListStoreRequest>();
-        req_ptr->path_       = remote_path;
+        auto req_ptr = make_shared<main::ListStoreRequest>();
+        req_ptr->path_ = _remote_path;
         req_ptr->storage_id_ = _rentry_ptr->pmaster_->remote_;
 
         front_rpc_service_.sendRequest(config_.auth_endpoint_.c_str(), req_ptr, lambda);
@@ -1295,57 +1129,175 @@ bool Engine::Implementation::entry(const fs::path& _path, EntryPointerT& _rentry
         _rentry_ptr->conditionVariable().wait(_rlock, [&_rentry_ptr]() { return _rentry_ptr->status_ != EntryStatusE::FetchPending; });
     }
 
-    if (_rentry_ptr->status_ == EntryStatusE::FetchError) {
-        if (_rentry_ptr->type_ == EntryTypeE::Unknown) {
-            Entry* papp_entry = nullptr;
-            if (_rentry_ptr->pmaster_ && _rentry_ptr->pmaster_->isApplication()) {
+    return _rentry_ptr->status_ == EntryStatusE::Fetched;
+}
+
+bool Engine::Implementation::entry(const fs::path& _path, EntryPointerT& _rentry_ptr, unique_lock<mutex>& _rlock, const bool _open)
+{
+    Entry* papp_entry = nullptr;
+    string remote_path;
+    const string* papp_unique = nullptr;
+    const string* pbuild_unique = nullptr;
+
+    auto   it = _path.begin();
+    for (; it != _path.end(); ++it) {
+        const auto& path_item = *it;
+        string      path_item_string = path_item.generic_string();
+
+        fetch(_rentry_ptr, _rlock, remote_path);
+
+        EntryPointerT path_entry_ptr = _rentry_ptr->find(path_item_string);
+
+        if (path_entry_ptr) {
+            solid_log(logger, Verbose, "\t" << path_item_string);
+
+            _rentry_ptr = std::move(path_entry_ptr);
+
+            if (_rentry_ptr->isApplication()) {
+                papp_entry = _rentry_ptr.get();
+                papp_entry->applicationData().useApplication(); //under root mutex
+            }else if (_rentry_ptr->isShortcut()) {
                 papp_entry = _rentry_ptr->pmaster_;
+                papp_entry->applicationData().useApplication(); //under root mutex
             }
-            eraseEntryFromParent(std::move(_rentry_ptr), std::move(_rlock));
-            solid_check(!_rlock.owns_lock());
-            //papp_entry cannot be invalidated because we have not release it yet
+
+            mutex& rmutex = _rentry_ptr->mutex();
+            _rlock.unlock(); //no overlapping locks
+            {
+                unique_lock<mutex> tlock{ rmutex };
+                _rlock.swap(tlock);
+            }
+
+            if (_rentry_ptr->isApplication()) {
+                remote_path.clear();
+                //_rpstorage_id = &_rentry_ptr->remote_;
+
+                auto& rad = _rentry_ptr->applicationData();
+                papp_unique = &rad.app_unique_;
+                pbuild_unique = &rad.build_unique_;
+            }
+            else if (_rentry_ptr->isMediaRoot()) {
+                break;
+            }
+            else if (!_rentry_ptr->remote_.empty()) {
+                remote_path += '/';
+                remote_path += _rentry_ptr->remote_;
+            }
+            else {
+                remote_path += '/';
+                remote_path += _rentry_ptr->name_;
+            }
+        }
+        else {
             if (papp_entry != nullptr) {
                 releaseApplication(*papp_entry);
             }
+            return false;
         }
-        solid_log(logger, Verbose, "Fail open: " << _path.generic_path());
+    }//for
 
-        return false;
-    } else {
-        solid_check(_rentry_ptr->type_ > EntryTypeE::Unknown);
-        //NOTE: the app_entry, if any, remains under use
-        if (_rentry_ptr->type_ == EntryTypeE::File) {
-            if (_rentry_ptr->data_any_.empty()) {
-                _rentry_ptr->data_any_ = FileData(remote_path);
-                if (papp_unique != nullptr) {
-                    file_cache_engine_.open(_rentry_ptr->fileData(), _rentry_ptr->size_, *papp_unique, *pbuild_unique, remote_path);
-                }
+    if (_rentry_ptr->isFile()) {
+        if (_open && _rentry_ptr->data_any_.empty()) {
+            _rentry_ptr->data_any_ = FileData(remote_path);
+            if (papp_unique != nullptr) {
+                file_cache_engine_.open(_rentry_ptr->fileData(), _rentry_ptr->size_, *papp_unique, *pbuild_unique, remote_path);
+            }
+        }
+    }else if (_rentry_ptr->isDirectory()){
+        solid_check_log(fetch(_rentry_ptr, _rlock, remote_path), logger, "fetch should not failed");
+    }else if (_rentry_ptr->isMediaRoot()) {
+        solid_check_log(papp_entry == nullptr, logger, "papp_entry is null");
+        ++it;
+        if (it == _path.end()) {
+            return false;
+        }
+
+        string encoded_storage_id = it->generic_string();
+        ++it;
+        while (it != _path.end()) {
+            remote_path += it->generic_string();
+            ++it;
+            if (it != _path.end()) {
+                remote_path += '/';
             }
         }
 
-        solid_log(logger, Verbose, "Open " << _rentry_ptr.get() << " " << _path.generic_path() << " type: " << static_cast<uint16_t>(_rentry_ptr->type_) << " remote: " << remote_path);
+        string name = encoded_storage_id + '/' + remote_path;
+        auto   entry_ptr = _rentry_ptr->find(name);
+        if (entry_ptr) {
+            _rentry_ptr = std::move(entry_ptr);
+        }
+        else {
 
-        //success
-        return true;
+            string storage_id = ola::utility::hex_decode(encoded_storage_id);
+
+            entry_ptr = createEntry(_rentry_ptr, name);
+            entry_ptr->pmaster_ = entry_ptr.get();
+            entry_ptr->remote_ = std::move(storage_id);
+            entry_ptr->status_ = EntryStatusE::FetchRequired;
+            entry_ptr->flagSet(EntryFlagsE::Volatile);
+            entry_ptr->flagSet(EntryFlagsE::Media);
+
+            _rentry_ptr->mediaData().insertEntry(config_, EntryPointerT(entry_ptr));
+
+            _rentry_ptr = std::move(entry_ptr);
+        }
+
+        if (fetch(_rentry_ptr, _rlock, remote_path)) {
+            if (_rentry_ptr->isFile()) {
+                _rentry_ptr->fileData().remote_path_ = std::move(remote_path);
+            }
+        }else{
+            eraseEntryFromParent(std::move(_rentry_ptr), std::move(_rlock));
+            solid_check_log(!_rlock.owns_lock(), logger, "not owning lock");
+            return false;
+        }
+    }
+    return true;
+}
+
+void Engine::info(Descriptor* _pdesc, NodeFlagsT& _rnode_flags, uint64_t& _rsize, int64_t& _rbase_time)
+{
+    try {
+        auto& m = _pdesc->entry_ptr_->mutex();
+        lock_guard<mutex> lock(m);
+
+        _pdesc->entry_ptr_->info(_rnode_flags, _rsize, _rbase_time);
+    }
+    catch (std::exception& e) {
+        solid_log(logger, Error, " Exception caught: " << e.what());
+    }
+    catch (...) {
+        solid_log(logger, Error, " Unknown Exception caught");
     }
 }
 
-void Engine::info(Descriptor* _pdesc, NodeFlagsT& _rnode_flags, uint64_t& _rsize)
+bool Engine::list(Descriptor* _pdesc, void*& _rpctx, std::wstring& _rname, NodeFlagsT& _rnode_flags, uint64_t& _rsize, int64_t& _rbase_time)
 {
-    auto&             m = _pdesc->entry_ptr_->mutex();
-    lock_guard<mutex> lock(m);
-
-    _pdesc->entry_ptr_->info(_rnode_flags, _rsize);
-}
-
-bool Engine::list(Descriptor* _pdesc, void*& _rpctx, std::wstring& _rname, NodeFlagsT& _rnode_flags, uint64_t& _rsize)
-{
-    return pimpl_->list(_pdesc->entry_ptr_, _rpctx, _rname, _rnode_flags, _rsize);
+    try {
+        return pimpl_->list(_pdesc->entry_ptr_, _rpctx, _rname, _rnode_flags, _rsize, _rbase_time);
+    }
+    catch (std::exception& e) {
+        solid_log(logger, Error, " Exception caught: " << e.what());
+    }
+    catch (...) {
+        solid_log(logger, Error, " Unknown Exception caught");
+    }
+    return false;
 }
 
 bool Engine::read(Descriptor* _pdesc, void* _pbuf, uint64_t _offset, unsigned long _length, unsigned long& _rbytes_transfered)
 {
-    return pimpl_->read(_pdesc->entry_ptr_, static_cast<char*>(_pbuf), _offset, _length, _rbytes_transfered);
+    try {
+        return pimpl_->read(_pdesc, static_cast<char*>(_pbuf), _offset, _length, _rbytes_transfered);
+    }
+    catch (std::exception& e) {
+        solid_log(logger, Error, " Exception caught: " << e.what());
+    }
+    catch (...) {
+        solid_log(logger, Error, " Unknown Exception caught");
+    }
+    return false;
 }
 
 // -- Implementation --------------------------------------------------------------------
@@ -1365,7 +1317,7 @@ void Engine::Implementation::releaseApplication(Entry& _rapp_entry)
         if ((_rapp_entry.hasDelete() || _rapp_entry.hasUpdate())) {
             auto entry_ptr = rrd.eraseApplication(_rapp_entry);
             if (entry_ptr) {
-                solid_check(entry_ptr.get() == &_rapp_entry);
+                solid_check_log(entry_ptr.get() == &_rapp_entry, logger, "incorrect entry_ptr");
                 file_cache_engine_.removeApplication(rad.app_unique_, rad.build_unique_);
                 solid_log(logger, Info, "app " << rad.app_unique_ << " deleted");
 
@@ -1400,7 +1352,7 @@ void Engine::Implementation::releaseApplication(Entry& _rapp_entry)
 bool Engine::Implementation::list(
     EntryPointerT& _rentry_ptr,
     void*&         _rpctx,
-    std::wstring& _rname, NodeFlagsT& _rnode_flags, uint64_t& _rsize)
+    std::wstring& _rname, NodeFlagsT& _rnode_flags, uint64_t& _rsize, int64_t& _rbase_time)
 {
     using ContextT = pair<int, EntryMapT::const_iterator>;
 
@@ -1408,7 +1360,12 @@ bool Engine::Implementation::list(
     unique_lock<mutex> lock(m);
     ContextT*          pctx = nullptr;
     DirectoryData*     pdd  = _rentry_ptr->directoryDataPtr();
-
+#ifdef OLA_VALIDATE_TIME
+    bool   should_validate = false;
+    if (_rentry_ptr->pmaster_) {
+        should_validate = _rentry_ptr->pmaster_->name_ == app_name;;
+    }
+#endif
     if (_rpctx) {
         pctx = static_cast<ContextT*>(_rpctx);
     } else {
@@ -1440,9 +1397,24 @@ bool Engine::Implementation::list(
                 continue;
             }
 
-            _rname       = utility::widen(pctx->second->second->name_);
-            _rsize       = pctx->second->second->size_;
-            const auto t = pctx->second->second->type_;
+            _rname      = utility::widen(rentry_ptr->name_);
+            _rsize      = rentry_ptr->size_;
+            _rbase_time = rentry_ptr->base_time_;
+
+            const auto t = rentry_ptr->type_;
+#ifdef OLA_VALIDATE_TIME
+            if (should_validate && t == EntryTypeE::File) {
+                string path = rentry_ptr->name_;
+                auto crt_entry = rentry_ptr->parent_.lock();
+
+                while (crt_entry && crt_entry->type_ == EntryTypeE::Directory) {
+                    path = crt_entry->name_ + '\\' + path;
+                    crt_entry = crt_entry->parent_.lock();
+                }
+                path = base_path + path;
+                _rbase_time = get_file_base_time(path);
+            }
+#endif
             _rnode_flags = node_flag(t == EntryTypeE::Application || t == EntryTypeE::Directory ? NodeFlagsE::Directory : NodeFlagsE::File);
             if (pctx->second->second->flags_ & entry_flag(EntryFlagsE::Hidden)) {
                 _rnode_flags |= node_flag(NodeFlagsE::Hidden);
@@ -1458,49 +1430,77 @@ bool Engine::Implementation::list(
     return false;
 }
 
-bool FileData::readFromResponses(ReadData& _rdata)
-{
-    if (fetch_stubs_[0].offset_ < fetch_stubs_[1].offset_) {
-        if (readFromResponse(0, _rdata))
-            return true;
-        return readFromResponse(1, _rdata);
-    } else {
-        if (readFromResponse(1, _rdata))
-            return true;
-        return readFromResponse(0, _rdata);
-    }
-}
-
 bool Engine::Implementation::read(
-    EntryPointerT& _rentry_ptr,
-    char*          _pbuf,
+    Descriptor* _pdesc,
+    char*       _pbuf,
     uint64_t _offset, unsigned long _length, unsigned long& _rbytes_transfered)
 {
-
-    auto&              m = _rentry_ptr->mutex();
-    unique_lock<mutex> lock(m);
-
-    if (_offset >= _rentry_ptr->size_) {
-        _rbytes_transfered = 0;
-        solid_log(logger, Verbose, "READ: " << _rentry_ptr.get() << " zero");
-        return true;
-    }
-
+    bool rv;
+#ifdef OLA_VALIDATE_READ
+    string file_path = base_path;
+    bool   should_validate = false;
+#endif
     {
-        size_t remaining_len = _rentry_ptr->size_ - _offset;
-        if (_length > remaining_len) {
-            _length = remaining_len;
+        auto& m = _pdesc->entry_ptr_->mutex();
+        unique_lock<mutex> lock(m);
+
+        if (_offset >= _pdesc->entry_ptr_->size_) {
+            _rbytes_transfered = 0;
+            solid_log(logger, Verbose, "READ: " << _pdesc->entry_ptr_.get() << " zero");
+            return true;
+        }
+
+        {
+            size_t remaining_len = _pdesc->entry_ptr_->size_ - _offset;
+            if (_length > remaining_len) {
+                _length = remaining_len;
+            }
+        }
+
+#ifdef OLA_VALIDATE_READ
+        file_path += _pdesc->entry_ptr_->fileData().remote_path_;
+        should_validate = _pdesc->entry_ptr_->pmaster_->name_ == app_name;
+#endif
+
+        switch (_pdesc->entry_ptr_->type_) {
+        case EntryTypeE::File:
+            rv = readFromFile(_pdesc->entry_ptr_, lock, _pbuf, _offset, _length, _rbytes_transfered);
+            break;
+        case EntryTypeE::Shortcut:
+            rv = readFromShortcut(_pdesc->entry_ptr_, _pbuf, _offset, _length, _rbytes_transfered);
+#ifdef OLA_VALIDATE_READ
+            should_validate = false;
+#endif
+            break;
+        default:
+            solid_throw("Try read from unknown entry type");
         }
     }
+    solid_check_log(_length == _rbytes_transfered, logger, _length<<" vs "<< _rbytes_transfered);
+#ifdef OLA_VALIDATE_READ
+    if (should_validate) {
+        ifstream ifs(file_path, ifstream::binary);
+        solid_check(ifs);
+        char* pbuf = new char[_length];
 
-    switch (_rentry_ptr->type_) {
-    case EntryTypeE::File:
-        return readFromFile(_rentry_ptr, lock, _pbuf, _offset, _length, _rbytes_transfered);
-    case EntryTypeE::Shortcut:
-        return readFromShortcut(_rentry_ptr, _pbuf, _offset, _length, _rbytes_transfered);
-    default:
-        solid_throw("Try read from unknown entry type");
+        ifs.seekg(_offset);
+        ifs.read(pbuf, _length);
+        solid_check(ifs.gcount() == _length);
+        //solid_check(memcmp(pbuf, _pbuf, _length) == 0);
+        if (memcmp(pbuf, _pbuf, _length) != 0) {
+            size_t i = 0;
+            for (; i < _length; ++i) {
+                if (pbuf[i] != _pbuf[i]) {
+                    break;
+                }
+            }
+            solid_check(i == _length);
+        }
+
+        delete[]pbuf;
     }
+#endif
+    return rv;
 }
 
 bool Engine::Implementation::readFromFile(
@@ -1511,29 +1511,28 @@ bool Engine::Implementation::readFromFile(
 {
     FileData& rfile_data = _rentry_ptr->fileData();
     ReadData  read_data{_pbuf, _offset, _length};
-
+    
     if (rfile_data.readFromCache(read_data)) {
         _rbytes_transfered = read_data.bytes_transfered_;
-        solid_log(logger, Verbose, "READ: " << _rentry_ptr.get() << " read from cache " << _rbytes_transfered);
+        solid_log(logger, Verbose, "READ: " << _rentry_ptr.get() << " " << _offset << " " << _length << " " << _rbytes_transfered);
         return true;
     }
-
-    if (rfile_data.readFromResponses(read_data)) {
-        _rbytes_transfered = read_data.bytes_transfered_;
-        solid_log(logger, Verbose, "READ: " << _rentry_ptr.get() << " read from responses " << _rbytes_transfered);
-        return true;
+    
+    if (!rfile_data.isInitiated()) {
+        solid_check_log(_rentry_ptr->pmaster_->isApplication(), logger, "not an application");
+        const auto& app_data = _rentry_ptr->pmaster_->applicationData();
+        rfile_data.init(app_data.compress_chunk_capacity_, app_data.compress_algorithm_type_);
     }
 
-    if (rfile_data.enqueue(read_data)) {
+    if (rfile_data.enqueue(read_data, _rentry_ptr->size_)) {
         //the queue was empty
-        tryFetch(_rentry_ptr, read_data);
-        tryPreFetch(_rentry_ptr);
+        tryFetch(_rentry_ptr);
     }
     solid_log(logger, Verbose, _rentry_ptr.get() << " wait");
     _rentry_ptr->conditionVariable().wait(_rlock, [&read_data]() { return read_data.done_; });
 
-    if (rfile_data.status_ == FileData::ErrorE) {
-        solid_log(logger, Verbose, "READ: " << _rentry_ptr.get() << " error reading");
+    if (rfile_data.error() != 0) {
+        solid_log(logger, Verbose, "READ: " << _rentry_ptr.get() << " error reading "<<rfile_data.error());
         return false;
     }
 
@@ -1555,201 +1554,158 @@ bool Engine::Implementation::readFromShortcut(
     return true;
 }
 
-size_t FileData::isReadHandledByPendingFetch(const ReadData& _rread_data) const
-{
-    size_t fetch_index = InvalidIndex();
-
-    {
-        auto& rfetch_stub = fetch_stubs_[0];
-        if (rfetch_stub.status_ == FetchStub::PendingE) {
-            if (
-                rfetch_stub.offset_ <= _rread_data.offset_ && _rread_data.offset_ < (rfetch_stub.offset_ + rfetch_stub.size_)) {
-                return 0;
-            }
-        }
-    }
-    {
-        auto& rfetch_stub = fetch_stubs_[1];
-        if (rfetch_stub.status_ == FetchStub::PendingE) {
-            if (
-                rfetch_stub.offset_ <= _rread_data.offset_ && _rread_data.offset_ < (rfetch_stub.offset_ + rfetch_stub.size_)) {
-                return 1;
-            }
-        }
-    }
-
-    return InvalidIndex();
-}
-
-size_t FileData::findAvailableFetchIndex() const
-{
-    auto& rfetch_stub0 = fetch_stubs_[0];
-    auto& rfetch_stub1 = fetch_stubs_[1];
-
-    if (rfetch_stub0.status_ == FetchStub::NotUsedE)
-        return 0;
-    if (rfetch_stub1.status_ == FetchStub::NotUsedE)
-        return 1;
-
-    if (rfetch_stub0.status_ == FetchStub::FetchedE)
-        return 0;
-    if (rfetch_stub1.status_ == FetchStub::FetchedE)
-        return 1;
-    return InvalidIndex();
-}
-
-void Engine::Implementation::tryFetch(EntryPointerT& _rentry_ptr, ReadData& _rread_data)
+void Engine::Implementation::tryFetch(EntryPointerT& _rentry_ptr)
 {
     FileData& rfile_data = _rentry_ptr->fileData();
+    rfile_data.prepareFetchingChunk();
+    rfile_data.pendingRequest(true);
 
-    //try to avoid double prefetching
-    if (auto fetch_index = rfile_data.isReadHandledByPendingFetch(_rread_data); fetch_index != InvalidIndex() && rfile_data.fetch_stubs_[fetch_index].size_ != 0) {
-        solid_log(logger, Verbose, _rentry_ptr.get() << " read handled by pending " << fetch_index);
-        //check if we can use the secondary buffer to speed-up fetching
-        auto&  rfs         = rfile_data.fetch_stubs_[fetch_index];
-        auto   next_offset = rfs.offset_ + rfs.size_;
-        size_t second_fetch_index;
-        if (canPreFetch(_rentry_ptr) && next_offset < _rentry_ptr->size_ && (second_fetch_index = rfile_data.findAvailableFetchIndex()) != InvalidIndex()) {
-            solid_log(logger, Verbose, _rentry_ptr.get() << " prefetch " << second_fetch_index << " " << next_offset);
-            asyncFetch(_rentry_ptr, second_fetch_index, next_offset, config_.max_stream_size_ /*_rread_data.size_*/);
+    auto req_ptr = make_shared<main::FetchStoreRequest>();
+    
+    req_ptr->path_ = rfile_data.remote_path_;
+    req_ptr->storage_id_ = _rentry_ptr->pmaster_->remote_;
+    req_ptr->chunk_index_ = rfile_data.currentChunkIndex();
+    req_ptr->chunk_offset_ = 0;
+
+    asyncFetchStoreFile(nullptr, _rentry_ptr, req_ptr, rfile_data.currentChunkIndex(), 0);
+}
+
+void Engine::Implementation::asyncFetchStoreFileHandleResponse(
+    frame::mprpc::ConnectionContext& _rctx, EntryPointerT& _rentry_ptr,
+    std::shared_ptr<main::FetchStoreRequest>& _rsent_msg_ptr,
+    std::shared_ptr<main::FetchStoreResponse>& _rrecv_msg_ptr
+) {
+    FileData& rfile_data = _rentry_ptr->fileData();
+    bool should_wake_readers = false;
+    const uint32_t received_size = rfile_data.copy(_rrecv_msg_ptr->ioss_, _rrecv_msg_ptr->chunk_.size_, _rrecv_msg_ptr->chunk_.isCompressed(), should_wake_readers);
+
+    solid_log(logger, Info, _rentry_ptr->name_ <<" Received " << received_size << " offset " << rfile_data.currentChunkOffset() << " crt_idx " << rfile_data.currentChunkIndex()<< " idx "<< _rsent_msg_ptr->chunk_index_ << " off " << _rsent_msg_ptr->chunk_offset_ << " totalsz " << _rrecv_msg_ptr->chunk_.size_);
+
+    if (should_wake_readers) {
+        _rentry_ptr->conditionVariable().notify_all();
+    }
+
+    if (rfile_data.responsePointer(0)) {
+        solid_log(logger, Info, _rentry_ptr->name_ << " response pointer");
+        auto res_ptr1 = std::move(rfile_data.responsePointer(0));
+        auto res_ptr2 = std::move(rfile_data.responsePointer(1));
+        asyncFetchStoreFileHandleResponse(_rctx, _rentry_ptr, _rsent_msg_ptr, res_ptr1);
+        if (res_ptr2) {
+            asyncFetchStoreFileHandleResponse(_rctx, _rentry_ptr, _rsent_msg_ptr, res_ptr2);
         }
         return;
     }
 
-    if (auto fetch_index = rfile_data.findAvailableFetchIndex(); fetch_index != InvalidIndex()) {
-        solid_log(logger, Verbose, _rentry_ptr.get() << " read " << fetch_index << " " << _rread_data.offset_);
-        asyncFetch(_rentry_ptr, fetch_index, _rread_data.offset_, canPreFetch(_rentry_ptr) ? config_.max_stream_size_ : _rread_data.size_);
-
-        auto&  rfetch_stub = rfile_data.fetch_stubs_[fetch_index];
-        auto   next_offset = rfetch_stub.offset_ + rfetch_stub.size_;
-        size_t second_fetch_index;
-
-        if (canPreFetch(_rentry_ptr) && next_offset < _rentry_ptr->size_ && (second_fetch_index = rfile_data.findAvailableFetchIndex()) != InvalidIndex()) {
-            asyncFetch(_rentry_ptr, second_fetch_index, next_offset, config_.max_stream_size_);
-        }
-    }
-}
-
-void copy_stream(ReadData& _rread_data, const uint64_t _offset, istream& _ris, uint64_t _size)
-{
-    solid_check(_offset <= _rread_data.offset_);
-    _ris.clear();
-    _ris.seekg(_rread_data.offset_ - _offset);
-    _ris.read(_rread_data.pbuffer_, _size);
-    uint64_t sz = _ris.gcount();
-    _rread_data.offset_ += sz;
-    _rread_data.pbuffer_ += sz;
-    _rread_data.bytes_transfered_ += sz;
-    _rread_data.size_ -= sz;
-}
-
-bool FileData::readFromResponse(const size_t _idx, ReadData& _rdata)
-{
-    FetchStub& rfetch_stub = fetch_stubs_[_idx];
-    if (rfetch_stub.status_ != FetchStub::FetchedE) {
-        return false;
-    }
-
-    if (rfetch_stub.offset_ <= _rdata.offset_ && _rdata.offset_ < (rfetch_stub.offset_ + rfetch_stub.size_)) {
-        uint64_t tocopy = (rfetch_stub.offset_ + rfetch_stub.size_) - _rdata.offset_;
-        if (tocopy > _rdata.size_) {
-            tocopy = _rdata.size_;
-        }
-
-        copy_stream(_rdata, rfetch_stub.offset_, rfetch_stub.response_ptr_->ioss_, tocopy);
-
-        return _rdata.size_ == 0;
-    }
-    return false;
-}
-
-void FileData::updateContiguousRead(uint64_t _offset, uint64_t _size)
-{
-    if (_offset == prefetch_offset_) {
-        ++contiguous_read_count_;
-    } else {
-        contiguous_read_count_ = 0;
-    }
-    prefetch_offset_ = _offset + _size;
-}
-
-bool Engine::Implementation::canPreFetch(const EntryPointerT& _rentry_ptr) const
-{
-    const FileData& rfile_data = _rentry_ptr->fileData();
-    return (rfile_data.contiguous_read_count_ >= config_.min_contiguous_read_count_) && rfile_data.prefetch_offset_ < _rentry_ptr->size_;
-}
-
-void Engine::Implementation::tryPreFetch(EntryPointerT& _rentry_ptr)
-{
-    FileData& rfile_data = _rentry_ptr->fileData();
-    size_t    fetch_index;
-    if (canPreFetch(_rentry_ptr) && ((fetch_index = rfile_data.findAvailableFetchIndex()) != InvalidIndex())) {
-        solid_log(logger, Verbose, _rentry_ptr.get() << " " << fetch_index << " " << rfile_data.prefetch_offset_);
-        asyncFetch(_rentry_ptr, fetch_index, rfile_data.prefetch_offset_, 0);
-    }
-}
-
-void Engine::Implementation::asyncFetch(EntryPointerT& _rentry_ptr, const size_t _fetch_index, const uint64_t _offset, uint64_t _size)
-{
-    solid_log(logger, Verbose, _rentry_ptr.get() << " " << _fetch_index << " " << _offset << " " << _size);
-    FileData& rfile_data  = _rentry_ptr->fileData();
-    auto&     rfetch_stub = rfile_data.fetch_stubs_[_fetch_index];
-
-    rfetch_stub.status_ = FetchStub::PendingE;
-    rfetch_stub.offset_ = _offset;
-    rfetch_stub.size_   = _size;
-
-    auto lambda = [entry_ptr = _rentry_ptr, this, _fetch_index](
-                      frame::mprpc::ConnectionContext&            _rctx,
-                      std::shared_ptr<main::FetchStoreRequest>&  _rsent_msg_ptr,
-                      std::shared_ptr<main::FetchStoreResponse>& _rrecv_msg_ptr,
-                      ErrorConditionT const&                      _rerror) mutable {
-        solid_check(_rrecv_msg_ptr, _rerror.message());
-        solid_log(logger, Verbose, "recv data: " << _rsent_msg_ptr->offset_ << " " << _rrecv_msg_ptr->size_);
-        auto&             m = entry_ptr->mutex();
-        lock_guard<mutex> lock{m};
-        FileData*         pfd = entry_ptr->fileDataPtr();
-        if (pfd == nullptr) {
+    if (_rrecv_msg_ptr->isResponsePart()) {
+        //do we need to request more data for current chunk:
+        if ((_rrecv_msg_ptr->chunk_.size_ - rfile_data.currentChunkOffset()) > received_size) {
+            rfile_data.pendingRequest(true);
+            asyncFetchStoreFile(&_rctx, _rentry_ptr, _rsent_msg_ptr, rfile_data.currentChunkIndex(), rfile_data.currentChunkOffset() + received_size);
             return;
         }
-        FileData& rfile_data  = (*pfd);
-        auto&     rfetch_stub = rfile_data.fetch_stubs_[_fetch_index];
-
-        rfetch_stub.status_       = FetchStub::FetchedE;
-        rfetch_stub.response_ptr_ = std::move(_rrecv_msg_ptr);
-        rfetch_stub.size_         = rfetch_stub.response_ptr_->size_ >= 0 ? rfetch_stub.response_ptr_->size_ : -rfetch_stub.response_ptr_->size_;
-
-        rfile_data.writeToCache(_rsent_msg_ptr->offset_, rfetch_stub.response_ptr_->ioss_);
-
-        for (auto* prd = rfile_data.pfront_; prd != nullptr;) {
-            rfile_data.readFromResponses(*prd);
-
-            if (prd->size_ == 0) {
-                auto tmp = prd;
-                prd      = prd->pprev_;
-                rfile_data.erase(*tmp);
-                tmp->done_ = true;
-                entry_ptr->conditionVariable().notify_all();
-            } else {
-                prd = prd->pprev_;
-            }
+        else {
+            rfile_data.pendingRequest(false);
         }
-
-        for (auto* prd = rfile_data.pfront_; prd != nullptr; prd = prd->pprev_) {
-            tryFetch(entry_ptr, *prd);
-        }
-        tryPreFetch(entry_ptr);
-    };
-
-    if (!rfetch_stub.request_ptr_) {
-        rfetch_stub.request_ptr_ = make_shared<main::FetchStoreRequest>();
     }
-    rfetch_stub.request_ptr_->path_       = rfile_data.remote_path_;
-    rfetch_stub.request_ptr_->storage_id_ = _rentry_ptr->pmaster_->remote_;
-    rfetch_stub.request_ptr_->offset_     = rfetch_stub.offset_;
-    rfetch_stub.request_ptr_->size_       = rfetch_stub.size_;
+    else if (rfile_data.currentChunkOffset() == 0 && !rfile_data.pendingRequest()) {//should try send another request
+        rfile_data.storeRequest(std::move(_rsent_msg_ptr));
+    }
+    else if (rfile_data.currentChunkOffset() == 0 && rfile_data.pendingRequest() && (received_size == _rrecv_msg_ptr->chunk_.size_)) {//should try send another request
+        rfile_data.storeRequest(std::move(_rsent_msg_ptr));
+        rfile_data.pendingRequest(false);
+    }
+    else {
+        rfile_data.storeRequest(std::move(_rsent_msg_ptr));
+        solid_log(logger, Info, _rentry_ptr->name_ << "");
+        rfile_data.pendingRequest(false);
+        return;
+    }
 
-    front_rpc_service_.sendRequest(config_.auth_endpoint_.c_str(), rfetch_stub.request_ptr_, lambda);
+    //is there a next chunk
+    
+    if (rfile_data.currentChunkIndex() != -1 && rfile_data.currentChunkOffset() == 0) {
+        rfile_data.pendingRequest(true);
+        solid_log(logger, Info, _rentry_ptr->name_ << "");
+        asyncFetchStoreFile(&_rctx, _rentry_ptr, _rsent_msg_ptr, rfile_data.currentChunkIndex(), 0);
+    }
+    else if (!rfile_data.isLastChunk()) {
+        solid_log(logger, Info, _rentry_ptr->name_ << " not last chunk ");
+        rfile_data.pendingRequest(true);
+        asyncFetchStoreFile(&_rctx, _rentry_ptr, _rsent_msg_ptr, rfile_data.peekNextChunk(), 0);
+    }
+    else {
+        solid_log(logger, Info, _rentry_ptr->name_ << "");
+    }
+}
+
+void Engine::Implementation::asyncFetchStoreFile(
+    frame::mprpc::ConnectionContext* _pctx, EntryPointerT& _rentry_ptr,
+    std::shared_ptr<main::FetchStoreRequest>& _rreq_msg_ptr,
+    const uint32_t _chunk_index, const uint32_t _chunk_offset)
+{
+    solid_log(logger, Info, _rentry_ptr->name_ << " " << _chunk_index << " " << _chunk_offset);
+    auto lambda = [entry_ptr = _rentry_ptr, this/*, _chunk_index, _chunk_offset*/](
+        frame::mprpc::ConnectionContext& _rctx,
+        std::shared_ptr<main::FetchStoreRequest>& _rsent_msg_ptr,
+        std::shared_ptr<main::FetchStoreResponse>& _rrecv_msg_ptr,
+        ErrorConditionT const& _rerror
+        )mutable {
+            FileData& rfile_data = entry_ptr->fileData();
+            auto& m = entry_ptr->mutex();
+            unique_lock<mutex> lock(m);
+
+            if (_rrecv_msg_ptr) {
+                if (_rrecv_msg_ptr->error_ == 0) {
+                    _rrecv_msg_ptr->ioss_.seekg(0);
+
+                    //if (_rfetch_stub.chunk_index_ == _chunk_index && _rfetch_stub.chunk_offset_ >= _chunk_offset) {
+                    if(rfile_data.isExpectedResponse(_rsent_msg_ptr->chunk_index_, _rsent_msg_ptr->chunk_offset_)){
+                        asyncFetchStoreFileHandleResponse(_rctx, entry_ptr, _rsent_msg_ptr, _rrecv_msg_ptr);
+                        rfile_data.tryClearFetchStub();
+                    }
+                    else {
+                        solid_log(logger, Info, entry_ptr->name_ << " store response for " << _rsent_msg_ptr->chunk_index_ << " " << _rsent_msg_ptr->chunk_offset_);
+                        rfile_data.storeResponse(_rrecv_msg_ptr);
+                    }
+                }
+                else {
+                    rfile_data.error(_rrecv_msg_ptr->error_);
+                    entry_ptr->conditionVariable().notify_all();
+                }
+            }
+            else {
+                rfile_data.error(-1);
+                entry_ptr->conditionVariable().notify_all();
+            }
+    };
+    
+    FileData& rfile_data = _rentry_ptr->fileData();
+    if (_pctx) {
+
+        std::shared_ptr<main::FetchStoreRequest> req_ptr;
+        if (rfile_data.requestPointer()) {
+            req_ptr = std::move(rfile_data.requestPointer());
+        }
+        else {
+            req_ptr = make_shared<main::FetchStoreRequest>();
+            req_ptr->storage_id_ = _rreq_msg_ptr->storage_id_;
+            req_ptr->path_ = _rreq_msg_ptr->path_;
+        }
+        req_ptr->chunk_index_ = _chunk_index;
+        req_ptr->chunk_offset_ = _chunk_offset;
+        const auto err = _pctx->service().sendRequest(_pctx->recipientId(), req_ptr, lambda);
+        if (err) {
+            rfile_data.error(-1);
+            _rentry_ptr->conditionVariable().notify_all();
+        }
+    }
+    else {
+        const auto err = front_rpc_service_.sendRequest(config_.auth_endpoint_.c_str(), _rreq_msg_ptr, lambda);
+        if (err) {
+            rfile_data.error(-1);
+            _rentry_ptr->conditionVariable().notify_all();
+        }
+    }
 }
 
 //-----------------------------------------------------------------------------
@@ -2009,7 +1965,7 @@ void Engine::Implementation::updateApplications(const UpdatesMapT& _updates_map)
                 auto entry_ptr = rrd.eraseApplication(rapp_entry); //rad will be valid as long as entry_ptr
                 if (entry_ptr) {
                     erased_applications = true;
-                    solid_check(entry_ptr.get() == &rapp_entry);
+                    solid_check_log(entry_ptr.get() == &rapp_entry, logger, "incorrect entry ptr");
                     app_it = rrd.app_entry_map_.erase(app_it);
                     file_cache_engine_.removeApplication(rad.app_unique_, rad.build_unique_);
                     solid_log(logger, Info, "app " << rad.app_unique_ << " is deleted");
@@ -2029,7 +1985,7 @@ void Engine::Implementation::updateApplications(const UpdatesMapT& _updates_map)
                 auto entry_ptr = rrd.eraseApplication(rapp_entry);
                 if (entry_ptr) {
                     erased_applications = true;
-                    solid_check(entry_ptr.get() == &rapp_entry);
+                    solid_check_log(entry_ptr.get() == &rapp_entry, logger, "incorrect entry ptr");
                     file_cache_engine_.removeApplication(rad.app_unique_, rad.build_unique_);
                     new_app_id_vec.emplace_back(it->second.first, rad.app_unique_);
                     app_it = rrd.app_entry_map_.erase(app_it);
@@ -2140,7 +2096,7 @@ void Engine::Implementation::insertMountEntry(EntryPointerT& _rparent_ptr, const
             entry_ptr->status_ = EntryStatusE::FetchRequired;
             auto ep            = tryInsertUnknownEntry(entry_ptr, s);
             entry_ptr->status_ = EntryStatusE::Fetched;
-            solid_check(ep);
+            solid_check_log(ep, logger, "empty entry ptr");
             entry_ptr = ep;
             remote_path += "./";
             entry_ptr->type_ = EntryTypeE::Directory;
@@ -2236,7 +2192,7 @@ void Engine::Implementation::insertApplicationEntry(
     }
     
     const auto& app_folder_name = entry_ptr->name_;
-
+    
     if (!is_invisible && !_rrecv_msg_ptr->configuration_.shortcut_vec_.empty()) {
         for (const auto& sh : _rrecv_msg_ptr->configuration_.shortcut_vec_) {
             ostringstream oss;
@@ -2281,7 +2237,7 @@ EntryPointerT Engine::Implementation::createEntry(EntryPointerT& _rparent_ptr, c
     return make_shared<Entry>(_type, _rparent_ptr, mutex_dq_[index % mutex_dq_.size()], cv_dq_[index % cv_dq_.size()], _name, _size);
 }
 
-void Engine::Implementation::insertDirectoryEntry(unique_lock<mutex>& _lock, EntryPointerT& _rparent_ptr, const string& _name)
+void Engine::Implementation::insertDirectoryEntry(unique_lock<mutex>& _rlock, EntryPointerT& _rparent_ptr, const string& _name)
 {
     solid_log(logger, Info, _rparent_ptr->name_ << " " << _name);
 
@@ -2290,33 +2246,45 @@ void Engine::Implementation::insertDirectoryEntry(unique_lock<mutex>& _lock, Ent
     if (!entry_ptr) {
         _rparent_ptr->directoryData().insertEntry(createEntry(_rparent_ptr, _name, EntryTypeE::Directory));
     } else {
-        _lock.unlock();
-        //make sure the entry is directory
-        auto&             rm = entry_ptr->mutex();
-        lock_guard<mutex> lock{rm};
-        entry_ptr->type_ = EntryTypeE::Directory;
+        _rlock.unlock();
+        {
+            //make sure the entry is directory
+            auto& rm = entry_ptr->mutex();
+            lock_guard<mutex> lock{ rm };
+            entry_ptr->type_ = EntryTypeE::Directory;
 
-        if (entry_ptr->directoryDataPtr() == nullptr) {
-            entry_ptr->data_any_ = DirectoryData();
+            if (entry_ptr->directoryDataPtr() == nullptr) {
+                entry_ptr->data_any_ = DirectoryData();
+            }
         }
+        _rlock.lock();
     }
 }
 
-void Engine::Implementation::insertFileEntry(unique_lock<mutex>& _lock, EntryPointerT& _rparent_ptr, const string& _name, uint64_t _size)
+void Engine::Implementation::insertFileEntry(
+    unique_lock<mutex>& _rlock, EntryPointerT& _rparent_ptr, const string& _name,
+    const uint64_t _size, const int64_t _base_time
+)
 {
     solid_log(logger, Info, _rparent_ptr->name_ << " " << _name << " " << _size);
 
     auto entry_ptr = _rparent_ptr->directoryData().find(_name);
 
     if (!entry_ptr) {
-        _rparent_ptr->directoryData().insertEntry(createEntry(_rparent_ptr, _name, EntryTypeE::File));
+        auto entry_ptr = createEntry(_rparent_ptr, _name, EntryTypeE::File, _size);
+        entry_ptr->base_time_ = _base_time;
+        _rparent_ptr->directoryData().insertEntry(std::move(entry_ptr));
     } else {
-        _lock.unlock();
-        //make sure the entry is file
-        auto&             rm = entry_ptr->mutex();
-        lock_guard<mutex> lock{rm};
-        entry_ptr->type_ = EntryTypeE::File;
-        entry_ptr->size_ = _size;
+        _rlock.unlock();
+        {
+            //make sure the entry is file
+            auto& rm = entry_ptr->mutex();
+            lock_guard<mutex> lock{ rm };
+            entry_ptr->type_ = EntryTypeE::File;
+            entry_ptr->size_ = _size;
+            entry_ptr->base_time_ = _base_time;
+        }
+        _rlock.lock();
     }
 }
 
@@ -2364,19 +2332,39 @@ void Engine::Implementation::eraseEntryFromParent(EntryPointerT&& _uentry_ptr, u
     }
 }
 
-void Engine::Implementation::createEntryData(unique_lock<mutex>& _lock, EntryPointerT& _rentry_ptr, const std::string& _path_str, ListNodeDequeT& _rnode_dq)
+void Engine::Implementation::createEntryData(
+    unique_lock<mutex>& _lock, EntryPointerT& _rentry_ptr,
+    ListNodeDequeT& _rnode_dq,
+    const uint32_t _compress_chunk_capacity,
+    const uint8_t _compress_algorithm_type
+)
 {
-    solid_log(logger, Info, _path_str);
+    solid_log(logger, Info, _rentry_ptr->name_);
+
     if (_rnode_dq.size() == 1 && _rnode_dq.front().name_.empty()) {
         _rentry_ptr->type_ = EntryTypeE::File;
         _rentry_ptr->size_ = _rnode_dq.front().size_;
-
-        _rentry_ptr->data_any_.clear();
+        if (_rentry_ptr->isMedia()) {
+            _rentry_ptr->data_any_ = FileData("");
+            _rentry_ptr->fileData().init(_compress_chunk_capacity, _compress_algorithm_type);
+        }
+        else {
+            _rentry_ptr->data_any_.clear();
+        }
         return;
     }
 
     if (_rentry_ptr->directoryDataPtr() == nullptr) {
+        solid_assert(_rentry_ptr->type_ == EntryTypeE::Directory || _rentry_ptr->type_ == EntryTypeE::Unknown);
+        _rentry_ptr->type_ = EntryTypeE::Directory;
         _rentry_ptr->data_any_ = DirectoryData();
+    }
+    else if (_rentry_ptr->isApplication()) {
+        _rentry_ptr->applicationData().compress_chunk_capacity_ = _compress_chunk_capacity;
+        _rentry_ptr->applicationData().compress_algorithm_type_ = _compress_algorithm_type;
+    }
+    else if (_rentry_ptr->type_ == EntryTypeE::Unknown) {
+        _rentry_ptr->type_ = EntryTypeE::Directory;
     }
 
     for (const auto& n : _rnode_dq) {
@@ -2387,7 +2375,7 @@ void Engine::Implementation::createEntryData(unique_lock<mutex>& _lock, EntryPoi
             name.pop_back();
             insertDirectoryEntry(_lock, _rentry_ptr, name);
         } else {
-            insertFileEntry(_lock, _rentry_ptr, n.name_, n.size_);
+            insertFileEntry(_lock, _rentry_ptr, n.name_, n.size_, n.base_time_);
         }
     }
 }
