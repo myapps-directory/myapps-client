@@ -734,7 +734,7 @@ static NTSTATUS PtfsCreate(PWSTR Path, PWSTR VolumePrefix, PWSTR MountPoint, UIN
     VolumeParams.SectorSize                  = ALLOCATION_UNIT;
     VolumeParams.SectorsPerAllocationUnit    = 1;
     VolumeParams.VolumeCreationTime          = ((PLARGE_INTEGER)&CreationTime)->QuadPart;
-    VolumeParams.VolumeSerialNumber          = 0;
+    VolumeParams.VolumeSerialNumber          = (UINT32)(((PLARGE_INTEGER)&CreationTime)->QuadPart / (10000 * 1000));
     VolumeParams.FileInfoTimeout             = 1000;
     VolumeParams.CaseSensitiveSearch         = 0;
     VolumeParams.CasePreservedNames          = 1;
@@ -744,6 +744,9 @@ static NTSTATUS PtfsCreate(PWSTR Path, PWSTR VolumePrefix, PWSTR MountPoint, UIN
     VolumeParams.PassQueryDirectoryPattern   = 1;
     VolumeParams.FlushAndPurgeOnCleanup      = 1;
     VolumeParams.UmFileContextIsUserContext2 = 1;
+    VolumeParams.ReparsePoints = 1;
+    VolumeParams.ReparsePointsAccessCheck = 0;
+    //VolumeParams.RejectIrpPriorToTransact0 = 1;
     if (0 != VolumePrefix)
         wcscpy_s(VolumeParams.Prefix, sizeof VolumeParams.Prefix / sizeof(WCHAR), VolumePrefix);
     wcscpy_s(VolumeParams.FileSystemName, sizeof VolumeParams.FileSystemName / sizeof(WCHAR), L"" PROGNAME);

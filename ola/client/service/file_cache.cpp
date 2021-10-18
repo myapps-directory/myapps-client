@@ -662,7 +662,7 @@ bool File::loadRanges()
 
         a(range_vec_, s);
     } catch (...) {
-        solid_assert(false);
+        //solid_assert(false);
         return false;
     }
     solid_log(logger, Info, this << " " << range_vec_.size() << " " << s);

@@ -2,9 +2,11 @@ cmake_minimum_required(VERSION 3.15 FATAL_ERROR)
 cmake_policy(SET CMP0091 NEW)
 cmake_policy(SET CMP0115 NEW)
 
-project(OlaClient VERSION 0.10)
+project(OlaClient VERSION 0.11)
 
 set(EXTERNAL_DIR "" CACHE PATH "External dependencies folder")
+
+#set(CMAKE_SUPPRESS_REGENERATION OFF CACHE BOOLEAN "Suppress Regeneration")
 
 execute_process(
     COMMAND "git" "rev-parse" "HEAD"

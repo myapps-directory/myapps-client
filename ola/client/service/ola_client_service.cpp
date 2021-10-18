@@ -1169,6 +1169,7 @@ NTSTATUS FileSystem::Init(PVOID Host0)
     Host->SetVolumeCreationTime(base_time_);
     Host->SetVolumeSerialNumber(0);
     Host->SetFlushAndPurgeOnCleanup(TRUE);
+    Host->SetRejectIrpPriorToTransact0(1);
 
 	return InitSecurityDescriptor();
 }
