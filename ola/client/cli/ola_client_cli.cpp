@@ -1814,9 +1814,16 @@ void handle_create_media(istream& _ris, Engine &_reng){
     
     string zip_path = system_path(get_temp_env() + "/ola_client_cli_" + generate_temp_name() + ".zip");
 
-    
-    if(!ola::utility::archive_create(zip_path, path(media_path), req_ptr->size_)){
-        return;
+    {
+        auto compute_base_time_lambda = [](const std::string& _path, vector<uint8_t>& _rdata) {
+            _rdata.resize(sizeof(uint64_t));
+            uint64_t base_time = get_file_base_time(_path);
+            solid::serialization::binary::store(reinterpret_cast<char*>(_rdata.data()), base_time);
+        };
+
+        if (!ola::utility::archive_create(zip_path, path(media_path), req_ptr->size_, compute_base_time_lambda)) {
+            return;
+        }
     }
     
     {
