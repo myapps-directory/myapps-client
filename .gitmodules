@@ -1,7 +1,6 @@
-[submodule "ola/common"]
-	path = ola/common
-	url = git@github.com:vipalade/ola-common.git
-[submodule "ola/client/utility"]
-	path = ola/client/utility
-	url = git@github.com:vipalade/ola-client-utility.git
-	branch = master
+[submodule "myapps/common"]
+	path = myapps/common
+	url = git@github.com:myapps-space/myapps-common.git
+[submodule "myapps/client/utility"]
+	path = myapps/client/utility
+	url = git@github.com:myapps-space/myapps-client-utility.git
