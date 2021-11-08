@@ -2,7 +2,7 @@
 
 if [[ $# -ne 3 ]] ; then
     echo 'Usage: ola_upload b APPID BUILDID'
-    echo 'Example: ./ola_upload b 8W9Hu1MnHPoifnCw7lUWWVpLEhDunsUi9cAXl1h6fec= b01'
+    echo 'Example: ./upload b 8W9Hu1MnHPoifnCw7lUWWVpLEhDunsUi9cAXl1h6fec= b01'
     exit 0
 fi
 
@@ -15,7 +15,7 @@ MEDIAID=""
 INSTALLER_PATH="@OLA_INSTALLER_PATH@"
 INSTALLER_NAME="@OLA_INSTALLER_NAME@"
 PROJECT_ROOT="@PROJECT_ROOT_DIR@"
-PROJECT_VERSION=`./ola_client_cli --version | head -n 1`
+PROJECT_VERSION=`./myapps_cli --version | head -n 1`
 
 createBuild()
 {
@@ -26,24 +26,16 @@ createBuild()
     cp ola_updater.exe tmp/build
     cp updater_dlls/* tmp/build
     cp "$INSTALLER_PATH/$INSTALLER_NAME" tmp/build
-	cp "$PROJECT_ROOT/ola/client/updater/updater.png" tmp
-    cp "$PROJECT_ROOT/ola/client/updater/updater.ico" tmp/build
+	cp "$PROJECT_ROOT/myapps/client/updater/updater.png" tmp
+    cp "$PROJECT_ROOT/myapps/client/updater/updater.ico" tmp/build
 	
-    #cp "$PROJECT_ROOT/ola/client/store/images/ola_store_bag.png" tmp
     INSTALLER_SUM=`sha256sum $INSTALLER_PATH/$INSTALLER_NAME | cut -d' ' -f 1`
-    #sed "s/MEDIAID/$MEDIAID/g" ola_store.build.yml > tmp/ola_store.build.yml
     
     echo "Installer sha256sum: $INSTALLER_SUM"
     
-    #sed "s/OLA_INSTALLER_NAME/$INSTALLER_NAME/g" updater.build.yml > tmp/updater.build.1.yml
-    #sed "s/OLA_INSTALLER_SUM/$INSTALLER_SUM/g" tmp/updater.build.1.yml > tmp/updater.build.yml
+    sed "s/MYAPPS_INSTALLER_NAME/$INSTALLER_NAME/g" updater.build.yml | sed "s/MYAPPS_VERSION/$PROJECT_VERSION/g" | sed "s/MYAPPS_INSTALLER_SUM/$INSTALLER_SUM/g" > tmp/updater.build.yml
 
-    sed "s/OLA_INSTALLER_NAME/$INSTALLER_NAME/g" updater.build.yml | sed "s/OLA_VERSION/$PROJECT_VERSION/g" | sed "s/OLA_INSTALLER_SUM/$INSTALLER_SUM/g" > tmp/updater.build.yml
-
-    #sed "s/OLA_INSTALLER/$INSTALLER_NAME/g" updater.build.yml > tmp/updater.build1.yml
-    #sed "s/OLA_INSTALLER_SUM/$INSTALLER_SUM/g" tmp/updater.build1.yml > tmp/updater.build.yml
-
-    echo -ne "create build $APPID $BUILDID tmp/updater.build.yml tmp/build tmp/updater.png\nq\n" | ola_client_cli --no-history
+    echo -ne "create build $APPID $BUILDID tmp/updater.build.yml tmp/build tmp/updater.png\nq\n" | myapps_cli --no-history
 }
 
 createMedia()
@@ -61,7 +53,7 @@ createMedia()
         magick convert -resize 384x216 "$filename" "tmp/media/$(basename "$filename" .png)t.jpg"
     done
 
-    echo -ne "create media $APPID $MEDIAID tmp/media\nq\n" | ola_client_cli --no-history
+    echo -ne "create media $APPID $MEDIAID tmp/media\nq\n" | myapps_cli --no-history
 }
 
 rm -rf tmp

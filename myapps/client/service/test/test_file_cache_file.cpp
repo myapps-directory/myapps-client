@@ -4,7 +4,7 @@
 #include <vector>
 
 using namespace std;
-using namespace ola::client::service::file_cache;
+using namespace myapps::client::service::file_cache;
 namespace {
 
 void copy(ostream& _ros, istream& _ris, uint64_t _size)

@@ -5,9 +5,9 @@
 #include <set>
 #include "file_cache.hpp"
 
-#include "ola/common/ola_front_protocol_main.hpp"
+#include "myapps/common/front_protocol_main.hpp"
 
-namespace ola {
+namespace myapps {
 namespace client {
 namespace service {
 
@@ -281,4 +281,4 @@ struct FileData : file_cache::FileData {
 
 } // namespace service
 } // namespace client
-} //namespace ola
+} //namespace myapps

@@ -10,17 +10,17 @@
 
 #include "solid/system/log.hpp"
 
-#include "ola/common/utility/encode.hpp"
-#include "ola/common/utility/version.hpp"
+#include "myapps/common/utility/encode.hpp"
+#include "myapps/common/utility/version.hpp"
 
 #include "boost/filesystem.hpp"
 #include "boost/program_options.hpp"
 
-#include "ola/client/service/engine.hpp"
-#include "ola/client/utility/locale.hpp"
-#include "ola/client/utility/auth_file.hpp"
-#include "ola/client/utility/app_list_file.hpp"
-#include "ola/client/utility/file_monitor.hpp"
+#include "myapps/client/service/engine.hpp"
+#include "myapps/client/utility/locale.hpp"
+#include "myapps/client/utility/auth_file.hpp"
+#include "myapps/client/utility/app_list_file.hpp"
+#include "myapps/client/utility/file_monitor.hpp"
 
 #include <iostream>
 #include <sstream>
@@ -51,7 +51,7 @@
 
 using namespace Fsp;
 using namespace std;
-using namespace ola::client;
+using namespace myapps::client;
 
 namespace fs = boost::filesystem;
 
@@ -59,7 +59,7 @@ namespace {
 
 constexpr string_view service_name("ola_client_service");
 
-const solid::LoggerT logger("ola::client::service");
+const solid::LoggerT logger("myapps::client::service");
 
 struct Parameters {
     wstring        debug_log_file_;
@@ -83,17 +83,17 @@ struct Parameters {
 };
 
 class FileSystem final : public FileSystemBase {
-    ola::client::service::Engine& rengine_;
+    myapps::client::service::Engine& rengine_;
     DWORD                         security_size_  = 0;
     char*                         psecurity_data_ = nullptr;
     int64_t                       base_time_      = 0;
 
 public:
-    FileSystem(ola::client::service::Engine& _rengine);
+    FileSystem(myapps::client::service::Engine& _rengine);
     ~FileSystem();
 
 private:
-    ola::client::service::Engine& engine() const
+    myapps::client::service::Engine& engine() const
     {
         return rengine_;
     }
@@ -225,7 +225,7 @@ class FileSystemService final : public Service {
         Restart,
     };
 
-    ola::client::service::Engine        engine_;
+    myapps::client::service::Engine        engine_;
     FileSystem                          fs_;
     FileSystemHost                      host_;
     Parameters                          params_;
@@ -236,7 +236,7 @@ class FileSystemService final : public Service {
     string                              auth_user_;
     string                              auth_token_;
     WaitStatusE                         wait_status_ = WaitStatusE::NoWait;
-    ola::client::utility::FileMonitor   file_monitor_;
+    myapps::client::utility::FileMonitor   file_monitor_;
 
 
     fs::path configDirectoryPath() const
@@ -459,7 +459,7 @@ bool Parameters::parse(ULONG argc, PWSTR* argv)
         options_description config(string(service_name) + " configuration options");
         // clang-format off
         config.add_options()
-            ("debug-modules,M", value<std::vector<std::string>>(&this->debug_modules_)->default_value(std::vector<std::string>{"ola::.*:VIEW", ".*:EWX"}), "Debug logging modules")
+            ("debug-modules,M", value<std::vector<std::string>>(&this->debug_modules_)->default_value(std::vector<std::string>{"myapps::.*:VIEW", ".*:EWX"}), "Debug logging modules")
             ("debug-address,A", value<string>(&debug_addr_)->default_value(""), "Debug server address (e.g. on linux use: nc -l 9999)")
             ("debug-port,P", value<string>(&debug_port_)->default_value("9999"), "Debug server port (e.g. on linux use: nc -l 9999)")
             ("debug-console,C", value<bool>(&debug_console_)->implicit_value(true)->default_value(false), "Debug console")
@@ -492,7 +492,7 @@ bool Parameters::parse(ULONG argc, PWSTR* argv)
         }
 
         if (bootstrap.count("version") != 0u) {
-            cout << ola::utility::version_full() << endl;
+            cout << myapps::utility::version_full() << endl;
             cout << "SolidFrame: " << solid::version_full() << endl;
             return false;
         }
@@ -555,7 +555,7 @@ void write_value(std::ostream& _ros, const string& _name, const boost::any& _rav
     } else if (_rav.type() == typeid(std::string)) {
         _ros << _name << '=' << boost::any_cast<std::string>(_rav) << endl;
     } else if (_rav.type() == typeid(std::wstring)) {
-        _ros << _name << '=' << ola::client::utility::narrow(boost::any_cast<std::wstring>(_rav)) << endl;
+        _ros << _name << '=' << myapps::client::utility::narrow(boost::any_cast<std::wstring>(_rav)) << endl;
     } else if (_rav.type() == typeid(std::vector<std::string>)) {
         const auto& v = boost::any_cast<const std::vector<std::string>&>(_rav);
         for (const auto& val : v) {
@@ -779,7 +779,7 @@ void FileSystemService::onAuthFileChange(const chrono::system_clock::time_point&
     string endpoint;
     string user;
     string token;
-    ola::client::utility::auth_read(authDataFilePath(), endpoint, user, token);
+    myapps::client::utility::auth_read(authDataFilePath(), endpoint, user, token);
     auth_file_time_point_ = empty_time_point;//reset the timepoint so we can do the next auth_update
     
     if((auth_endpoint_.empty() || endpoint == auth_endpoint_) && (auth_user_.empty() || user == auth_user_)){
@@ -938,7 +938,7 @@ NTSTATUS FileSystemService::OnStart(ULONG argc, PWSTR *argv)
 
     waitAuthentication();
     
-    ola::client::service::Configuration cfg;
+    myapps::client::service::Configuration cfg;
 
     {
         lock_guard<mutex> lock(mutex_);
@@ -965,7 +965,7 @@ NTSTATUS FileSystemService::OnStart(ULONG argc, PWSTR *argv)
         if(_error == 0 && !_message.empty()){
             lock_guard<mutex> lock(mutex_);
             auth_token_ = _message;
-            ola::client::utility::auth_update(authDataFilePath(), auth_file_time_point_, auth_endpoint_, auth_user_, auth_token_);
+            myapps::client::utility::auth_update(authDataFilePath(), auth_file_time_point_, auth_endpoint_, auth_user_, auth_token_);
         }else if(_error != 0){
             lock_guard<mutex> lock(mutex_);
             guiStart();
@@ -1093,9 +1093,9 @@ NTSTATUS error_to_status(const ErrorE _err) {
 	};
 }
 
-uint32_t node_flags_to_attributes(ola::client::service::NodeFlagsT _node_flags){
-	using ola::client::service::NodeFlagsE;
-	using ola::client::service::NodeFlagsT;
+uint32_t node_flags_to_attributes(myapps::client::service::NodeFlagsT _node_flags){
+	using myapps::client::service::NodeFlagsE;
+	using myapps::client::service::NodeFlagsT;
 	uint32_t attr = 0;
 
 	if(_node_flags & node_flag(NodeFlagsE::Directory)){
@@ -1113,7 +1113,7 @@ uint32_t node_flags_to_attributes(ola::client::service::NodeFlagsT _node_flags){
 
 //-----------------------------------------------------------------------------
 
-FileSystem::FileSystem(ola::client::service::Engine &_rengine) :  rengine_(_rengine)
+FileSystem::FileSystem(myapps::client::service::Engine &_rengine) :  rengine_(_rengine)
 {
 }
 
@@ -1125,7 +1125,7 @@ FileSystem::~FileSystem()
 
 NTSTATUS FileSystem::InitSecurityDescriptor(){
 	DWORD sz= 0;
-	auto path = ola::client::utility::widen(env_app_data_path());
+	auto path = myapps::client::utility::widen(env_app_data_path());
 	GetFileSecurity(
 		path.c_str(),
 		OWNER_SECURITY_INFORMATION | GROUP_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
@@ -1192,7 +1192,7 @@ NTSTATUS FileSystem::GetSecurityByName(
     PSECURITY_DESCRIPTOR SecurityDescriptor,
     SIZE_T *PSecurityDescriptorSize)
 {
-    using ola::client::service::NodeFlagsT;
+    using myapps::client::service::NodeFlagsT;
     
     if(PFileAttributes != nullptr){
 		++FileName;
@@ -1335,7 +1335,7 @@ NTSTATUS FileSystem::GetFileInfo(
     PVOID pFileDesc,
     FileInfo *FileInfo)
 {
-	using ola::client::service::NodeFlagsT;
+	using myapps::client::service::NodeFlagsT;
     NodeFlagsT node_flags;
 	uint64_t size = 0;
     int64_t  base_time = 0;
@@ -1452,7 +1452,7 @@ NTSTATUS FileSystem::ReadDirectoryEntry(
     PVOID *pContext,
     DirInfo *DirInfo)
 {
-	using namespace ola::client::service;
+	using namespace myapps::client::service;
     wstring	    name;
 	uint64_t	size = 0;
     int64_t     base_time = base_time_;

@@ -12,13 +12,13 @@
 #include "solid/frame/mprpc/mprpcsocketstub_openssl.hpp"
 #include "solid/frame/mprpc/mprpcprotocol_serialization_v3.hpp"
 
-#include "ola/common/utility/encode.hpp"
-#include "ola/common/ola_front_protocol_main.hpp"
+#include "myapps/common/utility/encode.hpp"
+#include "myapps/common/front_protocol_main.hpp"
 
-#include "ola/common/utility/version.hpp"
-#include "ola/common/utility/archive.hpp"
+#include "myapps/common/utility/version.hpp"
+#include "myapps/common/utility/archive.hpp"
 
-#include "ola/client/utility/auth_file.hpp"
+#include "myapps/client/utility/auth_file.hpp"
 
 #include <signal.h>
 
@@ -44,8 +44,8 @@
 
 using namespace std;
 using namespace solid;
-using namespace ola;
-using namespace ola::front;
+using namespace myapps;
+using namespace myapps::front;
 
 using Replxx = replxx::Replxx;
 
@@ -144,12 +144,12 @@ struct Engine {
         
         if (rparams_.auth_token.empty()) {
             const auto path = authDataFilePath();
-            ola::client::utility::auth_read(path, auth_endpoint_, auth_user_, auth_token_);
+            myapps::client::utility::auth_read(path, auth_endpoint_, auth_user_, auth_token_);
         }
         else {
             solid_check(!rparams_.front_endpoint.empty(), "front_enpoint required");
             auth_endpoint_ = rparams_.front_endpoint;
-            auth_token_ = ola::utility::base64_decode(rparams_.auth_token);
+            auth_token_ = myapps::utility::base64_decode(rparams_.auth_token);
         }
         solid_check(!auth_token_.empty(), "Please authenticate using ola_client_auth application");
     }
@@ -450,7 +450,7 @@ void Parameters::parse(int argc, char* argv[])
         options_description config(string(service_name) + " configuration options");
         // clang-format off
         config.add_options()
-            ("debug-modules,M", value<std::vector<std::string>>(&this->debug_modules)->default_value(std::vector<std::string>{"ola::.*:EWX", ".*:EWX"}), "Debug logging modules")
+            ("debug-modules,M", value<std::vector<std::string>>(&this->debug_modules)->default_value(std::vector<std::string>{"myapps::.*:EWX", ".*:EWX"}), "Debug logging modules")
             ("debug-address,A", value<string>(&debug_addr)->default_value(""), "Debug server address (e.g. on linux use: nc -l 9999)")
             ("debug-port,P", value<string>(&debug_port)->default_value("9999"), "Debug server port (e.g. on linux use: nc -l 9999)")
             ("debug-console,C", value<bool>(&debug_console)->implicit_value(true)->default_value(false), "Debug console")
@@ -484,7 +484,7 @@ void Parameters::parse(int argc, char* argv[])
         }
 
         if (bootstrap.count("version") != 0u) {
-            cout << ola::utility::version_full() << endl;
+            cout << myapps::utility::version_full() << endl;
             cout << "SolidFrame: " << solid::version_full() << endl;
             exit(0);
         }
@@ -625,27 +625,27 @@ string get_command(const string &_line){
 // Front
 //-----------------------------------------------------------------------------
 void configure_service(Engine &_reng, AioSchedulerT &_rsch, frame::aio::Resolver &_rres){
-    auto                        proto = frame::mprpc::serialization_v3::create_protocol<reflection::v1::metadata::Variant, ola::front::ProtocolTypeIndexT>(
-        ola::utility::metadata_factory,
+    auto                        proto = frame::mprpc::serialization_v3::create_protocol<reflection::v1::metadata::Variant, myapps::front::ProtocolTypeIndexT>(
+        myapps::utility::metadata_factory,
         [&](auto& _rmap) {
-            auto lambda = [&](const ola::front::ProtocolTypeIndexT _id, const std::string_view _name, auto const& _rtype) {
+            auto lambda = [&](const myapps::front::ProtocolTypeIndexT _id, const std::string_view _name, auto const& _rtype) {
                 using TypeT = typename std::decay_t<decltype(_rtype)>::TypeT;
                 _rmap.template registerMessage<TypeT>(_id, _name, complete_message<TypeT>);
             };
-            ola::front::core::configure_protocol(lambda);
-            ola::front::main::configure_protocol(lambda);
+            myapps::front::core::configure_protocol(lambda);
+            myapps::front::main::configure_protocol(lambda);
         }
     );
     frame::mprpc::Configuration cfg(_rsch, proto);
 
-    cfg.client.name_resolve_fnc = frame::mprpc::InternetResolverF(_rres, ola::front::default_port());
+    cfg.client.name_resolve_fnc = frame::mprpc::InternetResolverF(_rres, myapps::front::default_port());
     cfg.client.connection_start_state = frame::mprpc::ConnectionState::Passive;
     {
 //         auto connection_stop_lambda = [&_rctx](frame::mpipc::ConnectionContext &_ctx){
 //             engine_ptr->onConnectionStop(_ctx);
 //         };
         auto connection_start_lambda = [&_reng](frame::mprpc::ConnectionContext &_rctx){
-            _rctx.any() = std::make_tuple(core::version, main::version, ola::utility::version);
+            _rctx.any() = std::make_tuple(core::version, main::version, myapps::utility::version);
             _reng.onConnectionStart(_rctx);
         };
         //cfg.connection_stop_fnc = std::move(connection_stop_lambda);
@@ -843,18 +843,18 @@ void handle_change_state(istream& _ris, Engine& _reng) {
 
     _ris >> item_type >> std::quoted(req_ptr->app_id_) >> std::quoted(req_ptr->os_id_) >> std::quoted(req_ptr->item_.name_) >> std::quoted(state_name);
 
-    auto state = ola::utility::app_item_state_from_name(state_name.c_str());
-    if (state == ola::utility::AppItemStateE::StateCount) {
+    auto state = myapps::utility::app_item_state_from_name(state_name.c_str());
+    if (state == myapps::utility::AppItemStateE::StateCount) {
         cout << "Error: invalid state name " << state_name << endl;
         return;
     }
 
     if (item_type == 'b' || item_type == 'B')
     {
-        req_ptr->item_.type(ola::utility::AppItemTypeE::Build);
+        req_ptr->item_.type(myapps::utility::AppItemTypeE::Build);
     }
     else if (item_type == 'm' || item_type == 'M') {
-        req_ptr->item_.type(ola::utility::AppItemTypeE::Media);
+        req_ptr->item_.type(myapps::utility::AppItemTypeE::Media);
     }
     else {
         cout << "Error: invalid item type " << item_type << endl;
@@ -868,8 +868,8 @@ void handle_change_state(istream& _ris, Engine& _reng) {
 
     auto lambda = [&prom](
         frame::mprpc::ConnectionContext& _rctx,
-        std::shared_ptr<ola::front::main::ChangeAppItemStateRequest>& _rsent_msg_ptr,
-        std::shared_ptr<ola::front::core::Response>& _rrecv_msg_ptr,
+        std::shared_ptr<myapps::front::main::ChangeAppItemStateRequest>& _rsent_msg_ptr,
+        std::shared_ptr<myapps::front::core::Response>& _rrecv_msg_ptr,
         ErrorConditionT const& _rerror) {
 
         if (_rrecv_msg_ptr && _rrecv_msg_ptr->error_ == 0) {
@@ -930,7 +930,7 @@ void handle_fetch_app(istream& _ris, Engine &_reng){
             cout << "Items: {"<<endl;
             for(const auto& item: _rrecv_msg_ptr->item_vec_){
                 //cout<<utility::base64_encode(build_id)<<endl;
-                cout<<'\t'<<item.name_<<" "<< ola::utility::app_item_type_name(item.type())<<" "<< ola::utility::app_item_state_name(item.state()) <<endl;
+                cout<<'\t'<<item.name_<<" "<< myapps::utility::app_item_type_name(item.type())<<" "<< myapps::utility::app_item_state_name(item.state()) <<endl;
             }
             cout<<'}'<<endl;
             cout<<_rrecv_msg_ptr->application_;
@@ -1532,8 +1532,8 @@ void handle_fetch(istream& _ris, Engine& _reng){
 //  Create
 //-----------------------------------------------------------------------------
 #ifdef APP_CONFIG
-bool load_app_config(ola::utility::Application &_rcfg, const string &_path);
-bool store_app_config(const ola::utility::Application &_rcfg, const string &_path);
+bool load_app_config(myapps::utility::Application &_rcfg, const string &_path);
+bool store_app_config(const myapps::utility::Application &_rcfg, const string &_path);
 #endif
 string generate_temp_name();
 
@@ -1562,8 +1562,8 @@ void handle_create_app ( istream& _ris, Engine &_reng){
         if(_rrecv_msg_ptr){
             cout<<"{\n";
             cout<<"\terror = "<<_rrecv_msg_ptr->error_<<endl;
-            if(_rrecv_msg_ptr->error_ == ola::utility::error_exist.value() || _rrecv_msg_ptr->error_ == 0){
-                cout<<"\tmessage = "<<ola::utility::base64_encode(_rrecv_msg_ptr->message_)<<endl;
+            if(_rrecv_msg_ptr->error_ == myapps::utility::error_exist.value() || _rrecv_msg_ptr->error_ == 0){
+                cout<<"\tmessage = "<<myapps::utility::base64_encode(_rrecv_msg_ptr->message_)<<endl;
             }else{
                 cout<<"\tmessage = "<<_rrecv_msg_ptr->message_<<endl;
             }
@@ -1582,8 +1582,8 @@ void handle_create_app ( istream& _ris, Engine &_reng){
 
 //-----------------------------------------------------------------------------
 
-bool load_build_config(ola::utility::Build &_rbuild_cfg, const string &_path);
-bool store_build_config(const ola::utility::Build &_rbuild_cfg, const string &_path);
+bool load_build_config(myapps::utility::Build &_rbuild_cfg, const string &_path);
+bool store_build_config(const myapps::utility::Build &_rbuild_cfg, const string &_path);
 
 void on_upload_receive_last_response(
     frame::mprpc::ConnectionContext& _rctx,
@@ -1696,7 +1696,7 @@ void handle_create_build(istream& _ris, Engine &_reng){
     _ris>>std::quoted(req_ptr->app_id_)>>std::quoted(req_ptr->unique_);
     _ris>>std::quoted(config_path)>>std::quoted(build_path)>>std::quoted(icon_path);
     
-    req_ptr->app_id_ = ola::utility::base64_decode(req_ptr->app_id_);
+    req_ptr->app_id_ = myapps::utility::base64_decode(req_ptr->app_id_);
     
     if(!load_build_config(req_ptr->build_, path(config_path))){
         return;
@@ -1708,7 +1708,7 @@ void handle_create_build(istream& _ris, Engine &_reng){
     
     //create archive from build_path/*
     
-    string zip_path = system_path(get_temp_env() + "/ola_client_cli_" + generate_temp_name() + ".zip");
+    string zip_path = system_path(get_temp_env() + "/myapps_cli_" + generate_temp_name() + ".zip");
 
     {
         auto compute_base_time_lambda = [](const std::string& _path, vector<uint8_t>& _rdata) {
@@ -1717,14 +1717,14 @@ void handle_create_build(istream& _ris, Engine &_reng){
             solid::serialization::binary::store(reinterpret_cast<char*>(_rdata.data()), base_time);
         };
 
-        if (!ola::utility::archive_create(zip_path, path(build_path), req_ptr->size_, compute_base_time_lambda)) {
+        if (!myapps::utility::archive_create(zip_path, path(build_path), req_ptr->size_, compute_base_time_lambda)) {
             return;
         }
     }
     {
         ifstream ifs(zip_path, std::ifstream::binary);
         if(ifs){
-            req_ptr->sha_sum_ = ola::utility::sha256hex(ifs);
+            req_ptr->sha_sum_ = myapps::utility::sha256hex(ifs);
             cout<<"sha_sum for "<<zip_path<<": "<<req_ptr->sha_sum_<<endl;
         }else{
             cout<<"could not open "<<zip_path<<" for reading"<<endl;
@@ -1808,11 +1808,11 @@ void handle_create_media(istream& _ris, Engine &_reng){
     _ris>>std::quoted(media_path);
 
     
-    req_ptr->app_id_ = ola::utility::base64_decode(req_ptr->app_id_);
+    req_ptr->app_id_ = myapps::utility::base64_decode(req_ptr->app_id_);
     
     //create archive from build_path/*
     
-    string zip_path = system_path(get_temp_env() + "/ola_client_cli_" + generate_temp_name() + ".zip");
+    string zip_path = system_path(get_temp_env() + "/myapps_cli_" + generate_temp_name() + ".zip");
 
     {
         auto compute_base_time_lambda = [](const std::string& _path, vector<uint8_t>& _rdata) {
@@ -1821,7 +1821,7 @@ void handle_create_media(istream& _ris, Engine &_reng){
             solid::serialization::binary::store(reinterpret_cast<char*>(_rdata.data()), base_time);
         };
 
-        if (!ola::utility::archive_create(zip_path, path(media_path), req_ptr->size_, compute_base_time_lambda)) {
+        if (!myapps::utility::archive_create(zip_path, path(media_path), req_ptr->size_, compute_base_time_lambda)) {
             return;
         }
     }
@@ -1829,7 +1829,7 @@ void handle_create_media(istream& _ris, Engine &_reng){
     {
         ifstream ifs(zip_path, std::ifstream::binary);
         if(ifs){
-            req_ptr->sha_sum_ = ola::utility::sha256hex(ifs);
+            req_ptr->sha_sum_ = myapps::utility::sha256hex(ifs);
             cout<<"sha_sum for "<<zip_path<<": "<<req_ptr->sha_sum_<<endl;
         }else{
             cout<<"could not open "<<zip_path<<" for reading"<<endl;
@@ -1926,7 +1926,7 @@ void handle_generate_buid(istream& _ris, Engine &_reng){
     string config_path;
     _ris>>std::quoted(config_path);
     
-    ola::utility::Build cfg;
+    myapps::utility::Build cfg;
     
     cfg.name_ = "windows";
     cfg.tag_ = "r1.3";
@@ -1945,12 +1945,12 @@ void handle_generate_buid(istream& _ris, Engine &_reng){
         {"description", "${description}"}
     };
     
-    cfg.configuration_vec_ = ola::utility::Build::ConfigurationVectorT{
+    cfg.configuration_vec_ = myapps::utility::Build::ConfigurationVectorT{
         {
             {
                 "windows32bit",
                 "${name}",//directory
-                ola::utility::Build::Configuration::compute_flags({"HiddenDirectory"}),
+                myapps::utility::Build::Configuration::compute_flags({"HiddenDirectory"}),
                 {"Windows10x86_32", "Windows10x86_64"},
                 {{"bin", "bin32"}, {"lib", "lib32"}},
                 {"bin/bubbles.exe"},
@@ -1971,7 +1971,7 @@ void handle_generate_buid(istream& _ris, Engine &_reng){
             {
                 "windows64bit",
                 "${name}",//directory
-                ola::utility::Build::Configuration::compute_flags({}),
+                myapps::utility::Build::Configuration::compute_flags({}),
                 {"Windows10x86_64"},
                 {{"bin", "bin64"}, {"lib", "lib64"}},
                 {"bin/bubbles.exe"},
@@ -1994,7 +1994,7 @@ void handle_generate_buid(istream& _ris, Engine &_reng){
     
     store_build_config(cfg, path(config_path));
     {
-        ola::utility::Build cfg_check;
+        myapps::utility::Build cfg_check;
         load_build_config(cfg_check, path(config_path));
         solid_check(cfg == cfg_check);
     }
@@ -2019,7 +2019,7 @@ void handle_parse_buid(istream& _ris, Engine& _reng) {
     string config_path;
     _ris >> std::quoted(config_path);
 
-    ola::utility::Build cfg;
+    myapps::utility::Build cfg;
     if (load_build_config(cfg, path(config_path))){
         cout << endl;
         cout << cfg << endl;
@@ -2044,7 +2044,7 @@ void handle_acquire(istream& _ris, Engine &_reng){
 
     _ris >> std::quoted(req_ptr->app_id_);
     
-    req_ptr->app_id_ = ola::utility::base64_decode(req_ptr->app_id_);
+    req_ptr->app_id_ = myapps::utility::base64_decode(req_ptr->app_id_);
 
     promise<void> prom;
 
@@ -2216,7 +2216,7 @@ bool read(string& _rs, istream& _ris, size_t _sz)
 
 //-----------------------------------------------------------------------------
 #ifdef APP_CONFIG
-bool load_app_config(ola::utility::Application &_rcfg, const string &_path){
+bool load_app_config(myapps::utility::Application &_rcfg, const string &_path){
     using namespace libconfig;
     Config cfg;
     cfg.setOptions(Config::OptionFsync
@@ -2266,7 +2266,7 @@ bool load_app_config(ola::utility::Application &_rcfg, const string &_path){
 
 //-----------------------------------------------------------------------------
 
-bool store_app_config(const ola::utility::Application &_rcfg, const string &_path){
+bool store_app_config(const myapps::utility::Application &_rcfg, const string &_path){
     using namespace libconfig;
     Config cfg;
     
@@ -2315,7 +2315,7 @@ bool store_app_config(const ola::utility::Application &_rcfg, const string &_pat
 #endif
 
 //-----------------------------------------------------------------------------
-bool load_build_config(ola::utility::Build& _rcfg, const string& _path) {
+bool load_build_config(myapps::utility::Build& _rcfg, const string& _path) {
     using namespace YAML;
     Node config;
     try {
@@ -2391,7 +2391,7 @@ bool load_build_config(ola::utility::Build& _rcfg, const string& _path) {
             if (configurations) {
                 if (configurations.Type() == NodeType::Sequence) {
                     for (const_iterator it = configurations.begin(); it != configurations.end(); ++it) {
-                        ola::utility::Build::Configuration c;
+                        myapps::utility::Build::Configuration c;
                         if (it->Type() == NodeType::Map) {
                             if ((*it)["name"]) {
                                 c.name_ = (*it)["name"].as<string>();
@@ -2423,7 +2423,7 @@ bool load_build_config(ola::utility::Build& _rcfg, const string& _path) {
                             if ((*it)["flags"] && (*it)["flags"].Type() == NodeType::Sequence) {
                                 Node flags = (*it)["flags"];
                                 for (const_iterator it = flags.begin(); it != flags.end(); ++it) {
-                                    c.flags_ |= ola::utility::Build::Configuration::flag(it->as<string>().c_str());
+                                    c.flags_ |= myapps::utility::Build::Configuration::flag(it->as<string>().c_str());
                                 }
                             }
 
@@ -2476,7 +2476,7 @@ bool load_build_config(ola::utility::Build& _rcfg, const string& _path) {
                             if ((*it)["shortcuts"] && (*it)["shortcuts"].Type() == NodeType::Sequence) {
                                 Node shortcuts = (*it)["shortcuts"];
                                 for (const_iterator it = shortcuts.begin(); it != shortcuts.end(); ++it) {
-                                    ola::utility::Build::Shortcut s;
+                                    myapps::utility::Build::Shortcut s;
 
                                     s.name_ = (*it)["name"].as<string>();
                                     s.command_ = (*it)["command"].as<string>();
@@ -2499,7 +2499,7 @@ bool load_build_config(ola::utility::Build& _rcfg, const string& _path) {
                                 if (media["entries"] && media["entries"].Type() == NodeType::Sequence) {
                                     Node entries = media["entries"];
                                     for (const_iterator it = entries.begin(); it != entries.end(); ++it) {
-                                        ola::utility::Build::Media::Entry e;
+                                        myapps::utility::Build::Media::Entry e;
 
                                         e.thumbnail_path_ = (*it)["thumbnail"].as<string>();
                                         e.path_ = (*it)["file"].as<string>();
@@ -2545,7 +2545,7 @@ bool load_build_config(ola::utility::Build& _rcfg, const string& _path) {
 }
 
 //-----------------------------------------------------------------------------
-bool store_build_config(const ola::utility::Build& _rcfg, const string& _path) {
+bool store_build_config(const myapps::utility::Build& _rcfg, const string& _path) {
     using namespace YAML;
 
     Node config;
@@ -2594,7 +2594,7 @@ bool store_build_config(const ola::utility::Build& _rcfg, const string& _path) {
             {
                 Node flags;
 
-                ola::utility::Build::Configuration::for_each_flag(
+                myapps::utility::Build::Configuration::for_each_flag(
                     component.flags_,
                     [&flags](const char* _name) {
                         flags.push_back(std::string(_name));

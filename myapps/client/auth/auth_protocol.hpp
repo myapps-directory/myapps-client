@@ -2,7 +2,7 @@
 
 #include "solid/frame/mprpc/mprpcprotocol_serialization_v2.hpp"
 
-namespace ola {
+namespace myapps {
 namespace client {
 namespace auth {
 
@@ -74,4 +74,4 @@ inline void protocol_setup(R _r, ProtocolT& _rproto)
 
 } //namespace auth
 } //namespace client
-} //namespace ola
+} //namespace myapps

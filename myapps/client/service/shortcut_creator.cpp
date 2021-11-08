@@ -20,7 +20,7 @@ using namespace solid;
 using namespace std;
 namespace fs = boost::filesystem;
 
-namespace ola {
+namespace myapps {
 namespace client {
 namespace service {
 
@@ -119,4 +119,4 @@ size_t ShortcutCreator::create(
 
 } //namespace service
 } //namespace client
-} //namespace ola
+} //namespace myapps

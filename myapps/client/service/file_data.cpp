@@ -6,7 +6,7 @@
 
 using namespace std;
 
-namespace ola {
+namespace myapps {
 namespace client {
 namespace service {
 namespace {
@@ -172,4 +172,4 @@ bool FileData::tryFillReads(const std::string& _data, const uint64_t _offset, co
 
 } // namespace service
 } // namespace client
-} //namespace ola
+} //namespace myapps

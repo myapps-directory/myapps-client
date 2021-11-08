@@ -7,7 +7,7 @@
 #include <string>
 #include <vector>
 
-namespace ola {
+namespace myapps {
 namespace client {
 namespace service {
 namespace file_cache {
@@ -163,4 +163,4 @@ public:
 } // namespace file_cache
 } // namespace service
 } // namespace client
-} //namespace ola
+} //namespace myapps

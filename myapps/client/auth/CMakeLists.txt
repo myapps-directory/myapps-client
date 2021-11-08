@@ -49,7 +49,7 @@ if(${Qt5Widgets_FOUND})
 
     if(WIN32)
         add_executable(
-            ola_client_auth
+            myapps_auth
             WIN32
             ${SRCS}
             auth_main.rc
@@ -61,39 +61,39 @@ if(${Qt5Widgets_FOUND})
                 set(BUILD_TYPE "--release")
             endif()
             # execute windeployqt in a tmp directory after build
-            add_custom_command(TARGET ola_client_auth
+            add_custom_command(TARGET myapps_auth
                 POST_BUILD
                 #COMMAND ${CMAKE_COMMAND} -E remove_directory $<TARGET_FILE_DIR:ola_client_store>/windeployqt
                 COMMAND set PATH=%PATH%$<SEMICOLON>${qt5_install_prefix}/bin
-                COMMAND Qt5::windeployqt ${BUILD_TYPE} "$<TARGET_FILE_DIR:ola_client_auth>/$<TARGET_FILE_NAME:ola_client_auth>"
+                COMMAND Qt5::windeployqt ${BUILD_TYPE} "$<TARGET_FILE_DIR:myapps_auth>/$<TARGET_FILE_NAME:myapps_auth>"
             )
 
             # copy deployment directory during installation
-            install(DIRECTORY $<TARGET_FILE_DIR:ola_client_auth>//windeployqt/ DESTINATION bin PATTERN "windeployqt/*")
+            install(DIRECTORY $<TARGET_FILE_DIR:myapps_auth>//windeployqt/ DESTINATION bin PATTERN "windeployqt/*")
         endif()
         set_source_files_properties(auth_main.cpp PROPERTIES COMPILE_FLAGS "-DOLA_FRONT_URL=\\\"${OLA_FRONT_URL}\\\" -bigobj")
     elseif(APPLE)
         add_executable(
-            ola_client_auth
+            myapps_auth
             MACOSX_BUNDLE
             ${SRCS}
         )
     else()
         add_executable(
-            ola_client_auth
+            myapps_auth
             ${SRCS}
         )
     endif()
 
-    add_dependencies(ola_client_auth build-snappy build-cereal)
+    add_dependencies(myapps_auth build-snappy build-cereal)
     set_target_properties(
-        ola_client_auth PROPERTIES
-        VS_DEBUGGER_WORKING_DIRECTORY $<TARGET_FILE_DIR:ola_client_auth>)
+        myapps_auth PROPERTIES
+        VS_DEBUGGER_WORKING_DIRECTORY $<TARGET_FILE_DIR:myapps_auth>)
 
     target_link_libraries(
-        ola_client_auth
-        ola_client_utility
-		ola_utility
+        myapps_auth
+        myapps_client_utility
+		myapps_utility
         SolidFrame::solid_frame_mprpc
         SolidFrame::solid_frame_aio_openssl
         SolidFrame::solid_serialization_v3
@@ -112,24 +112,24 @@ if(${Qt5Widgets_FOUND})
             set(BUILD_TYPE "--release")
         endif()
         # execute windeployqt in a tmp directory after build
-        add_custom_command(TARGET ola_client_auth
+        add_custom_command(TARGET myapps_auth
             POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E remove_directory $<TARGET_FILE_DIR:ola_client_auth>/windeployqt
+            COMMAND ${CMAKE_COMMAND} -E remove_directory $<TARGET_FILE_DIR:myapps_auth>/windeployqt
             COMMAND set PATH=%PATH%$<SEMICOLON>${qt5_install_prefix}/bin
-            COMMAND Qt5::windeployqt ${BUILD_TYPE} --dir $<TARGET_FILE_DIR:ola_client_auth>//windeployqt "$<TARGET_FILE_DIR:ola_client_auth>/$<TARGET_FILE_NAME:ola_client_auth>"
+            COMMAND Qt5::windeployqt ${BUILD_TYPE} --dir $<TARGET_FILE_DIR:myapps_auth>//windeployqt "$<TARGET_FILE_DIR:myapps_auth>/$<TARGET_FILE_NAME:myapps_auth>"
         )
 
         # copy deployment directory during installation
-        install(DIRECTORY $<TARGET_FILE_DIR:ola_client_auth>/windeployqt/ DESTINATION bin PATTERN "windeployqt/*")
+        install(DIRECTORY $<TARGET_FILE_DIR:myapps_auth>/windeployqt/ DESTINATION bin PATTERN "windeployqt/*")
     endif()
 
-    add_custom_command(TARGET ola_client_auth POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/ola/client/utility/certs  $<TARGET_FILE_DIR:ola_client_auth>/certs
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${OPENSSL_SSL_DLL} $<TARGET_FILE_DIR:ola_client_auth>
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${OPENSSL_CRYPTO_DLL} $<TARGET_FILE_DIR:ola_client_auth>
+    add_custom_command(TARGET myapps_auth POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/myapps/client/utility/certs  $<TARGET_FILE_DIR:myapps_auth>/certs
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${OPENSSL_SSL_DLL} $<TARGET_FILE_DIR:myapps_auth>
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${OPENSSL_CRYPTO_DLL} $<TARGET_FILE_DIR:myapps_auth>
     )
 
-    install(TARGETS ola_client_auth DESTINATION bin)
+    install(TARGETS myapps_auth DESTINATION bin)
     install(FILES ${OPENSSL_SSL_DLL} DESTINATION bin)
     install(FILES ${OPENSSL_CRYPTO_DLL} DESTINATION bin)
 endif()

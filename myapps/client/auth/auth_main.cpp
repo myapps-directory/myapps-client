@@ -34,15 +34,15 @@
 #include "solid/frame/mprpc/mprpcsocketstub_openssl.hpp"
 #include "solid/frame/mprpc/mprpcprotocol_serialization_v3.hpp"
 
-#include "ola/common/utility/encode.hpp"
-#include "ola/common/utility/version.hpp"
+#include "myapps/common/utility/encode.hpp"
+#include "myapps/common/utility/version.hpp"
 
-#include "ola/client/utility/auth_file.hpp"
-#include "ola/client/utility/locale.hpp"
+#include "myapps/client/utility/auth_file.hpp"
+#include "myapps/client/utility/locale.hpp"
 
 #include "auth_protocol.hpp"
-#include "ola/common/ola_front_protocol_main.hpp"
-#include "ola/common/ola_front_protocol_auth.hpp"
+#include "myapps/common/front_protocol_main.hpp"
+#include "myapps/common/front_protocol_auth.hpp"
 
 #include "boost/filesystem.hpp"
 #include "boost/program_options.hpp"
@@ -62,7 +62,7 @@
 #include <future>
 #include <iostream>
 
-using namespace ola;
+using namespace myapps;
 using namespace solid;
 using namespace std;
 
@@ -76,7 +76,7 @@ using SchedulerT    = frame::Scheduler<frame::Reactor>;
 //-----------------------------------------------------------------------------
 namespace {
 constexpr string_view service_name("ola_client_auth");
-const solid::LoggerT logger("ola::client::auth");
+const solid::LoggerT logger("myapps::client::auth");
 
 struct Parameters {
     vector<string> debug_modules;
@@ -267,7 +267,7 @@ int main(int argc, char* argv[])
             1024 * 1024 * 64);
     }
 
-    qRegisterMetaType<ola::client::auth::CaptchaPointerT>("CaptchaPointerT");
+    qRegisterMetaType<myapps::client::auth::CaptchaPointerT>("CaptchaPointerT");
 
     //QApplication::setHighDpiScaleFactorRoundingPolicy(Qt::HighDpiScaleFactorRoundingPolicy::PassThrough);
     //QApplication::setAttribute(Qt::AA_EnableHighDpiScaling);
@@ -302,14 +302,14 @@ int main(int argc, char* argv[])
     {
         client::auth::Configuration config;
         config.authenticate_fnc_ = [&engine](const string& _user, const string& _pass, const string& _code) {
-            return engine.onAuthStart(_user, ola::utility::sha256hex(_pass), _code);
+            return engine.onAuthStart(_user, myapps::utility::sha256hex(_pass), _code);
         };
         config.create_fnc_ = [&engine](const string& _user, const string &_email, const string& _pass, const string& _code) {
-            return engine.onCreateStart(_user, _email, ola::utility::sha256hex(_pass), _code);
+            return engine.onCreateStart(_user, _email, myapps::utility::sha256hex(_pass), _code);
         };
 
         config.amend_fnc_ = [&engine](const string& _user, const string& _email, const string& _pass, const string& _new_pass) {
-            return engine.onAmendStart(_user, _email, ola::utility::sha256hex(_pass), _new_pass.empty() ? _new_pass : ola::utility::sha256hex(_new_pass));
+            return engine.onAmendStart(_user, _email, myapps::utility::sha256hex(_pass), _new_pass.empty() ? _new_pass : myapps::utility::sha256hex(_new_pass));
         };
 
         config.validate_fnc_ = [&engine](const string& _code) {
@@ -333,7 +333,7 @@ int main(int argc, char* argv[])
         };
 
         config.reset_fnc_ = [&engine](const string& _token, const string& _pass, const string& _code) {
-            return engine.passwordReset(_token, ola::utility::sha256hex(_pass), _code);
+            return engine.passwordReset(_token, myapps::utility::sha256hex(_pass), _code);
         };
 
         config.login_ = QString::fromStdString(engine.auth_login_);
@@ -416,7 +416,7 @@ bool Parameters::parse(ULONG argc, PWSTR* argv)
         options_description config(string(service_name) + " configuration options");
         // clang-format off
         config.add_options()
-            ("debug-modules,M", value<std::vector<std::string>>(&this->debug_modules)->default_value(std::vector<std::string>{"ola::.*:VIEW", ".*:EWX"}), "Debug logging modules")
+            ("debug-modules,M", value<std::vector<std::string>>(&this->debug_modules)->default_value(std::vector<std::string>{"myapps::.*:VIEW", ".*:EWX"}), "Debug logging modules")
             ("debug-address,A", value<string>(&debug_addr)->default_value(""), "Debug server address (e.g. on linux use: nc -l 9999)")
             ("debug-port,P", value<string>(&debug_port)->default_value("9999"), "Debug server port (e.g. on linux use: nc -l 9999)")
             ("debug-console,C", value<bool>(&debug_console)->implicit_value(true)->default_value(false), "Debug console")
@@ -449,7 +449,7 @@ bool Parameters::parse(ULONG argc, PWSTR* argv)
         }
 
         if (bootstrap.count("version") != 0u) {
-            cout << ola::utility::version_full() << endl;
+            cout << myapps::utility::version_full() << endl;
             cout << "SolidFrame: " << solid::version_full() << endl;
             return false;
         }
@@ -519,7 +519,7 @@ void write_value(std::ostream& _ros, const string& _name, const boost::any& _rav
         _ros << _name << '=' << boost::any_cast<std::string>(_rav) << endl;
     }
     else if (_rav.type() == typeid(std::wstring)) {
-        _ros << _name << '=' << ola::client::utility::narrow(boost::any_cast<std::wstring>(_rav)) << endl;
+        _ros << _name << '=' << myapps::client::utility::narrow(boost::any_cast<std::wstring>(_rav)) << endl;
     }
     else if (_rav.type() == typeid(std::vector<std::string>)) {
         const auto& v = boost::any_cast<const std::vector<std::string>&>(_rav);
@@ -584,20 +584,20 @@ void complete_message(
 
 void front_configure_service(Engine& _rengine, const Parameters& _params, frame::mprpc::ServiceT& _rsvc, AioSchedulerT& _rsch, frame::aio::Resolver& _rres)
 {
-    auto                        proto = frame::mprpc::serialization_v3::create_protocol<reflection::v1::metadata::Variant, ola::front::ProtocolTypeIndexT>(
-        ola::utility::metadata_factory,
+    auto                        proto = frame::mprpc::serialization_v3::create_protocol<reflection::v1::metadata::Variant, myapps::front::ProtocolTypeIndexT>(
+        myapps::utility::metadata_factory,
         [&](auto& _rmap) {
-            auto lambda = [&](const ola::front::ProtocolTypeIndexT _id, const std::string_view _name, auto const& _rtype) {
+            auto lambda = [&](const myapps::front::ProtocolTypeIndexT _id, const std::string_view _name, auto const& _rtype) {
                 using TypeT = typename std::decay_t<decltype(_rtype)>::TypeT;
                 _rmap.template registerMessage<TypeT>(_id, _name, complete_message<TypeT>);
             };
-            ola::front::core::configure_protocol(lambda);
-            ola::front::auth::configure_protocol(lambda);
+            myapps::front::core::configure_protocol(lambda);
+            myapps::front::auth::configure_protocol(lambda);
         }
     );
     frame::mprpc::Configuration cfg(_rsch, proto);
 
-    cfg.client.name_resolve_fnc = frame::mprpc::InternetResolverF(_rres, ola::front::default_port());
+    cfg.client.name_resolve_fnc = frame::mprpc::InternetResolverF(_rres, myapps::front::default_port());
 
     cfg.client.connection_start_state     = frame::mprpc::ConnectionState::Passive;
     cfg.pool_max_active_connection_count  = 1;
@@ -872,7 +872,7 @@ void Engine::onAuthResponse(
 {
     if (_rrecv_msg_ptr) {
         solid_log(logger, Info, "AuthResponse: " << _rrecv_msg_ptr->error_);
-        if (_rrecv_msg_ptr->error_ == ola::utility::error_authentication_validate.value()) {
+        if (_rrecv_msg_ptr->error_ == myapps::utility::error_authentication_validate.value()) {
             auth_token_ = std::move(_rrecv_msg_ptr->message_);
             if (!_rctx.isConnectionActive()) {
                 _rctx.service().connectionNotifyEnterActiveState(_rctx.recipientId());
@@ -914,7 +914,7 @@ void Engine::loadAuthData()
 {
     const auto path = authDataFilePath();
 
-    ola::client::utility::auth_read(path, auth_endpoint_, auth_login_, auth_token_);
+    myapps::client::utility::auth_read(path, auth_endpoint_, auth_login_, auth_token_);
 
     if (auth_endpoint_ != params_.front_endpoint) {
         auth_login_.clear();
@@ -928,13 +928,13 @@ void Engine::storeAuthData()
     fs::create_directories(authDataDirectoryPath());
     const auto path = authDataFilePath();
 
-    ola::client::utility::auth_write(path, auth_endpoint_, auth_login_, auth_token_);
+    myapps::client::utility::auth_write(path, auth_endpoint_, auth_login_, auth_token_);
 #if 0
     ofstream ofs(path.generic_string(), std::ios::trunc);
     if (ofs) {
         ofs << auth_endpoint_ << endl;
         ofs << _user << endl;
-        ofs << ola::utility::base64_encode(_token) << endl;
+        ofs << myapps::utility::base64_encode(_token) << endl;
         ofs.flush();
         solid_log(logger, Info, "Stored auth data to: " << path.generic_string());
     } else {

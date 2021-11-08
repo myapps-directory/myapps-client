@@ -1,4 +1,4 @@
-#include "ola/client/service/engine.hpp"
+#include "myapps/client/service/engine.hpp"
 
 #include "solid/frame/manager.hpp"
 #include "solid/frame/scheduler.hpp"
@@ -13,13 +13,13 @@
 #include "solid/frame/mprpc/mprpcsocketstub_openssl.hpp"
 #include "solid/frame/mprpc/mprpcprotocol_serialization_v3.hpp"
 
-#include "ola/common/utility/encode.hpp"
+#include "myapps/common/utility/encode.hpp"
 
-#include "ola/common/utility/version.hpp"
+#include "myapps/common/utility/version.hpp"
 
-#include "ola/client/auth/auth_protocol.hpp"
-#include "ola/client/utility/locale.hpp"
-#include "ola/client/utility/app_list_file.hpp"
+#include "myapps/client/auth/auth_protocol.hpp"
+#include "myapps/client/utility/locale.hpp"
+#include "myapps/client/utility/app_list_file.hpp"
 
 #include "file_data.hpp"
 #include "shortcut_creator.hpp"
@@ -38,15 +38,15 @@
 
 using namespace solid;
 using namespace std;
-using namespace ola;
-using namespace ola::front;
+using namespace myapps;
+using namespace myapps::front;
 
-namespace ola {
+namespace myapps {
 namespace client {
 namespace service {
 
 namespace {
-const solid::LoggerT logger("ola::client::service::engine");
+const solid::LoggerT logger("myapps::client::service::engine");
 
 constexpr const char* media_name = ".m";
 
@@ -131,7 +131,7 @@ using EntryMapT       = std::unordered_map<const std::reference_wrapper<const st
 using EntryPtrMapT    = std::unordered_map<const std::reference_wrapper<const string>, Entry*, Hash, Equal>;
 using EntryPtrVectorT = std::vector<Entry*>;
 using UpdatesMapT     = std::unordered_map<string, pair<string, string>>;
-using AppListFileT = ola::client::utility::AppListFile;
+using AppListFileT = myapps::client::utility::AppListFile;
 
 
 struct DirectoryData {
@@ -655,7 +655,7 @@ struct Descriptor {
     }
 };
 
-using ListNodeDequeT = decltype(ola::front::main::ListStoreResponse::node_dq_);
+using ListNodeDequeT = decltype(myapps::front::main::ListStoreResponse::node_dq_);
 
 struct Engine::Implementation {
     using RecipientVectorT = std::vector<frame::mprpc::RecipientId>;
@@ -787,7 +787,7 @@ private:
 
     void insertApplicationEntry(
         std::shared_ptr<main::FetchBuildConfigurationResponse>& _rrecv_msg_ptr,
-        const ola::utility::ApplicationListItem &_app
+        const myapps::utility::ApplicationListItem &_app
     );
     void insertMountEntry(EntryPointerT& _rparent_ptr, const fs::path& _local, const string& _remote);
 
@@ -850,26 +850,26 @@ void Engine::start(const Configuration& _rcfg)
     pimpl_->scheduler_.start(1);
 
     {
-        auto                        proto = frame::mprpc::serialization_v3::create_protocol<reflection::v1::metadata::Variant, ola::front::ProtocolTypeIndexT>(
-            ola::utility::metadata_factory,
+        auto                        proto = frame::mprpc::serialization_v3::create_protocol<reflection::v1::metadata::Variant, myapps::front::ProtocolTypeIndexT>(
+            myapps::utility::metadata_factory,
             [&](auto& _rmap) {
-                auto lambda = [&](const ola::front::ProtocolTypeIndexT _id, const std::string_view _name, auto const& _rtype) {
+                auto lambda = [&](const myapps::front::ProtocolTypeIndexT _id, const std::string_view _name, auto const& _rtype) {
                     using TypeT = typename std::decay_t<decltype(_rtype)>::TypeT;
                     _rmap.template registerMessage<TypeT>(_id, _name, complete_message<TypeT>);
                 };
-                ola::front::core::configure_protocol(lambda);
-                ola::front::main::configure_protocol(lambda);
+                myapps::front::core::configure_protocol(lambda);
+                myapps::front::main::configure_protocol(lambda);
             }
         );
         frame::mprpc::Configuration cfg(pimpl_->scheduler_, proto);
 
-        cfg.client.name_resolve_fnc = frame::mprpc::InternetResolverF(pimpl_->resolver_, ola::front::default_port());
+        cfg.client.name_resolve_fnc = frame::mprpc::InternetResolverF(pimpl_->resolver_, myapps::front::default_port());
 
         cfg.client.connection_start_state = frame::mprpc::ConnectionState::Passive;
 
         {
             auto connection_start_lambda = [this](frame::mprpc::ConnectionContext& _rctx) {
-                _rctx.any() = std::make_tuple(front::core::version, front::main::version, ola::utility::version);
+                _rctx.any() = std::make_tuple(front::core::version, front::main::version, myapps::utility::version);
                 pimpl_->onFrontConnectionStart(_rctx);
             };
             auto connection_stop_lambda = [this](frame::mprpc::ConnectionContext& _ctx) {
@@ -1229,7 +1229,7 @@ bool Engine::Implementation::entry(const fs::path& _path, EntryPointerT& _rentry
         }
         else {
 
-            string storage_id = ola::utility::hex_decode(encoded_storage_id);
+            string storage_id = myapps::utility::hex_decode(encoded_storage_id);
 
             entry_ptr = createEntry(_rentry_ptr, name);
             entry_ptr->pmaster_ = entry_ptr.get();
@@ -1338,11 +1338,11 @@ void Engine::Implementation::releaseApplication(Entry& _rapp_entry)
         //TODO:
         req_ptr->lang_  = "US_en";
         req_ptr->os_id_ = "Windows10x86_64";
-        ola::utility::Build::set_option(req_ptr->fetch_options_, ola::utility::Build::FetchOptionsE::Directory);
-        //ola::utility::Build::set_option(req_ptr->fetch_options_, ola::utility::Build::FetchOptionsE::Name);
-        ola::utility::Build::set_option(req_ptr->fetch_options_, ola::utility::Build::FetchOptionsE::EXEs);
-        ola::utility::Build::set_option(req_ptr->fetch_options_, ola::utility::Build::FetchOptionsE::Flags);
-        ola::utility::Build::set_option(req_ptr->fetch_options_, ola::utility::Build::FetchOptionsE::Shortcuts);
+        myapps::utility::Build::set_option(req_ptr->fetch_options_, myapps::utility::Build::FetchOptionsE::Directory);
+        //myapps::utility::Build::set_option(req_ptr->fetch_options_, myapps::utility::Build::FetchOptionsE::Name);
+        myapps::utility::Build::set_option(req_ptr->fetch_options_, myapps::utility::Build::FetchOptionsE::EXEs);
+        myapps::utility::Build::set_option(req_ptr->fetch_options_, myapps::utility::Build::FetchOptionsE::Flags);
+        myapps::utility::Build::set_option(req_ptr->fetch_options_, myapps::utility::Build::FetchOptionsE::Shortcuts);
         req_ptr->property_vec_.emplace_back("brief");
 
         remoteFetchApplication(new_app_id_vec, req_ptr, 0);
@@ -1858,7 +1858,7 @@ void Engine::Implementation::update()
             req_ptr->app_id_vec_.reserve(_rrecv_msg_ptr->app_vec_.size());
             for (auto&& a : _rrecv_msg_ptr->app_vec_) {
                 auto build_req = app_list_.find(a.unique_).name_;
-                if (build_req != ola::utility::app_item_invalid) {
+                if (build_req != myapps::utility::app_item_invalid) {
                     req_ptr->app_id_vec_.emplace_back(std::move(a.id_), app_list_.find(a.unique_).name_);
                 }
             }
@@ -2012,11 +2012,11 @@ void Engine::Implementation::updateApplications(const UpdatesMapT& _updates_map)
         //TODO:
         req_ptr->lang_  = "en_US";
         req_ptr->os_id_ = "Windows10x86_64";
-        ola::utility::Build::set_option(req_ptr->fetch_options_, ola::utility::Build::FetchOptionsE::Directory);
-        //ola::utility::Build::set_option(req_ptr->fetch_options_, ola::utility::Build::FetchOptionsE::Name);
-        ola::utility::Build::set_option(req_ptr->fetch_options_, ola::utility::Build::FetchOptionsE::EXEs);
-        ola::utility::Build::set_option(req_ptr->fetch_options_, ola::utility::Build::FetchOptionsE::Flags);
-        ola::utility::Build::set_option(req_ptr->fetch_options_, ola::utility::Build::FetchOptionsE::Shortcuts);
+        myapps::utility::Build::set_option(req_ptr->fetch_options_, myapps::utility::Build::FetchOptionsE::Directory);
+        //myapps::utility::Build::set_option(req_ptr->fetch_options_, myapps::utility::Build::FetchOptionsE::Name);
+        myapps::utility::Build::set_option(req_ptr->fetch_options_, myapps::utility::Build::FetchOptionsE::EXEs);
+        myapps::utility::Build::set_option(req_ptr->fetch_options_, myapps::utility::Build::FetchOptionsE::Flags);
+        myapps::utility::Build::set_option(req_ptr->fetch_options_, myapps::utility::Build::FetchOptionsE::Shortcuts);
         req_ptr->property_vec_.emplace_back("brief");
         req_ptr->property_vec_.emplace_back("version");
 
@@ -2055,11 +2055,11 @@ void Engine::Implementation::onFrontListAppsResponse(
     //TODO:
     req_ptr->lang_  = "en_US";
     req_ptr->os_id_ = "Windows10x86_64";
-    ola::utility::Build::set_option(req_ptr->fetch_options_, ola::utility::Build::FetchOptionsE::Directory);
-    //ola::utility::Build::set_option(req_ptr->fetch_options_, ola::utility::Build::FetchOptionsE::Name);
-    ola::utility::Build::set_option(req_ptr->fetch_options_, ola::utility::Build::FetchOptionsE::EXEs);
-    ola::utility::Build::set_option(req_ptr->fetch_options_, ola::utility::Build::FetchOptionsE::Flags);
-    ola::utility::Build::set_option(req_ptr->fetch_options_, ola::utility::Build::FetchOptionsE::Shortcuts);
+    myapps::utility::Build::set_option(req_ptr->fetch_options_, myapps::utility::Build::FetchOptionsE::Directory);
+    //myapps::utility::Build::set_option(req_ptr->fetch_options_, myapps::utility::Build::FetchOptionsE::Name);
+    myapps::utility::Build::set_option(req_ptr->fetch_options_, myapps::utility::Build::FetchOptionsE::EXEs);
+    myapps::utility::Build::set_option(req_ptr->fetch_options_, myapps::utility::Build::FetchOptionsE::Flags);
+    myapps::utility::Build::set_option(req_ptr->fetch_options_, myapps::utility::Build::FetchOptionsE::Shortcuts);
     req_ptr->property_vec_.emplace_back("brief");
     req_ptr->property_vec_.emplace_back("version");
 
@@ -2125,7 +2125,7 @@ string to_system_path(const string& _path)
 
 void Engine::Implementation::insertApplicationEntry(
     std::shared_ptr<main::FetchBuildConfigurationResponse>& _rrecv_msg_ptr,
-    const ola::utility::ApplicationListItem& _app)
+    const myapps::utility::ApplicationListItem& _app)
 {
     //NOTE: because of the entry_ptr, which after inserting it into root entry
     //will have use count == 2, the application cannot be deleted on releaseApplication
@@ -2144,11 +2144,11 @@ void Engine::Implementation::insertApplicationEntry(
 
     bool is_invisible = false;
     if (
-        _app.isFlagSet(ola::utility::AppFlagE::Default) &&
+        _app.isFlagSet(myapps::utility::AppFlagE::Default) &&
         _rrecv_msg_ptr->configuration_.exe_vec_.size() == 1 && 
         _rrecv_msg_ptr->configuration_.exe_vec_[0] == "ola_updater.exe" &&
         _rrecv_msg_ptr->configuration_.property_vec_.size() >= 2 &&
-        _rrecv_msg_ptr->configuration_.property_vec_[1].second == ola::utility::version_full()
+        _rrecv_msg_ptr->configuration_.property_vec_[1].second == myapps::utility::version_full()
     ) {
         entry_ptr->flagSet(EntryFlagsE::Invisible);
         is_invisible = true;
@@ -2382,4 +2382,4 @@ void Engine::Implementation::createEntryData(
 
 } //namespace service
 } //namespace client
-} //namespace ola
+} //namespace myapps

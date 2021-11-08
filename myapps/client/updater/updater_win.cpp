@@ -30,8 +30,8 @@ processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
 #include <mutex>
 #include <fstream>
 #include <boost/filesystem.hpp>
-#include "ola/client/utility/locale.hpp"
-#include "ola/common/utility/encode.hpp"
+#include "myapps/client/utility/locale.hpp"
+#include "myapps/common/utility/encode.hpp"
 
 using namespace std;
 
@@ -287,9 +287,9 @@ bool file_copy(LPWSTR _src_path, HWND _hProgCtrl, wstring& _rdes_path) {
 bool file_validate(const wstring& _des_path, HWND _hProgCtrl, const LPWSTR _sum) {
 	ifstream ifs(_des_path, ios_base::binary);
 	if (ifs) {
-		auto sha_sum = ola::utility::sha256hex(ifs);
+		auto sha_sum = myapps::utility::sha256hex(ifs);
 		::SendNotifyMessage(_hProgCtrl, PBM_SETPOS, (WPARAM)(INT)(100), 0);
-		return sha_sum == ola::client::utility::narrow(_sum);
+		return sha_sum == myapps::client::utility::narrow(_sum);
 	}
 	return false;
 }

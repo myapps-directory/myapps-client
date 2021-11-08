@@ -6,7 +6,7 @@
 #include <vector>
 
 using namespace std;
-using namespace ola::client::service::file_cache;
+using namespace myapps::client::service::file_cache;
 namespace {
 
 struct FileStub : FileData {

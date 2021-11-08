@@ -12,7 +12,7 @@
     <Fragment>
     <Directory Id="TARGETDIR" Name="SourceDir">
             <Directory Id="LocalAppDataFolder">
-                <Directory Id="INSTALLFOLDER" Name="OLA" />
+                <Directory Id="INSTALLFOLDER" Name="MYAPPS" />
             </Directory>
         </Directory>
     </Fragment>
@@ -55,12 +55,12 @@
     
     <CustomAction Id='LaunchService' Directory='CM_DP_bin'
               Return="asyncNoWait"
-              ExeCommand='[CM_DP_bin]ola_client_service.exe'/>
+              ExeCommand='[CM_DP_bin]myapps_service_filesystem.exe'/>
     
-    <CustomAction Id="KillService" Directory='CM_DP_bin' Execute="immediate" ExeCommand="taskkill.exe /F /IM ola_client_service.exe" Return="ignore"/>
+    <CustomAction Id="KillService" Directory='CM_DP_bin' Execute="immediate" ExeCommand="taskkill.exe /F /IM myapps_service_filesystem.exe" Return="ignore"/>
     
     <!-- This works on notepad.exe - client_service should handle VM_CLOSE message: -->
-    <util:CloseApplication Id="CloseApp" CloseMessage="yes" Target="ola_client_service.exe" RebootPrompt="no">
+    <util:CloseApplication Id="CloseApp" CloseMessage="yes" Target="myapps_service_filesystem.exe" RebootPrompt="no">
         Installed
     </util:CloseApplication>
 
@@ -70,11 +70,11 @@
       <Custom Action='UninstallCleanup' After='WixCloseApplications'>REMOVE = "ALL" AND NOT UPGRADINGPRODUCTCODE</Custom>
     </InstallExecuteSequence>
     
-    <CustomAction Id="UninstallCleanup" BinaryKey="ola_wix_custom_action_dll" DllEntry="UninstallCleanup"/>
+    <CustomAction Id="UninstallCleanup" BinaryKey="myapps_wix_custom_action_dll" DllEntry="UninstallCleanup"/>
     
   </CPackWiXFragment>
 
-  <CPackWiXFragment Id="CM_CP_bin.ola_client_cli.exe">
+  <CPackWiXFragment Id="CM_CP_bin.myapps_cli.exe">
     <Environment Id="PATH" Name="PATH" Value='[CM_DP_bin]' Permanent="yes" Part="last" Action="set" System="no" />
   </CPackWiXFragment>
 </CPackWiXPatch>

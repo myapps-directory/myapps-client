@@ -1,5 +1,5 @@
 #include "file_cache.hpp"
-#include "ola/common/utility/encode.hpp"
+#include "myapps/common/utility/encode.hpp"
 #include "solid/system/cassert.hpp"
 #include <algorithm>
 #include <chrono>
@@ -14,13 +14,13 @@
 
 using namespace std;
 
-namespace ola {
+namespace myapps {
 namespace client {
 namespace service {
 namespace file_cache {
 
 namespace {
-const solid::LoggerT logger("ola::client::file_cache");
+const solid::LoggerT logger("myapps::client::file_cache");
 
 struct FileStub;
 
@@ -994,4 +994,4 @@ bool FileData::readFromCache(char* _pbuf, uint64_t _offset, size_t _length, size
 } //namespace file_cache
 } //namespace service
 } //namespace client
-} //namespace ola
+} //namespace myapps

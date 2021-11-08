@@ -5,7 +5,7 @@
 #include <solid/system/pimpl.hpp>
 #include <string>
 
-namespace ola {
+namespace myapps {
 namespace client {
 namespace service {
 
@@ -29,4 +29,4 @@ private:
 
 } //namespace service
 } //namespace client
-} //namespace ola
+} //namespace myapps

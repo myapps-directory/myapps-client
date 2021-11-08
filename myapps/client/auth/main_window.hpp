@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-namespace ola {
+namespace myapps {
 namespace client {
 namespace auth {
 
@@ -109,7 +109,7 @@ private:
 };
 } //namespace auth
 } //namespace client
-} //namespace ola
+} //namespace myapps
 
-Q_DECLARE_METATYPE(ola::client::auth::CaptchaPointerT);
-Q_DECLARE_METATYPE(ola::client::auth::AmendFetchPointerT);
+Q_DECLARE_METATYPE(myapps::client::auth::CaptchaPointerT);
+Q_DECLARE_METATYPE(myapps::client::auth::AmendFetchPointerT);

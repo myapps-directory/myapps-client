@@ -21,15 +21,15 @@
 #include <windows.h>
 #pragma comment(lib, "user32.lib")
 
-#include "ola/common/utility/version.hpp"
+#include "myapps/common/utility/version.hpp"
 
 #include "solid/system/log.hpp"
 
-namespace ola {
+namespace myapps {
 namespace client {
 namespace auth {
 namespace {
-const solid::LoggerT logger("ola::client::auth::widget");
+const solid::LoggerT logger("myapps::client::auth::widget");
 
 
 enum struct ActionE {
@@ -364,7 +364,7 @@ MainWindow::MainWindow(QWidget* parent)
 
         oss << utility::VERSION_MAJOR << '.' << utility::VERSION_MINOR;
         //oss << " - " << client::utility::version_vcs_branch();
-        oss << " - <a href=https://github.com/vipalade/ola-client/tree/" << utility::version_vcs_commit()<<">"<< utility::version_vcs_commit() << "</a>";
+        oss << " - <a href=https://github.com/myapps-space/myapps-client/tree/" << utility::version_vcs_commit()<<">"<< utility::version_vcs_commit() << "</a>";
 
         pimpl_->about_form_.label_version->setText(QString::fromStdString(oss.str()));
     }
@@ -794,4 +794,4 @@ void MainWindow::resetTextEdited(const QString& text)
 
 } //namespace auth
 } //namespace client
-} //namespace ola
+} //namespace myapps

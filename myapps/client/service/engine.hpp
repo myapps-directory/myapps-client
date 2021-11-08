@@ -6,9 +6,9 @@
 #include <string>
 
 
-#include "ola/common/ola_front_protocol_main.hpp"
+#include "myapps/common/front_protocol_main.hpp"
 
-namespace ola {
+namespace myapps {
 namespace client {
 namespace service {
 
@@ -95,4 +95,4 @@ public:
 
 } //namespace service
 } //namespace client
-} //namespace ola
+} //namespace myapps

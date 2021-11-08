@@ -3,7 +3,7 @@
 #include <iostream>
 
 using namespace std;
-using namespace ola::client::service::file_cache;
+using namespace myapps::client::service::file_cache;
 
 void test_namefy(const std::string& _path)
 {

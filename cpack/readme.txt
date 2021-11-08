@@ -1,3 +1,3 @@
-ola-server infrastructure service:
+myapps-server infrastructure service:
 
 Releases:
