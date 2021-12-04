@@ -145,6 +145,7 @@ struct Engine {
     bool onAmendStart(string _user, string _email, const string& _pass, const string& _new_pass);
     bool onValidateStart(const string& _code);
     bool onAuthFetchStart();
+    bool onDeleteAccountStart(const string& _pass, const string& _reason);
 
 
     void onCaptchaResponse(
@@ -156,7 +157,10 @@ struct Engine {
         frame::mprpc::ConnectionContext&      _rctx,
         std::shared_ptr<front::core::AuthResponse>& _rrecv_msg_ptr,
         ErrorConditionT const&                _rerror);
-
+    void onDeleteAccountResponse(
+        frame::mprpc::ConnectionContext&        _rctx,
+        std::shared_ptr<front::core::Response>& _rrecv_msg_ptr,
+        ErrorConditionT const&                  _rerror);
     void loadAuthData();
     void storeAuthData();
 
@@ -310,6 +314,10 @@ int main(int argc, char* argv[])
 
         config.amend_fnc_ = [&engine](const string& _user, const string& _email, const string& _pass, const string& _new_pass) {
             return engine.onAmendStart(_user, _email, myapps::utility::sha256hex(_pass), _new_pass.empty() ? _new_pass : myapps::utility::sha256hex(_new_pass));
+        };
+
+        config.delete_account_fnc_ = [&engine](const string& _pass, const string& _reason)  {
+            return engine.onDeleteAccountStart(_pass, _reason);
         };
 
         config.validate_fnc_ = [&engine](const string& _code) {
@@ -602,6 +610,7 @@ void front_configure_service(Engine& _rengine, const Parameters& _params, frame:
     cfg.client.connection_start_state     = frame::mprpc::ConnectionState::Passive;
     cfg.pool_max_active_connection_count  = 1;
     cfg.pool_max_pending_connection_count = 1;
+    cfg.connection_timeout_keepalive_seconds = 30;
 
     {
         auto connection_stop_lambda = [&_rengine](frame::mprpc::ConnectionContext& _rctx) {
@@ -713,6 +722,7 @@ bool Engine::onAuthFetchStart()
     front_rpc_service_.sendRequest(front_recipient_id_, req_ptr, lambda);
     return true;
 }
+
 bool Engine::onAmendStart(string _user, string _email, const string& _pass, const string& _new_pass) 
 {
     solid::to_lower(_user);
@@ -747,10 +757,51 @@ bool Engine::onAmendStart(string _user, string _email, const string& _pass, cons
         
         onAuthResponse(_rctx, _rrecv_msg_ptr, _rerror);
     };
-    front_rpc_service_.sendRequest(auth_endpoint_.c_str(), req_ptr, lambda);
+    front_rpc_service_.sendRequest(auth_endpoint_.c_str(), req_ptr, lambda, {frame::mprpc::MessageFlagsE::AwaitResponse, frame::mprpc::MessageFlagsE::OneShotSend});
 
     return false;
 }
+
+bool Engine::onDeleteAccountStart(const string& _pass, const string& _reason)
+{
+    auto req_ptr = std::make_shared<front::auth::DeleteRequest>();
+    req_ptr->ticket_ = auth_token_;
+    req_ptr->pass_ = _pass;
+    if(_reason.size() <= 1000){
+        req_ptr->reason_ = _reason;
+    }else{
+        req_ptr->reason_.assign(_reason.data(), 1000);
+    }
+
+    auto lambda = [this](
+                      frame::mprpc::ConnectionContext&           _rctx,
+                      std::shared_ptr<front::auth::DeleteRequest>&  _rsent_msg_ptr,
+                      std::shared_ptr<front::core::Response>& _rrecv_msg_ptr,
+                      ErrorConditionT const&                     _rerror) {
+       
+        
+        onDeleteAccountResponse(_rctx, _rrecv_msg_ptr, _rerror);
+    };
+
+    front_rpc_service_.sendRequest(auth_endpoint_.c_str(), req_ptr, lambda, {frame::mprpc::MessageFlagsE::AwaitResponse, frame::mprpc::MessageFlagsE::OneShotSend});
+
+    return true;
+}
+
+void Engine::onDeleteAccountResponse(
+    frame::mprpc::ConnectionContext&      _rctx,
+    std::shared_ptr<front::core::Response>& _rrecv_msg_ptr,
+    ErrorConditionT const&                _rerror)
+{
+    if(_rrecv_msg_ptr){
+        main_window_.onDeleteAccountResponse(_rrecv_msg_ptr->message_);
+    }else if(_rerror){
+        main_window_.onDeleteAccountResponse(_rerror.message());
+    }else{
+        main_window_.onDeleteAccountResponse("Unknown error");
+    }
+}
+
 bool Engine::onValidateStart(const string& _code)
 {
     auto req_ptr = std::make_shared<front::auth::ValidateRequest>();
@@ -776,6 +827,8 @@ bool Engine::onValidateStart(const string& _code)
     }
     return false;
 }
+
+
 
 void Engine::onConnectionStart(frame::mprpc::ConnectionContext& _ctx)
 {
