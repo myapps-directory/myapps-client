@@ -16,7 +16,7 @@ using namespace std;
 static TCHAR szWindowClass[] = _T("DesktopApp");
 
 // The string that appears in the application's title bar.
-static TCHAR szTitle[] = _T("OLA Example Basic");
+static TCHAR szTitle[] = _T("MyApps Example Basic");
 
 HINSTANCE hInst;
 

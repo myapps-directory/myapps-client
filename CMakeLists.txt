@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.15 FATAL_ERROR)
 cmake_policy(SET CMP0091 NEW)
 cmake_policy(SET CMP0115 NEW)
 
-project(OlaClient VERSION 0.11)
+project(MyAppsClient VERSION 0.12)
 
 set(EXTERNAL_DIR "" CACHE PATH "External dependencies folder")
 
@@ -56,16 +56,16 @@ set(QT5PREFIX_DIR "" CACHE PATH "QT Prefix directory")
 
 message("project build type: ${CMAKE_BUILD_TYPE}")
 
-set(OLA_FRONT_URL "front.myapps.space:443" CACHE STRING "OLA Front Default URL")
+set(MYAPPS_FRONT_URL "front.myapps.space:443" CACHE STRING "MyApps.space Front Default URL")
 set(EXTRA_DEFINITIONS "${EXTRA_DEFINITIONS}" CACHE STRING "Extra compiler definitions")
 add_definitions(${EXTRA_DEFINITIONS})
 
 ###############################################################################
 # Build configuration
 ###############################################################################
-set(OLA_CLIENT_VERSION_MAJOR ${PROJECT_VERSION_MAJOR})
-set(OLA_CLIENT_VERSION_MINOR ${PROJECT_VERSION_MINOR})
-set(OLA_CLIENT_VERSION_PATCH ${PROJECT_VERSION_PATCH})
+set(MYAPPS_CLIENT_VERSION_MAJOR ${PROJECT_VERSION_MAJOR})
+set(MYAPPS_CLIENT_VERSION_MINOR ${PROJECT_VERSION_MINOR})
+set(MYAPPS_CLIENT_VERSION_PATCH ${PROJECT_VERSION_PATCH})
 
 ###############################################################################
 # Build external projects
@@ -151,7 +151,7 @@ set( CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin )
 ###############################################################################
 # cmake_config.hpp support
 include(cmake/check.config.cmake)
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/cmake/config.hpp.in ${CMAKE_BINARY_DIR}/ola/client/client_config.hpp)
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/cmake/config.hpp.in ${CMAKE_BINARY_DIR}/myapps/client/client_config.hpp)
 
 ###############################################################################
 
@@ -177,7 +177,7 @@ set(CPACK_PACKAGE_NAME                  "MyApps.space")
 set(CPACK_PACKAGE_VERSION               "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}")
 set(CPACK_PACKAGE_FILE_NAME             "${CPACK_PACKAGE_NAME}-${CMAKE_BUILD_TYPE}-${CPACK_PACKAGE_VERSION}-${CMAKE_SYSTEM_PROCESSOR}")
 
-add_subdirectory(ola)
+add_subdirectory(myapps)
 add_subdirectory(example)
 add_subdirectory(cpack/wix)
 ###############################################################################
@@ -198,21 +198,21 @@ install (FILES ${CMAKE_CURRENT_SOURCE_DIR}/cpack/readme.txt DESTINATION "/")
 
 message(STATUS "Generating ${CPACK_GENERATOR}  package")
 
-string(TIMESTAMP OLA_YMDHM "%y%m%d%H%M")
-string(TIMESTAMP OLA_YEAR "%Y")
+string(TIMESTAMP YMDHM "%y%m%d%H%M")
+#string(TIMESTAMP YEAR "%Y")
 
 set(CPACK_PACKAGE_VENDOR                "MyApps.space")
 set(CPACK_PACKAGE_VERSION_MAJOR         "${PROJECT_VERSION_MAJOR}")
 set(CPACK_PACKAGE_VERSION_MINOR         "${PROJECT_VERSION_MINOR}")
 set(CPACK_PACKAGING_INSTALL_PREFIX      ${CMAKE_CURRENT_BINARY_DIR})
-set(CPACK_RELEASE_VER                   ${OLA_YMDHM})
-set(CPACK_PACKAGE_EXECUTABLES           "ola_client_cli" "MyApps.space CLI" "ola_client_auth" "MyApps.space Login" "ola_client_service" "MyApps.space Service")
+set(CPACK_RELEASE_VER                   ${YMDHM})
+set(CPACK_PACKAGE_EXECUTABLES           "myapps_cli" "MyApps.space CLI" "myapps_auth" "MyApps.space Login" "myapps_service_filesystem" "MyApps.space Applications Virtual FileSystem Service")
 set(CPACK_PACKAGE_CONTACT               "office@myapps.space")
 set(CPACK_PACKAGING_INSTALL_PREFIX      ${PACKAGING_INSTALL_PREFIX})
 SET(CPACK_PACKAGE_INSTALL_DIRECTORY     "MyApps.space")
-set(CPACK_PACKAGE_DESCRIPTION_SUMMARY   "MyApps.space - On Line Application Service")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY   "MyApps.space - Applications Virtual FileSystem Service")
 
-set(CPACK_WIX_TEMPLATE                  "${CMAKE_CURRENT_SOURCE_DIR}/cpack/wix/ola.wxs")
+set(CPACK_WIX_TEMPLATE                  "${CMAKE_CURRENT_SOURCE_DIR}/cpack/wix/myapps.wxs")
 #set(CPACK_WIX_PRODUCT_GUID              "80D72FCC-5083-406C-B592-BE442CEA4708")
 SET(CPACK_WIX_UPGRADE_GUID              "5C004871-28A4-43D5-947E-10F080CED048")
 SET(CPACK_WIX_LICENSE_RTF               "${CMAKE_CURRENT_SOURCE_DIR}/cpack/wix/license.rtf")
@@ -230,7 +230,7 @@ set(CPACK_WIX_EXTRA_SOURCES             "${CMAKE_BINARY_DIR}/cpack/wix/custom_ac
 
 
 if(WIN32)
-    set(WIX_BUNDLE_ICON "${CMAKE_SOURCE_DIR}/ola/client/auth/auth.ico")
+    set(WIX_BUNDLE_ICON "${CMAKE_SOURCE_DIR}/myapps/client/auth/auth.ico")
     set(WIX_BUNDLE_WINFSP_MSI src/winfsp-1.9.21096.msi)
     set(WIX_BUNDLE_WINFSP_URL https://github.com/billziss-gh/winfsp/releases/download/v1.9/winfsp-1.9.21096.msi)
 
@@ -269,20 +269,20 @@ if(WIN32)
     
 endif()
 
-#set(CPACK_WIX_EXTRA_SOURCES             "${CMAKE_CURRENT_SOURCE_DIR}/cpack/wix/ola_dirs.wxs")
+#set(CPACK_WIX_EXTRA_SOURCES             "${CMAKE_CURRENT_SOURCE_DIR}/cpack/wix/myapps_dirs.wxs")
 #set(CPACK_WIX_SKIP_PROGRAM_FOLDER       TRUE)
 #set(CPACK_WIX_PROGRAM_MENU_FOLDER       "")
 if(CMAKE_BUILD_TYPE MATCHES "debug")
     if (MSVC)
         #string(REGEX REPLACE "Visual Studio ([0-9]+).*" "\\1" MSVC_VERSION "${CMAKE_GENERATOR}")
-        set(OLA_MSVC_VERSION 140)
+        set(MYAPPS_MSVC_VERSION 140)
         # Starting with Visual Studio 2015 (MSVC_VERSION==14) the msvcr dll has been renamed to vcruntime.
-        find_file(OLA_VCRUNTIME_DLL "vcruntime${OLA_MSVC_VERSION}_1.dll" PATHS "$ENV{SYSTEMROOT}\\System32")
-        install(FILES  ${OLA_VCRUNTIME_DLL} DESTINATION "bin")
-        find_file(OLA_VCRUNTIMED_DLL "vcruntime${OLA_MSVC_VERSION}_1d.dll" PATHS "$ENV{SYSTEMROOT}\\System32")
-        install(FILES  ${OLA_VCRUNTIMED_DLL} DESTINATION "bin")
-        find_file(OLA_VCP_DLL "msvcp${OLA_MSVC_VERSION}_1d.dll" PATHS "$ENV{SYSTEMROOT}\\System32")
-        install(FILES  ${OLA_VCP_DLL} DESTINATION "bin")
+        find_file(MYAPPS_VCRUNTIME_DLL "vcruntime${MYAPPS_MSVC_VERSION}_1.dll" PATHS "$ENV{SYSTEMROOT}\\System32")
+        install(FILES  ${MYAPPS_VCRUNTIME_DLL} DESTINATION "bin")
+        find_file(MYAPPS_VCRUNTIMED_DLL "vcruntime${MYAPPS_MSVC_VERSION}_1d.dll" PATHS "$ENV{SYSTEMROOT}\\System32")
+        install(FILES  ${MYAPPS_VCRUNTIMED_DLL} DESTINATION "bin")
+        find_file(MYAPPS_VCP_DLL "msvcp${MYAPPS_MSVC_VERSION}_1d.dll" PATHS "$ENV{SYSTEMROOT}\\System32")
+        install(FILES  ${MYAPPS_VCP_DLL} DESTINATION "bin")
     endif()
 endif()
 

@@ -1,7 +1,7 @@
 # additional target to perform clang-format run, requires clang-format
 
 # get all project files
-file(GLOB_RECURSE ALL_SOURCE_FILES ola/*.hpp ola/*.cpp)
+file(GLOB_RECURSE ALL_SOURCE_FILES myapps/*.hpp myapps/*.cpp)
 foreach (SOURCE_FILE ${ALL_SOURCE_FILES})
     #message("Source file: ${SOURCE_FILE}")
     string(FIND ${SOURCE_FILE} ${CMAKE_CURRENT_BINARY_DIR} PROJECT_TRDPARTY_DIR_FOUND)
