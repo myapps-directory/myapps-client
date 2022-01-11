@@ -290,6 +290,7 @@ MainWindow::MainWindow(QWidget* parent)
     connect(this, &MainWindow::captchaSignal, this, &MainWindow::captchaSlot, Qt::QueuedConnection);
     connect(this, &MainWindow::amendFetchSignal, this, &MainWindow::amendFetchSlot, Qt::QueuedConnection);
     connect(this, &MainWindow::emailValidationResentSignal, this, &MainWindow::emailValidationResentSlot, Qt::QueuedConnection);
+    connect(this, &MainWindow::deleteAccountSignal, this, &MainWindow::deleteAccountSlot, Qt::QueuedConnection);
 
     connect(&pimpl_->home_action_, &QAction::triggered, this, &MainWindow::goAuthSlot);
     connect(&pimpl_->create_action_, &QAction::triggered, this, &MainWindow::goCreateSlot);
@@ -310,12 +311,15 @@ MainWindow::MainWindow(QWidget* parent)
     connect(pimpl_->create_form_.password2Edit, &QLineEdit::textChanged, this, &MainWindow::createTextEdited);
     connect(pimpl_->create_form_.codeEdit, &QLineEdit::textChanged, this, &MainWindow::createTextEdited);
 
-    connect(pimpl_->amend_form_.userEdit, &QLineEdit::textChanged, this, &MainWindow::amendTextEdited);
-    connect(pimpl_->amend_form_.email1Edit, &QLineEdit::textChanged, this, &MainWindow::amendTextEdited);
-    connect(pimpl_->amend_form_.email2Edit, &QLineEdit::textChanged, this, &MainWindow::amendTextEdited);
-    connect(pimpl_->amend_form_.passwordEdit, &QLineEdit::textChanged, this, &MainWindow::amendTextEdited);
-    connect(pimpl_->amend_form_.newPassword1Edit, &QLineEdit::textChanged, this, &MainWindow::amendTextEdited);
-    connect(pimpl_->amend_form_.newPassword2Edit, &QLineEdit::textChanged, this, &MainWindow::amendTextEdited);
+    connect(pimpl_->amend_form_.userEdit, &QLineEdit::textChanged, this, &MainWindow::amendLineEdited);
+    connect(pimpl_->amend_form_.email1Edit, &QLineEdit::textChanged, this, &MainWindow::amendLineEdited);
+    connect(pimpl_->amend_form_.email2Edit, &QLineEdit::textChanged, this, &MainWindow::amendLineEdited);
+    connect(pimpl_->amend_form_.passwordEdit, &QLineEdit::textChanged, this, &MainWindow::amendLineEdited);
+    connect(pimpl_->amend_form_.newPassword1Edit, &QLineEdit::textChanged, this, &MainWindow::amendLineEdited);
+    connect(pimpl_->amend_form_.newPassword2Edit, &QLineEdit::textChanged, this, &MainWindow::amendLineEdited);
+    connect(pimpl_->amend_form_.reasonEdit, &QTextEdit::textChanged, this, &MainWindow::amendTextEdited);
+    connect(pimpl_->amend_form_.editRadioButton, &QAbstractButton::toggled, this, &MainWindow::editAccountOptionChanged);
+    connect(pimpl_->amend_form_.deleteRadioButton, &QAbstractButton::toggled, this, &MainWindow::editAccountOptionChanged);
 
     connect(pimpl_->reset_form_.tokenEdit, &QLineEdit::textChanged, this, &MainWindow::resetTextEdited);
     connect(pimpl_->reset_form_.newPassword1Edit, &QLineEdit::textChanged, this, &MainWindow::resetTextEdited);
@@ -347,6 +351,8 @@ MainWindow::MainWindow(QWidget* parent)
     pimpl_->home_form_.authButton->setEnabled(false);
     pimpl_->create_form_.createButton->setEnabled(false);
     pimpl_->home_form_.validateEmailButton->setEnabled(false);
+
+    pimpl_->amend_form_.reasonEdit->setVisible(false);
 
     this->addToolBar(&pimpl_->tool_bar_);
 
@@ -481,17 +487,32 @@ void MainWindow::onValidateClick()
 
 void MainWindow::onAmendClick()
 {
-    const auto user = pimpl_->amend_form_.userEdit->text().toStdString();
-    const auto email        = pimpl_->amend_form_.email1Edit->text().toStdString();
-    const auto password     = pimpl_->amend_form_.passwordEdit->text().toStdString();
-    const auto new_password = pimpl_->amend_form_.newPassword1Edit->text().toStdString();
+    if (pimpl_->amend_form_.editRadioButton->isChecked()) {
+        const auto user         = pimpl_->amend_form_.userEdit->text().toStdString();
+        const auto email        = pimpl_->amend_form_.email1Edit->text().toStdString();
+        const auto password     = pimpl_->amend_form_.passwordEdit->text().toStdString();
+        const auto new_password = pimpl_->amend_form_.newPassword1Edit->text().toStdString();
 
-    const bool ok = pimpl_->config_.amend_fnc_(user, email, password, new_password);
-    if (ok) {
-        pimpl_->amend_form_.amendButton->setEnabled(false);
-        pimpl_->amend_form_.passwordEdit->setText("");
-        pimpl_->amend_form_.newPassword1Edit->setText("");
-        pimpl_->amend_form_.newPassword2Edit->setText("");
+        const bool ok = pimpl_->config_.amend_fnc_(user, email, password, new_password);
+        if (ok) {
+            pimpl_->amend_form_.amendButton->setEnabled(false);
+            pimpl_->amend_form_.passwordEdit->setText("");
+            pimpl_->amend_form_.newPassword1Edit->setText("");
+            pimpl_->amend_form_.newPassword2Edit->setText("");
+        }
+    } else if (pimpl_->amend_form_.deleteRadioButton->isChecked()) {
+        QMessageBox msgBox;
+        msgBox.setText("We're sorry to loose you as a client.\nThank you for your feedback.");
+        msgBox.setInformativeText("If you change your mind, press Cancel, otherwise press Ok and you will be disconnected on all MyApps instances!");
+        msgBox.setStandardButtons(QMessageBox::Cancel | QMessageBox::Ok);
+        msgBox.setDefaultButton(QMessageBox::Cancel);
+        msgBox.setIcon(QMessageBox::Critical);
+        int ret = msgBox.exec();
+        if (ret == QMessageBox::Ok) {
+            const auto password = pimpl_->amend_form_.passwordEdit->text().toStdString();
+            const auto reason   = pimpl_->amend_form_.reasonEdit->toPlainText().toStdString();
+            pimpl_->config_.delete_account_fnc_(password, reason);
+        }
     }
 }
 
@@ -591,6 +612,32 @@ void MainWindow::onAuthValidate()
 void MainWindow::closeEvent(QCloseEvent*)
 {
     QApplication::quit();
+}
+
+void MainWindow::editAccountOptionChanged(bool checked)
+{
+    if (!checked) {
+        return;//ignore unchecked events
+    }
+
+    if (pimpl_->amend_form_.editRadioButton->isChecked()) {
+        pimpl_->amend_form_.email1Edit->setVisible(true);
+        pimpl_->amend_form_.email2Edit->setVisible(true);
+        pimpl_->amend_form_.userEdit->setVisible(true);
+        pimpl_->amend_form_.passwordEdit->setVisible(true);
+        pimpl_->amend_form_.newPassword1Edit->setVisible(true);
+        pimpl_->amend_form_.newPassword2Edit->setVisible(true);
+        pimpl_->amend_form_.reasonEdit->setVisible(false);
+    } else if (pimpl_->amend_form_.deleteRadioButton->isChecked()) {
+        pimpl_->amend_form_.email1Edit->setVisible(false);
+        pimpl_->amend_form_.email2Edit->setVisible(false);
+        pimpl_->amend_form_.userEdit->setVisible(false);
+        pimpl_->amend_form_.passwordEdit->setVisible(true);
+        pimpl_->amend_form_.newPassword1Edit->setVisible(false);
+        pimpl_->amend_form_.newPassword2Edit->setVisible(false);
+        pimpl_->amend_form_.reasonEdit->setVisible(true);
+    }
+    amendTextEdited();
 }
 
 bool MainWindow::eventFilter(QObject* obj, QEvent* event)
@@ -703,6 +750,25 @@ void MainWindow::onEmailValidationResent()
     emit emailValidationResentSignal();
 }
 
+void MainWindow::onDeleteAccountResponse(const std::string& _error)
+{
+    emit deleteAccountSignal(QString::fromStdString(_error));
+}
+
+void MainWindow::deleteAccountSlot(const QString& error)
+{
+    if (error.isEmpty()) {
+        //success
+        goAuthSlot(true);//wait for disconnect from server
+    } else {
+        QMessageBox msgBox;
+        msgBox.setText("Delete Account Failed. Please retry later.");
+        msgBox.setInformativeText(error);
+        msgBox.setIcon(QMessageBox::Critical);
+        msgBox.exec();
+    }
+}
+
 void MainWindow::captchaSlot(CaptchaPointerT _captcha_ptr)
 {
     solid_log(logger, Info, "size = " << _captcha_ptr->size());
@@ -766,17 +832,24 @@ void MainWindow::emailValidationResentSlot()
     pimpl_->home_form_.validateEmailResendButton->setEnabled(true);
 }
 
-void MainWindow::amendTextEdited(const QString& text)
+void MainWindow::amendLineEdited(const QString& text) {
+    amendTextEdited();
+}
+
+void MainWindow::amendTextEdited()
 {
     bool enable = true;
-
-    enable = enable && !pimpl_->amend_form_.userEdit->text().isEmpty();
-    enable = enable && !pimpl_->amend_form_.email1Edit->text().isEmpty();
-    enable = enable && !pimpl_->amend_form_.passwordEdit->text().isEmpty();
-    enable = enable && email_check(pimpl_->amend_form_.email1Edit->text().toStdString());
-    enable = enable && pimpl_->amend_form_.email1Edit->text() == pimpl_->amend_form_.email2Edit->text();
-    enable = enable && pimpl_->amend_form_.newPassword1Edit->text() == pimpl_->amend_form_.newPassword2Edit->text();
-
+    if (pimpl_->amend_form_.editRadioButton->isChecked()) {
+        enable = enable && !pimpl_->amend_form_.userEdit->text().isEmpty();
+        enable = enable && !pimpl_->amend_form_.email1Edit->text().isEmpty();
+        enable = enable && !pimpl_->amend_form_.passwordEdit->text().isEmpty();
+        enable = enable && email_check(pimpl_->amend_form_.email1Edit->text().toStdString());
+        enable = enable && pimpl_->amend_form_.email1Edit->text() == pimpl_->amend_form_.email2Edit->text();
+        enable = enable && pimpl_->amend_form_.newPassword1Edit->text() == pimpl_->amend_form_.newPassword2Edit->text();
+    } else if (pimpl_->amend_form_.deleteRadioButton->isChecked()) {
+        enable = enable && !pimpl_->amend_form_.passwordEdit->text().isEmpty();
+        enable = enable && !pimpl_->amend_form_.reasonEdit->toPlainText().isEmpty();
+    }
     pimpl_->amend_form_.amendButton->setEnabled(enable);
 }
 

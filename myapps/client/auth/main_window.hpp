@@ -29,6 +29,7 @@ struct Configuration {
     using LogoutFunctionT = std::function<bool()>;
     using ForgotFunctionT = std::function<bool(const std::string&, const std::string&)>;
     using ResetFunctionT = std::function<bool(const std::string&, const std::string&, const std::string&)>;
+    using DeleteAccountFunctionT = std::function<bool(const std::string&, const std::string&)>;
 
     QString                 login_;
     AuthenticateFunctionT authenticate_fnc_;
@@ -40,6 +41,7 @@ struct Configuration {
     LogoutFunctionT         logout_fnc_;
     ForgotFunctionT         forgot_fnc_;
     ResetFunctionT          reset_fnc_;
+    DeleteAccountFunctionT  delete_account_fnc_;
 };
 
 class MainWindow : public QMainWindow {
@@ -60,6 +62,7 @@ public:
     void onCaptcha(std::vector<uint8_t>&& _captcha_image);
     void onAmendFetch(const std::string& _user, const std::string& _email);
     void onEmailValidationResent();
+    void onDeleteAccountResponse(const std::string& _error);
  
 signals:
     void closeSignal();
@@ -70,6 +73,8 @@ signals:
     void captchaSignal(CaptchaPointerT);
     void amendFetchSignal(AmendFetchPointerT);
     void emailValidationResentSignal();
+    void deleteAccountSignal(const QString&);
+
 private slots:
     void onAuthClick();
     void onLogoutClick();
@@ -96,9 +101,14 @@ private slots:
     void authTextEdited(const QString& text);
     void createTextEdited(const QString& text);
     void validateTextEdited(const QString& text);
-    void amendTextEdited(const QString& text);
+    void amendLineEdited(const QString& text);
+    void amendTextEdited();
     void resetTextEdited(const QString& text);
     void emailValidationResentSlot();
+    void editAccountOptionChanged(bool checked);
+
+    void deleteAccountSlot(const QString& error);
+
 private:
     void closeEvent(QCloseEvent*) override;
     bool eventFilter(QObject* obj, QEvent* event) override;
