@@ -13,11 +13,12 @@
 #include "solid/frame/mprpc/mprpcsocketstub_openssl.hpp"
 #include "solid/frame/mprpc/mprpcprotocol_serialization_v3.hpp"
 
+#include "solid/utility/workpool.hpp"
+
 #include "myapps/common/utility/encode.hpp"
 
 #include "myapps/common/utility/version.hpp"
 
-#include "myapps/client/auth/auth_protocol.hpp"
 #include "myapps/client/utility/locale.hpp"
 #include "myapps/client/utility/app_list_file.hpp"
 
@@ -665,7 +666,7 @@ struct Engine::Implementation {
     Configuration             config_;
     AioSchedulerT             scheduler_;
     frame::Manager            manager_;
-    CallPool<void()>          workpool_;
+    lockfree::CallPoolT<void(), void> workpool_;
     frame::aio::Resolver      resolver_;
     frame::mprpc::ServiceT    front_rpc_service_;
     mutex                     mutex_;
@@ -691,8 +692,8 @@ public:
     Implementation(
         const Configuration& _rcfg)
         : config_(_rcfg)
-        , workpool_{WorkPoolConfiguration{}, 1}
-        , resolver_{workpool_}
+        , workpool_{WorkPoolConfiguration{1}}
+        , resolver_{[this](std::function<void()>&& _fnc) { workpool_.push(std::move(_fnc)); }}
         , front_rpc_service_{manager_}
         , shortcut_creator_{config_.temp_folder_}
     {
@@ -850,10 +851,10 @@ void Engine::start(const Configuration& _rcfg)
     pimpl_->scheduler_.start(1);
 
     {
-        auto                        proto = frame::mprpc::serialization_v3::create_protocol<reflection::v1::metadata::Variant, myapps::front::ProtocolTypeIndexT>(
+        auto                        proto = frame::mprpc::serialization_v3::create_protocol<reflection::v1::metadata::Variant, myapps::front::ProtocolTypeIdT>(
             myapps::utility::metadata_factory,
             [&](auto& _rmap) {
-                auto lambda = [&](const myapps::front::ProtocolTypeIndexT _id, const std::string_view _name, auto const& _rtype) {
+                auto lambda = [&](const myapps::front::ProtocolTypeIdT _id, const std::string_view _name, auto const& _rtype) {
                     using TypeT = typename std::decay_t<decltype(_rtype)>::TypeT;
                     _rmap.template registerMessage<TypeT>(_id, _name, complete_message<TypeT>);
                 };

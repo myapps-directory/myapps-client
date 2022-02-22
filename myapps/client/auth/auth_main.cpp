@@ -23,6 +23,8 @@
 #include "solid/system/exception.hpp"
 #include "solid/utility/string.hpp"
 
+#include "solid/utility/workpool.hpp"
+
 #include "solid/frame/aio/aioresolver.hpp"
 
 #include "solid/frame/reactor.hpp"
@@ -40,7 +42,6 @@
 #include "myapps/client/utility/auth_file.hpp"
 #include "myapps/client/utility/locale.hpp"
 
-#include "auth_protocol.hpp"
 #include "myapps/common/front_protocol_main.hpp"
 #include "myapps/common/front_protocol_auth.hpp"
 
@@ -291,8 +292,8 @@ int main(int argc, char* argv[])
 
     frame::mprpc::ServiceT front_rpc_service{manager};
 
-    CallPool<void()>     cwp{WorkPoolConfiguration(), 1};
-    frame::aio::Resolver resolver(cwp);
+    lockfree::CallPoolT<void(), void> cwp{WorkPoolConfiguration(1)};
+    frame::aio::Resolver              resolver([&cwp](std::function<void()>&& _fnc) { cwp.push(std::move(_fnc)); });
 
     client::auth::MainWindow main_window;
     Engine                   engine(main_window, front_rpc_service, params);
@@ -317,7 +318,7 @@ int main(int argc, char* argv[])
         };
 
         config.delete_account_fnc_ = [&engine](const string& _pass, const string& _reason)  {
-            return engine.onDeleteAccountStart(_pass, _reason);
+            return engine.onDeleteAccountStart(myapps::utility::sha256hex(_pass), _reason);
         };
 
         config.validate_fnc_ = [&engine](const string& _code) {
@@ -592,10 +593,10 @@ void complete_message(
 
 void front_configure_service(Engine& _rengine, const Parameters& _params, frame::mprpc::ServiceT& _rsvc, AioSchedulerT& _rsch, frame::aio::Resolver& _rres)
 {
-    auto                        proto = frame::mprpc::serialization_v3::create_protocol<reflection::v1::metadata::Variant, myapps::front::ProtocolTypeIndexT>(
+    auto                        proto = frame::mprpc::serialization_v3::create_protocol<reflection::v1::metadata::Variant, myapps::front::ProtocolTypeIdT>(
         myapps::utility::metadata_factory,
         [&](auto& _rmap) {
-            auto lambda = [&](const myapps::front::ProtocolTypeIndexT _id, const std::string_view _name, auto const& _rtype) {
+            auto lambda = [&](const myapps::front::ProtocolTypeIdT _id, const std::string_view _name, auto const& _rtype) {
                 using TypeT = typename std::decay_t<decltype(_rtype)>::TypeT;
                 _rmap.template registerMessage<TypeT>(_id, _name, complete_message<TypeT>);
             };
@@ -757,7 +758,7 @@ bool Engine::onAmendStart(string _user, string _email, const string& _pass, cons
         
         onAuthResponse(_rctx, _rrecv_msg_ptr, _rerror);
     };
-    front_rpc_service_.sendRequest(auth_endpoint_.c_str(), req_ptr, lambda, {frame::mprpc::MessageFlagsE::AwaitResponse, frame::mprpc::MessageFlagsE::OneShotSend});
+    front_rpc_service_.sendRequest(front_recipient_id_, req_ptr, lambda, {frame::mprpc::MessageFlagsE::AwaitResponse, frame::mprpc::MessageFlagsE::OneShotSend});
 
     return false;
 }
@@ -783,7 +784,7 @@ bool Engine::onDeleteAccountStart(const string& _pass, const string& _reason)
         onDeleteAccountResponse(_rctx, _rrecv_msg_ptr, _rerror);
     };
 
-    front_rpc_service_.sendRequest(auth_endpoint_.c_str(), req_ptr, lambda, {frame::mprpc::MessageFlagsE::AwaitResponse, frame::mprpc::MessageFlagsE::OneShotSend});
+    front_rpc_service_.sendRequest(front_recipient_id_, req_ptr, lambda, {frame::mprpc::MessageFlagsE::AwaitResponse, frame::mprpc::MessageFlagsE::OneShotSend});
 
     return true;
 }
@@ -842,7 +843,7 @@ void Engine::onConnectionStart(frame::mprpc::ConnectionContext& _ctx)
             if (_rrecv_msg_ptr->error_ == 0) {
                 onConnectionInit(_rctx);
             } else {
-                cout << "ERROR initiating connection: version " << _rctx.peerVersionMajor() << '.' << _rctx.peerVersionMinor() << " error " << _rrecv_msg_ptr->error_ << ':' << _rrecv_msg_ptr->message_ << endl;
+                cout << "ERROR initiating connection: error " << _rrecv_msg_ptr->error_ << ':' << _rrecv_msg_ptr->message_ << endl;
             }
         }
     };

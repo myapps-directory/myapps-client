@@ -43,7 +43,6 @@ if(${Qt5Widgets_FOUND})
         auth_main.cpp
         main_window.cpp
         main_window.hpp
-	    auth_protocol.hpp
         ${FORMS_HEADERS}
     )
 

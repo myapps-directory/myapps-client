@@ -12,6 +12,8 @@
 #include "solid/frame/mprpc/mprpcsocketstub_openssl.hpp"
 #include "solid/frame/mprpc/mprpcprotocol_serialization_v3.hpp"
 
+#include "solid/utility/workpool.hpp"
+
 #include "myapps/common/utility/encode.hpp"
 #include "myapps/common/front_protocol_main.hpp"
 
@@ -255,8 +257,8 @@ int main(int argc, char* argv[])
     }
     AioSchedulerT          scheduler;
     frame::Manager         manager;
-    CallPool<void()>       cwp{WorkPoolConfiguration(), 1};
-    frame::aio::Resolver   resolver(cwp);
+    lockfree::CallPoolT<void(), void> cwp{WorkPoolConfiguration(1)};
+    frame::aio::Resolver              resolver([&cwp](std::function<void()>&& _fnc) { cwp.push(std::move(_fnc)); });
     frame::mprpc::ServiceT rpc_service(manager);
     Engine                 engine(rpc_service, params);
 
@@ -625,10 +627,10 @@ string get_command(const string &_line){
 // Front
 //-----------------------------------------------------------------------------
 void configure_service(Engine &_reng, AioSchedulerT &_rsch, frame::aio::Resolver &_rres){
-    auto                        proto = frame::mprpc::serialization_v3::create_protocol<reflection::v1::metadata::Variant, myapps::front::ProtocolTypeIndexT>(
+    auto                        proto = frame::mprpc::serialization_v3::create_protocol<reflection::v1::metadata::Variant, myapps::front::ProtocolTypeIdT>(
         myapps::utility::metadata_factory,
         [&](auto& _rmap) {
-            auto lambda = [&](const myapps::front::ProtocolTypeIndexT _id, const std::string_view _name, auto const& _rtype) {
+            auto lambda = [&](const myapps::front::ProtocolTypeIdT _id, const std::string_view _name, auto const& _rtype) {
                 using TypeT = typename std::decay_t<decltype(_rtype)>::TypeT;
                 _rmap.template registerMessage<TypeT>(_id, _name, complete_message<TypeT>);
             };

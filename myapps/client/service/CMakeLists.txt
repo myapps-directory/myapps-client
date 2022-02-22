@@ -63,7 +63,6 @@ if(WIN32)
 		myapps_utility
         SolidFrame::solid_frame_mprpc
         SolidFrame::solid_frame_aio_openssl
-        SolidFrame::solid_serialization_v2
         ${SNAPPY_LIB}
         Boost::program_options
         Boost::system
@@ -83,7 +82,6 @@ if(WIN32)
 		myapps_utility
         SolidFrame::solid_frame_mprpc
         SolidFrame::solid_frame_aio_openssl
-        SolidFrame::solid_serialization_v2
         ${SNAPPY_LIB}
         Boost::program_options
         Boost::system
