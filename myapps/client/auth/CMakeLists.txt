@@ -70,7 +70,7 @@ if(${Qt5Widgets_FOUND})
             # copy deployment directory during installation
             install(DIRECTORY $<TARGET_FILE_DIR:myapps_auth>//windeployqt/ DESTINATION bin PATTERN "windeployqt/*")
         endif()
-        set_source_files_properties(auth_main.cpp PROPERTIES COMPILE_FLAGS "-DOLA_FRONT_URL=\\\"${OLA_FRONT_URL}\\\" -bigobj")
+        set_source_files_properties(auth_main.cpp PROPERTIES COMPILE_FLAGS "-DMYAPPS_FRONT_URL=\\\"${MYAPPS_FRONT_URL}\\\" -bigobj")
     elseif(APPLE)
         add_executable(
             myapps_auth

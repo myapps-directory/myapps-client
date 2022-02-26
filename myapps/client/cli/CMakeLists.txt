@@ -1,9 +1,9 @@
 add_executable (myapps_cli client_cli.cpp)
 
 if(WIN32)
-    set_source_files_properties(client_cli.cpp PROPERTIES COMPILE_FLAGS "-bigobj -DOLA_FRONT_URL=\\\"${OLA_FRONT_URL}\\\"")
+    set_source_files_properties(client_cli.cpp PROPERTIES COMPILE_FLAGS "-bigobj -DMYAPPS_FRONT_URL=\\\"${MYAPPS_FRONT_URL}\\\"")
 else()
-    set_source_files_properties(client_cli.cpp PROPERTIES COMPILE_FLAGS "-DOLA_FRONT_URL=\\\"${OLA_FRONT_URL}\\\"")
+    set_source_files_properties(client_cli.cpp PROPERTIES COMPILE_FLAGS "-DMYAPPS_FRONT_URL=\\\"${MYAPPS_FRONT_URL}\\\"")
 endif()
 
 target_link_libraries (myapps_cli

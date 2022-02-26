@@ -153,7 +153,7 @@ struct Engine {
             auth_endpoint_ = rparams_.front_endpoint;
             auth_token_ = myapps::utility::base64_decode(rparams_.auth_token);
         }
-        solid_check(!auth_token_.empty(), "Please authenticate using ola_client_auth application");
+        solid_check(!auth_token_.empty(), "Please authenticate using myapps_auth application");
     }
 
     frame::mprpc::ServiceT& rpcService() const
@@ -459,7 +459,7 @@ void Parameters::parse(int argc, char* argv[])
             ("debug-buffered,S", value<bool>(&this->debug_buffered)->implicit_value(true)->default_value(true), "Debug unbuffered")
             ("secure,s", value<bool>(&secure)->implicit_value(true)->default_value(true), "Use SSL to secure communication")
             ("compress", value<bool>(&compress)->implicit_value(true)->default_value(false), "Use Snappy to compress communication")
-            ("front-endpoint", value<std::string>(&front_endpoint)->default_value(string(OLA_FRONT_URL)), "MyApps.space Front Endpoint")
+            ("front-endpoint", value<std::string>(&front_endpoint)->default_value(string(MYAPPS_FRONT_URL)), "MyApps.space Front Endpoint")
             ("no-history", value<bool>(&no_history)->implicit_value(true)->default_value(false), "Disable history log")
             ("secure-prefix", value<std::string>(&secure_prefix)->default_value("certs"), "Secure Path prefix")
             ("path-prefix", value<std::string>(&path_prefix_)->default_value(env_config_path_prefix()), "Path prefix")

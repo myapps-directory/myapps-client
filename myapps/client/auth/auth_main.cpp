@@ -76,7 +76,7 @@ using SchedulerT    = frame::Scheduler<frame::Reactor>;
 //      Parameters
 //-----------------------------------------------------------------------------
 namespace {
-constexpr string_view service_name("ola_client_auth");
+constexpr string_view service_name("myapps_auth");
 const solid::LoggerT logger("myapps::client::auth");
 
 struct Parameters {
@@ -434,7 +434,7 @@ bool Parameters::parse(ULONG argc, PWSTR* argv)
             ("compress", value<bool>(&compress)->implicit_value(true)->default_value(false), "Use Snappy to compress communication")
             ("secure-prefix", value<std::string>(&secure_prefix)->default_value("certs"), "Secure Path prefix")
             ("path-prefix", value<std::string>(&path_prefix)->default_value(env_config_path_prefix()), "Path prefix")
-            ("front,f", value<std::string>(&front_endpoint)->default_value(string(OLA_FRONT_URL)), "MyApps.space Front Endpoint")
+            ("front,f", value<std::string>(&front_endpoint)->default_value(string(MYAPPS_FRONT_URL)), "MyApps.space Front Endpoint")
             ;
         // clang-format off
 
