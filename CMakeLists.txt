@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.15 FATAL_ERROR)
 cmake_policy(SET CMP0091 NEW)
 cmake_policy(SET CMP0115 NEW)
 
-project(MyAppsClient VERSION 0.12)
+project(MyAppsClient VERSION 0.13)
 
 set(EXTERNAL_DIR "" CACHE PATH "External dependencies folder")
 
@@ -231,8 +231,8 @@ set(CPACK_WIX_EXTRA_SOURCES             "${CMAKE_BINARY_DIR}/cpack/wix/custom_ac
 
 if(WIN32)
     set(WIX_BUNDLE_ICON "${CMAKE_SOURCE_DIR}/myapps/client/auth/auth.ico")
-    set(WIX_BUNDLE_WINFSP_MSI src/winfsp-1.9.21096.msi)
-    set(WIX_BUNDLE_WINFSP_URL https://github.com/billziss-gh/winfsp/releases/download/v1.9/winfsp-1.9.21096.msi)
+    set(WIX_BUNDLE_WINFSP_MSI src/winfsp-1.10.22006.msi)
+    set(WIX_BUNDLE_WINFSP_URL https://github.com/billziss-gh/winfsp/releases/download/v1.10/winfsp-1.10.22006.msi)
 
     ExternalProject_Add(
         WinFSP_Download
