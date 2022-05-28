@@ -1975,6 +1975,7 @@ void Engine::Implementation::updateApplications(const UpdatesMapT& _updates_map)
             } else {
                 rapp_entry.flagSet(EntryFlagsE::Delete);
                 solid_log(logger, Info, "app " << rad.app_unique_ << " cannot be deleted");
+                config_.invalidate_cache_fnc_(rapp_entry.name_);
             }
 
         } else if (it->second.second != rad.build_unique_) {

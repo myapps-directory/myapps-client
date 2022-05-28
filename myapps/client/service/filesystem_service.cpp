@@ -17,14 +17,14 @@
 #include "boost/program_options.hpp"
 
 #include "myapps/client/service/engine.hpp"
-#include "myapps/client/utility/locale.hpp"
-#include "myapps/client/utility/auth_file.hpp"
 #include "myapps/client/utility/app_list_file.hpp"
+#include "myapps/client/utility/auth_file.hpp"
 #include "myapps/client/utility/file_monitor.hpp"
+#include "myapps/client/utility/locale.hpp"
 
+#include <future>
 #include <iostream>
 #include <sstream>
-#include <future>
 #include <thread>
 
 #include "solid/system/log.hpp"
@@ -75,18 +75,18 @@ struct Parameters {
     string         secure_prefix_;
     string         path_prefix_;
 
-    string configPath(const string &_path_prefix)const;
+    string configPath(const string& _path_prefix) const;
 
-    bool parse(ULONG argc, PWSTR* argv);
+    bool                                  parse(ULONG argc, PWSTR* argv);
     boost::program_options::variables_map bootstrapCommandLine(ULONG argc, PWSTR* argv);
-    void writeConfigurationFile(string _path, const boost::program_options::options_description& _od, const boost::program_options::variables_map& _vm)const;
+    void                                  writeConfigurationFile(string _path, const boost::program_options::options_description& _od, const boost::program_options::variables_map& _vm) const;
 };
 
 class FileSystem final : public FileSystemBase {
     myapps::client::service::Engine& rengine_;
-    DWORD                         security_size_  = 0;
-    char*                         psecurity_data_ = nullptr;
-    int64_t                       base_time_      = 0;
+    DWORD                            security_size_  = 0;
+    char*                            psecurity_data_ = nullptr;
+    int64_t                          base_time_      = 0;
 
 public:
     FileSystem(myapps::client::service::Engine& _rengine);
@@ -225,19 +225,18 @@ class FileSystemService final : public Service {
         Restart,
     };
 
-    myapps::client::service::Engine        engine_;
-    FileSystem                          fs_;
-    FileSystemHost                      host_;
-    Parameters                          params_;
-    mutex                               mutex_;
-    condition_variable                  condition_;
-    chrono::system_clock::time_point    auth_file_time_point_;
-    string                              auth_endpoint_;
-    string                              auth_user_;
-    string                              auth_token_;
-    WaitStatusE                         wait_status_ = WaitStatusE::NoWait;
-    myapps::client::utility::FileMonitor   file_monitor_;
-
+    myapps::client::service::Engine      engine_;
+    FileSystem                           fs_;
+    FileSystemHost                       host_;
+    Parameters                           params_;
+    mutex                                mutex_;
+    condition_variable                   condition_;
+    chrono::system_clock::time_point     auth_file_time_point_;
+    string                               auth_endpoint_;
+    string                               auth_user_;
+    string                               auth_token_;
+    WaitStatusE                          wait_status_ = WaitStatusE::NoWait;
+    myapps::client::utility::FileMonitor file_monitor_;
 
     fs::path configDirectoryPath() const
     {
@@ -255,12 +254,14 @@ class FileSystemService final : public Service {
     {
         return configDirectoryPath() / "app_list.data";
     }
+
 public:
     FileSystemService();
 
     bool waitAuthentication();
     void onAuthFileChange(const chrono::system_clock::time_point& _time_point);
     void onAppListFileChange(const chrono::system_clock::time_point& _time_point);
+
 protected:
     NTSTATUS OnStart(ULONG Argc, PWSTR* Argv) override;
     NTSTATUS OnStop() override;
@@ -277,8 +278,8 @@ private:
 #ifdef SOLID_ON_WINDOWS
 int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR pCmdLine, int nCmdShow)
 {
-    int     argc;
-    LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+    int        argc;
+    LPWSTR*    argv                  = CommandLineToArgvW(GetCommandLineW(), &argc);
     const auto m_singleInstanceMutex = CreateMutex(NULL, TRUE, L"OLA_SERVICE_SHARED_MUTEX");
     if (m_singleInstanceMutex == NULL || GetLastError() == ERROR_ALREADY_EXISTS) {
         return -1; // Exit the app. For MFC, return false from InitInstance.
@@ -291,11 +292,11 @@ int wmain(int argc, wchar_t** argv)
 #endif
 
     FileSystemService service;
-    const auto rv = service.Run();
+    const auto        rv = service.Run();
     if (!service.waitAuthentication()) {
     } else {
         //we need to restart the service
-        TCHAR szFileName[MAX_PATH];
+        TCHAR          szFileName[MAX_PATH];
         vector<WCHAR*> arg_vec;
         for (int i = 0; i < argc; ++i) {
             arg_vec.emplace_back(argv[i]);
@@ -312,13 +313,13 @@ int wmain(int argc, wchar_t** argv)
 }
 
 namespace std {
-    std::ostream& operator<<(std::ostream& os, const std::vector<string>& vec)
-    {
-        for (auto item : vec) {
-            os << item << ",";
-        }
-        return os;
+std::ostream& operator<<(std::ostream& os, const std::vector<string>& vec)
+{
+    for (auto item : vec) {
+        os << item << ",";
     }
+    return os;
+}
 } // namespace std
 
 namespace {
@@ -419,7 +420,8 @@ static ULONG wcstol_deflt(wchar_t* w, ULONG deflt)
 //-----------------------------------------------------------------------------
 // Parameters
 //-----------------------------------------------------------------------------
-string Parameters::configPath(const std::string &_path_prefix)const {
+string Parameters::configPath(const std::string& _path_prefix) const
+{
     return _path_prefix + "\\config\\" + string(service_name) + ".config";
 }
 //-----------------------------------------------------------------------------
@@ -982,6 +984,44 @@ NTSTATUS FileSystemService::OnStart(ULONG argc, PWSTR *argv)
 #endif
     cfg.folder_update_fnc_ = [this](const std::string &_folder){
         SHChangeNotify(SHCNE_UPDATEDIR, SHCNF_PATH | SHCNF_FLUSHNOWAIT, params_.mount_point_.c_str(), NULL);
+    };
+
+    cfg.invalidate_cache_fnc_ = [this](const std::string &_app){
+        //TODO: fix - seems not to work for what is needed
+        union
+        {
+            FSP_FSCTL_NOTIFY_INFO V;
+            UINT8 B[1024];
+        } Buffer;
+
+        ULONG Length = 0;
+        
+        union
+        {
+            FSP_FSCTL_NOTIFY_INFO V;
+            UINT8 B[sizeof(FSP_FSCTL_NOTIFY_INFO) + MAX_PATH * sizeof(WCHAR)];
+        } nf;
+
+        NTSTATUS  Result = STATUS_SUCCESS;
+
+        std::wstring wpath = params_.mount_point_ + L"\\" + utility::widen(_app);
+        
+        solid_log(solid::generic_logger, Info, "Invalidating cache for: "<<utility::narrow(wpath));
+        
+        Result = FspFileSystemNotifyBegin(host_.FileSystemHandle(), 4);
+        assert(Result == STATUS_SUCCESS);
+
+        nf.V.Size = (UINT16)(sizeof(FSP_FSCTL_NOTIFY_INFO) + wpath.size() * sizeof(WCHAR));
+        nf.V.Filter = FILE_NOTIFY_CHANGE_CREATION;
+        nf.V.Action = FILE_ACTION_REMOVED;
+        memcpy(nf.V.FileNameBuf, wpath.data(), nf.V.Size - sizeof(FSP_FSCTL_NOTIFY_INFO));
+        FspFileSystemAddNotifyInfo(&nf.V, &Buffer, sizeof Buffer, &Length);
+
+        Result = FspFileSystemNotify(host_.FileSystemHandle(), &Buffer.V, Length);
+        assert(Result == STATUS_SUCCESS);
+
+        Result = FspFileSystemNotifyEnd(host_.FileSystemHandle());
+        assert(Result == STATUS_SUCCESS);
     };
     
     engine_.start(cfg);
