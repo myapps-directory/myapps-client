@@ -1,4 +1,6 @@
 list(APPEND CMAKE_PREFIX_PATH "${EXTERNAL_PATH}")
+list(PREPEND CMAKE_PREFIX_PATH "${QTPREFIX_DIR}")
+
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
 
 # Instruct CMake to run moc automatically when needed
@@ -7,36 +9,39 @@ set(CMAKE_AUTOMOC ON)
 # Create code from a list of Qt designer ui files
 set(CMAKE_AUTOUIC ON)
 
-set(Qt5_DIR ${QT5PREFIX_DIR}/Qt5)
 
-message("Finding Qt5 from ${Qt5_DIR}")
-find_package(Qt5 COMPONENTS Core Widgets Gui)
+#set(Qt6_DIR ${QTPREFIX_DIR}/Qt6)
 
-if(Qt5_FOUND AND WIN32 AND NOT TARGET Qt5::windeployqt)
-    message("Finding Qt5 windeployqt")
-    get_target_property(_qt5_qmake_location Qt5::qmake IMPORTED_LOCATION)
+#message("Finding Qt6 from ${Qt6_DIR}")
+
+find_package(Qt6 REQUIRED COMPONENTS Core Widgets Gui)
+qt6_standard_project_setup()
+
+if(Qt6_FOUND AND WIN32 AND NOT TARGET Qt6::windeployqt)
+    message("Finding Qt6 windeployqt")
+    get_target_property(_qt6_qmake_location Qt6::qmake IMPORTED_LOCATION)
 
     execute_process(
-        COMMAND "${_qt5_qmake_location}" -query QT_INSTALL_PREFIX
+        COMMAND "${_qt6_qmake_location}" -query QT_INSTALL_PREFIX
         RESULT_VARIABLE return_code
-        OUTPUT_VARIABLE qt5_install_prefix
+        OUTPUT_VARIABLE qt6_install_prefix
         OUTPUT_STRIP_TRAILING_WHITESPACE
     )
 
-    set(imported_location "${qt5_install_prefix}/bin/windeployqt.exe")
+    set(imported_location "${qt6_install_prefix}/bin/windeployqt.exe")
 
     if(EXISTS ${imported_location})
-        add_executable(Qt5::windeployqt IMPORTED)
+        add_executable(Qt6::windeployqt IMPORTED)
 
-        set_target_properties(Qt5::windeployqt PROPERTIES
+        set_target_properties(Qt6::windeployqt PROPERTIES
             IMPORTED_LOCATION ${imported_location}
         )
     endif()
 endif()
 
-if(${Qt5Widgets_FOUND})
-    QT5_WRAP_UI(FORMS_HEADERS main_form.ui home_form.ui create_form.ui about_form.ui amend_form.ui reset_form.ui)
-    QT5_ADD_RESOURCES( FORMS_HEADERS main_form.qrc)
+if(${Qt6Widgets_FOUND})
+    QT6_WRAP_UI(FORMS_HEADERS main_form.ui home_form.ui create_form.ui about_form.ui amend_form.ui reset_form.ui)
+    QT6_ADD_RESOURCES( FORMS_HEADERS main_form.qrc)
     
     set(SRCS
         main_form.ui
@@ -53,7 +58,7 @@ if(${Qt5Widgets_FOUND})
             ${SRCS}
             auth_main.rc
         )
-        if(TARGET Qt5::windeployqt)
+        if(TARGET Qt6::windeployqt)
             if(CMAKE_BUILD_TYPE MATCHES "debug")
                 set(BUILD_TYPE "--debug")
             else()
@@ -63,8 +68,8 @@ if(${Qt5Widgets_FOUND})
             add_custom_command(TARGET myapps_auth
                 POST_BUILD
                 #COMMAND ${CMAKE_COMMAND} -E remove_directory $<TARGET_FILE_DIR:ola_client_store>/windeployqt
-                COMMAND set PATH=%PATH%$<SEMICOLON>${qt5_install_prefix}/bin
-                COMMAND Qt5::windeployqt ${BUILD_TYPE} "$<TARGET_FILE_DIR:myapps_auth>/$<TARGET_FILE_NAME:myapps_auth>"
+                COMMAND set PATH=%PATH%$<SEMICOLON>${qt6_install_prefix}/bin
+                COMMAND Qt6::windeployqt ${BUILD_TYPE} "$<TARGET_FILE_DIR:myapps_auth>/$<TARGET_FILE_NAME:myapps_auth>"
             )
 
             # copy deployment directory during installation
@@ -98,13 +103,13 @@ if(${Qt5Widgets_FOUND})
         SolidFrame::solid_serialization_v3
         Boost::program_options
         Boost::system
-        Qt5::Widgets
+        Qt::Widgets
         ${SNAPPY_LIB}
         ${SYS_BASIC_LIBS}
         ${SYS_DYNAMIC_LOAD_LIB}
     )
 
-    if(TARGET Qt5::windeployqt)
+    if(TARGET Qt6::windeployqt)
         if(CMAKE_BUILD_TYPE MATCHES "debug")
             set(BUILD_TYPE "--debug")
         else()
@@ -114,8 +119,8 @@ if(${Qt5Widgets_FOUND})
         add_custom_command(TARGET myapps_auth
             POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E remove_directory $<TARGET_FILE_DIR:myapps_auth>/windeployqt
-            COMMAND set PATH=%PATH%$<SEMICOLON>${qt5_install_prefix}/bin
-            COMMAND Qt5::windeployqt ${BUILD_TYPE} --dir $<TARGET_FILE_DIR:myapps_auth>//windeployqt "$<TARGET_FILE_DIR:myapps_auth>/$<TARGET_FILE_NAME:myapps_auth>"
+            COMMAND set PATH=%PATH%$<SEMICOLON>${qt6_install_prefix}/bin
+            COMMAND Qt6::windeployqt ${BUILD_TYPE} --dir $<TARGET_FILE_DIR:myapps_auth>//windeployqt "$<TARGET_FILE_DIR:myapps_auth>/$<TARGET_FILE_NAME:myapps_auth>"
         )
 
         # copy deployment directory during installation

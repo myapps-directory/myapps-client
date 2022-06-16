@@ -5,7 +5,7 @@ ExternalProject_Add(
         build-zlib
         EXCLUDE_FROM_ALL 1
         PREFIX ${zlib_PREFIX}
-        URL https://zlib.net/zlib-1.2.11.tar.gz
+        URL https://zlib.net/zlib-1.2.12.tar.gz
         CMAKE_ARGS
             -DCMAKE_INSTALL_PREFIX:PATH=${CMAKE_BINARY_DIR}/external
 )

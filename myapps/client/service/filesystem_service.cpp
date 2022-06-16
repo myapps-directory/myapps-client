@@ -6,7 +6,7 @@
 #define NOMINMAX
 #endif
 #include <strsafe.h>
-#include <winfsp.hpp>
+#include <winfsp/winfsp.hpp>
 
 #include "solid/system/log.hpp"
 
@@ -1209,7 +1209,7 @@ NTSTATUS FileSystem::Init(PVOID Host0)
     Host->SetVolumeCreationTime(base_time_);
     Host->SetVolumeSerialNumber(0);
     Host->SetFlushAndPurgeOnCleanup(TRUE);
-    Host->SetRejectIrpPriorToTransact0(1);
+    //Host->SetRejectIrpPriorToTransact0(1);
 
 	return InitSecurityDescriptor();
 }

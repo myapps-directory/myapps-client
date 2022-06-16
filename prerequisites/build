@@ -26,7 +26,7 @@ printUsage()
     echo
 }
 
-BOOST_ADDR="https://dl.bintray.com/boostorg/release/1.75.0/source/boost_1_75_0.tar.bz2"
+BOOST_ADDR="https://boostorg.jfrog.io/artifactory/main/release/1.79.0/source/boost_1_79_0.tar.bz2"
 OPENSSL_ADDR="https://www.openssl.org/source/openssl-1.1.1k.tar.gz"
 
 SYSTEM=

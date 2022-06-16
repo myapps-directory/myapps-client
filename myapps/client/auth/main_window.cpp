@@ -8,7 +8,6 @@
 #include <QKeyEvent>
 #include <QToolBar>
 #include <QToolButton>
-#include <QDesktopWidget>
 #include <QMessageBox>
 
 #include <string>
@@ -73,8 +72,8 @@ struct MainWindow::Data {
     ActionE                  current_action_;
     bool                     authenticated_ = false;
     bool                     validate_email_ = false;
-    int                      dpi_x_          = QApplication::desktop()->logicalDpiX();
-    int                      dpi_y_          = QApplication::desktop()->logicalDpiY();
+    int                      dpi_x_          = QApplication::primaryScreen()->logicalDotsPerInchX();
+    int                      dpi_y_          = QApplication::primaryScreen()->logicalDotsPerInchY();
     double                   scale_x_        = double(dpi_x_) / 120.0; //173.0 / double(dpi_x_);
     double                   scale_y_        = double(dpi_y_) / 120.0; //166.0 / double(dpi_y_);
 
