@@ -10,10 +10,6 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTOUIC ON)
 
 
-#set(Qt6_DIR ${QTPREFIX_DIR}/Qt6)
-
-#message("Finding Qt6 from ${Qt6_DIR}")
-
 find_package(Qt6 REQUIRED COMPONENTS Core Widgets Gui)
 qt6_standard_project_setup()
 
