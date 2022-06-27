@@ -17,6 +17,7 @@ enum struct NodeFlagsE : uint32_t {
     Directory = 0,
     File,
     Hidden,
+    PendingDelete,
 };
 
 using NodeFlagsT = std::underlying_type<NodeFlagsE>::type;
@@ -93,8 +94,10 @@ public:
     bool list(Descriptor* _pdesc, void*& _rpctx, std::wstring& _rname, NodeFlagsT& _rentry_type, uint64_t& _rsize, int64_t& _rbase_time);
 
     bool read(Descriptor* _pdesc, void* _pbuf, uint64_t _offset, unsigned long _length, unsigned long& _rbytes_transfered);
+
+    void post(std::function<void(Engine&)>&&);
 };
 
-} //namespace service
-} //namespace client
-} //namespace myapps
+} // namespace service
+} // namespace client
+} // namespace myapps
