@@ -307,18 +307,18 @@ int main(int argc, char* argv[])
     {
         client::auth::Configuration config;
         config.authenticate_fnc_ = [&engine](const string& _user, const string& _pass, const string& _code) {
-            return engine.onAuthStart(_user, myapps::utility::sha256hex(_pass), _code);
+            return engine.onAuthStart(_user, myapps::utility::hex_encode(myapps::utility::sha256(_pass)), _code);
         };
         config.create_fnc_ = [&engine](const string& _user, const string &_email, const string& _pass, const string& _code) {
-            return engine.onCreateStart(_user, _email, myapps::utility::sha256hex(_pass), _code);
+            return engine.onCreateStart(_user, _email, myapps::utility::hex_encode(myapps::utility::sha256(_pass)), _code);
         };
 
         config.amend_fnc_ = [&engine](const string& _user, const string& _email, const string& _pass, const string& _new_pass) {
-            return engine.onAmendStart(_user, _email, myapps::utility::sha256hex(_pass), _new_pass.empty() ? _new_pass : myapps::utility::sha256hex(_new_pass));
+            return engine.onAmendStart(_user, _email, myapps::utility::hex_encode(myapps::utility::sha256(_pass)), _new_pass.empty() ? _new_pass : myapps::utility::hex_encode(myapps::utility::sha256(_pass)));
         };
 
         config.delete_account_fnc_ = [&engine](const string& _pass, const string& _reason)  {
-            return engine.onDeleteAccountStart(myapps::utility::sha256hex(_pass), _reason);
+            return engine.onDeleteAccountStart(myapps::utility::hex_encode(myapps::utility::sha256(_pass)), _reason);
         };
 
         config.validate_fnc_ = [&engine](const string& _code) {
@@ -342,7 +342,7 @@ int main(int argc, char* argv[])
         };
 
         config.reset_fnc_ = [&engine](const string& _token, const string& _pass, const string& _code) {
-            return engine.passwordReset(_token, myapps::utility::sha256hex(_pass), _code);
+            return engine.passwordReset(_token, myapps::utility::hex_encode(myapps::utility::sha256(_pass)), _code);
         };
 
         config.login_ = QString::fromStdString(engine.auth_login_);

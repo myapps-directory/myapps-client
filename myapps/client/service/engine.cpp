@@ -239,7 +239,8 @@ struct Entry {
     std::mutex&              rmutex_;
     std::condition_variable& rcv_;
     string                   name_;
-    string                   remote_;
+    uint32_t                 remote_shard_id_ = -1;
+    string                   remote_storage_id_;
     EntryTypeE               type_   = EntryTypeE::Unknown;
     EntryStatusE             status_ = EntryStatusE::FetchRequired;
     EntryFlagsT              flags_  = 0;
@@ -1131,7 +1132,9 @@ bool Engine::Implementation::fetch(EntryPointerT& _rentry_ptr, unique_lock<mutex
 
         auto req_ptr         = make_shared<main::ListStoreRequest>();
         req_ptr->path_       = _remote_path;
-        req_ptr->storage_id_ = _rentry_ptr->pmaster_->remote_;
+        req_ptr->shard_id_ =  _rentry_ptr->pmaster_->remote_shard_id_;
+        req_ptr->storage_id_ = _rentry_ptr->pmaster_->remote_storage_id_;
+
 
         front_rpc_service_.sendRequest(config_.auth_endpoint_.c_str(), req_ptr, lambda);
     }
@@ -1188,9 +1191,9 @@ bool Engine::Implementation::entry(const fs::path& _path, EntryPointerT& _rentry
                 pbuild_unique = &rad.build_unique_;
             } else if (_rentry_ptr->isMediaRoot()) {
                 break;
-            } else if (!_rentry_ptr->remote_.empty()) {
+            } else if (!_rentry_ptr->remote_storage_id_.empty()) {
                 remote_path += '/';
-                remote_path += _rentry_ptr->remote_;
+                remote_path += _rentry_ptr->remote_storage_id_;
             } else {
                 remote_path += '/';
                 remote_path += _rentry_ptr->name_;
@@ -1218,8 +1221,9 @@ bool Engine::Implementation::entry(const fs::path& _path, EntryPointerT& _rentry
         if (it == _path.end()) {
             return false;
         }
-
-        string encoded_storage_id = it->generic_string();
+        const uint32_t shard_id           = std::stol(it->generic_string());
+        ++it;
+        const::string encoded_storage_id = it->generic_string();
         ++it;
         while (it != _path.end()) {
             remote_path += it->generic_string();
@@ -1239,7 +1243,8 @@ bool Engine::Implementation::entry(const fs::path& _path, EntryPointerT& _rentry
 
             entry_ptr           = createEntry(_rentry_ptr, name);
             entry_ptr->pmaster_ = entry_ptr.get();
-            entry_ptr->remote_  = std::move(storage_id);
+            entry_ptr->remote_shard_id_   = shard_id;
+            entry_ptr->remote_storage_id_  = std::move(storage_id);
             entry_ptr->status_  = EntryStatusE::FetchRequired;
             entry_ptr->flagSet(EntryFlagsE::Volatile);
             entry_ptr->flagSet(EntryFlagsE::Media);
@@ -1580,7 +1585,8 @@ void Engine::Implementation::tryFetch(EntryPointerT& _rentry_ptr)
     auto req_ptr = make_shared<main::FetchStoreRequest>();
 
     req_ptr->path_         = rfile_data.remote_path_;
-    req_ptr->storage_id_   = _rentry_ptr->pmaster_->remote_;
+    req_ptr->shard_id_   = _rentry_ptr->pmaster_->remote_shard_id_;
+    req_ptr->storage_id_   = _rentry_ptr->pmaster_->remote_storage_id_;
     req_ptr->chunk_index_  = rfile_data.currentChunkIndex();
     req_ptr->chunk_offset_ = 0;
 
@@ -1694,6 +1700,7 @@ void Engine::Implementation::asyncFetchStoreFile(
             req_ptr = std::move(rfile_data.requestPointer());
         } else {
             req_ptr              = make_shared<main::FetchStoreRequest>();
+            req_ptr->shard_id_ = _rreq_msg_ptr->shard_id_;
             req_ptr->storage_id_ = _rreq_msg_ptr->storage_id_;
             req_ptr->path_       = _rreq_msg_ptr->path_;
         }
@@ -1797,7 +1804,7 @@ void Engine::Implementation::remoteFetchApplication(
     std::shared_ptr<main::FetchBuildConfigurationRequest>& _rsent_msg_ptr,
     size_t                                                 _app_index)
 {
-    _rsent_msg_ptr->app_id_   = _rapp_id_vec[_app_index].id_;
+    _rsent_msg_ptr->application_id_   = _rapp_id_vec[_app_index].id_;
     _rsent_msg_ptr->build_id_ = app_list_.find(_rapp_id_vec[_app_index].unique_).name_;
 
     auto lambda = [this, _app_index, app_id_vec = std::move(_rapp_id_vec)](
@@ -2112,7 +2119,7 @@ void Engine::Implementation::insertMountEntry(EntryPointerT& _rparent_ptr, const
         }
     }
     remote_path += _remote;
-    entry_ptr->remote_ = std::move(remote_path);
+    entry_ptr->remote_storage_id_ = std::move(remote_path);
     entry_ptr->status_ = EntryStatusE::FetchRequired;
 }
 
@@ -2140,7 +2147,8 @@ void Engine::Implementation::insertApplicationEntry(
         root_entry_ptr_, _rrecv_msg_ptr->configuration_.directory_,
         EntryTypeE::Application);
 
-    entry_ptr->remote_   = _rrecv_msg_ptr->build_storage_id_;
+    entry_ptr->remote_shard_id_   = _rrecv_msg_ptr->build_shard_id_;
+    entry_ptr->remote_storage_id_   = _rrecv_msg_ptr->build_storage_id_;
     entry_ptr->data_any_ = ApplicationData(_rrecv_msg_ptr->app_unique_, _rrecv_msg_ptr->build_unique_);
     entry_ptr->pmaster_  = entry_ptr.get();
 

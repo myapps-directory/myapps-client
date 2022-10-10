@@ -783,6 +783,7 @@ void handle_list_apps(istream& _ris, Engine &_reng){
 void handle_list_store(istream& _ris, Engine &_reng){
     auto req_ptr = make_shared<main::ListStoreRequest>();
     
+    _ris>>req_ptr->shard_id_;
     _ris>>std::quoted(req_ptr->storage_id_);
     _ris>>std::quoted(req_ptr->path_);
     
@@ -843,7 +844,7 @@ void handle_change_state(istream& _ris, Engine& _reng) {
     char item_type = '\0';//m/M->media, b/B->build
     string state_name;
 
-    _ris >> item_type >> std::quoted(req_ptr->app_id_) >> std::quoted(req_ptr->os_id_) >> std::quoted(req_ptr->item_.name_) >> std::quoted(state_name);
+    _ris >> item_type >> std::quoted(req_ptr->application_id_) >> std::quoted(req_ptr->os_id_) >> std::quoted(req_ptr->item_.name_) >> std::quoted(state_name);
 
     auto state = myapps::utility::app_item_state_from_name(state_name.c_str());
     if (state == myapps::utility::AppItemStateE::StateCount) {
@@ -863,7 +864,7 @@ void handle_change_state(istream& _ris, Engine& _reng) {
         return;
     }
     
-    req_ptr->app_id_ = utility::base64_decode(req_ptr->app_id_);
+    req_ptr->application_id_ = utility::base64_decode(req_ptr->application_id_);
     req_ptr->new_state_ = static_cast<uint8_t>(state);
 
     promise<void> prom;
@@ -914,10 +915,10 @@ ostream& operator<<(ostream &_ros, const utility::Application &_cfg){
 void handle_fetch_app(istream& _ris, Engine &_reng){
      auto req_ptr = make_shared<main::FetchAppRequest>();
     
-    _ris>>std::quoted(req_ptr->app_id_);
+    _ris>>std::quoted(req_ptr->application_id_);
     _ris>>std::quoted(req_ptr->os_id_);
     
-    req_ptr->app_id_ = utility::base64_decode(req_ptr->app_id_);
+    req_ptr->application_id_ = utility::base64_decode(req_ptr->application_id_);
     
     promise<void> prom;
     
@@ -1024,10 +1025,10 @@ ostream& operator<<(ostream &_ros, const utility::Build &_cfg){
 void handle_fetch_build(istream& _ris, Engine &_reng){
     auto req_ptr = make_shared<main::FetchBuildRequest>();
     
-    _ris>>std::quoted(req_ptr->app_id_);
+    _ris>>std::quoted(req_ptr->application_id_);
     _ris>>std::quoted(req_ptr->build_id_);
     
-    req_ptr->app_id_ = utility::base64_decode(req_ptr->app_id_);
+    req_ptr->application_id_ = utility::base64_decode(req_ptr->application_id_);
     req_ptr->build_id_ = req_ptr->build_id_;//utility::base64_decode(req_ptr->build_id_);
     
     promise<void> prom;
@@ -1040,6 +1041,7 @@ void handle_fetch_build(istream& _ris, Engine &_reng){
     ){
         if(_rrecv_msg_ptr && _rrecv_msg_ptr->error_ == 0){
             cout<<"{\n";
+            cout<<"Remote shard: "<<_rrecv_msg_ptr->shard_id_<<endl;
             cout<<"Remote Root: "<<utility::base64_encode(_rrecv_msg_ptr->storage_id_)<<endl;
             cout<<"Icon of size: "<<_rrecv_msg_ptr->image_blob_.size()<<endl;
             cout<<_rrecv_msg_ptr->build_;
@@ -1062,7 +1064,7 @@ void handle_fetch_build(istream& _ris, Engine &_reng){
 void handle_fetch_config(istream& _ris, Engine &_reng){
     auto req_ptr = make_shared<main::FetchBuildConfigurationRequest>();
     
-    _ris>>std::quoted(req_ptr->app_id_);
+    _ris>>std::quoted(req_ptr->application_id_);
     _ris>>std::quoted(req_ptr->lang_);
     _ris>>std::quoted(req_ptr->os_id_);
     
@@ -1075,7 +1077,7 @@ void handle_fetch_config(istream& _ris, Engine &_reng){
         req_ptr->property_vec_.emplace_back(std::move(prop));
     }
     req_ptr->fetch_options_.set();
-    req_ptr->app_id_ = utility::base64_decode(req_ptr->app_id_);    
+    req_ptr->application_id_ = utility::base64_decode(req_ptr->application_id_);    
     promise<void> prom;
     
     auto lambda = [&prom](
@@ -1086,7 +1088,9 @@ void handle_fetch_config(istream& _ris, Engine &_reng){
     ){
         if(_rrecv_msg_ptr && _rrecv_msg_ptr->error_ == 0){
             cout<<"{\n";
+            cout<< "Build Remote Shard: "<<_rrecv_msg_ptr->build_shard_id_<<endl;
             cout << "Build Remote Root: "<<utility::base64_encode(_rrecv_msg_ptr->build_storage_id_)<<endl;
+            cout << "Media Remote Shard: " << _rrecv_msg_ptr->media_shard_id_ << endl;
             cout << "Media Remote Root: " << utility::base64_encode(_rrecv_msg_ptr->media_storage_id_) << endl;
             cout<<"Application unique: "<<_rrecv_msg_ptr->app_unique_<<endl;
             cout<<"Build unique: "<<_rrecv_msg_ptr->build_unique_<<endl;
@@ -1368,6 +1372,7 @@ void fetch_remote_file(
         }
         else {
             req_ptr = make_shared<main::FetchStoreRequest>();
+            req_ptr->shard_id_ = _rreq_msg_ptr->shard_id_;
             req_ptr->storage_id_ = _rreq_msg_ptr->storage_id_;
             req_ptr->path_ = _rreq_msg_ptr->path_;
         }
@@ -1389,6 +1394,7 @@ void handle_fetch_store(istream& _ris, Engine &_reng){
     auto req_ptr = make_shared<main::FetchStoreRequest>();
     string local_path;
     
+    _ris>>req_ptr->shard_id_;
     _ris>>std::quoted(req_ptr->storage_id_);
     _ris>>std::quoted(req_ptr->path_);
     _ris>>std::quoted(local_path);
@@ -1726,7 +1732,7 @@ void handle_create_build(istream& _ris, Engine &_reng){
     {
         ifstream ifs(zip_path, std::ifstream::binary);
         if(ifs){
-            req_ptr->sha_sum_ = myapps::utility::sha256hex(ifs);
+            req_ptr->sha_sum_ = myapps::utility::hex_encode(myapps::utility::sha256(ifs));
             cout<<"sha_sum for "<<zip_path<<": "<<req_ptr->sha_sum_<<endl;
         }else{
             cout<<"could not open "<<zip_path<<" for reading"<<endl;
@@ -1831,7 +1837,7 @@ void handle_create_media(istream& _ris, Engine &_reng){
     {
         ifstream ifs(zip_path, std::ifstream::binary);
         if(ifs){
-            req_ptr->sha_sum_ = myapps::utility::sha256hex(ifs);
+            req_ptr->sha_sum_ = myapps::utility::hex_encode(myapps::utility::sha256(ifs));
             cout<<"sha_sum for "<<zip_path<<": "<<req_ptr->sha_sum_<<endl;
         }else{
             cout<<"could not open "<<zip_path<<" for reading"<<endl;
