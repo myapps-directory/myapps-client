@@ -1889,7 +1889,7 @@ void Engine::Implementation::update()
                         const auto& build_unique = _rrecv_msg_ptr->app_vec_[i].second;
                         const auto& app_id       = _rsent_msg_ptr->app_id_vec_[i];
                         if (!build_unique.empty()) {
-                            updates_map[app_unique] = make_pair(app_id.first, build_unique);
+                            updates_map[myapps::utility::hex_encode(app_unique)] = make_pair(app_id.first, build_unique);
                         }
                         solid_log(logger, Info, "update: app_unique = " << app_unique << " build_unique = " << build_unique);
                     }
@@ -2149,7 +2149,7 @@ void Engine::Implementation::insertApplicationEntry(
 
     entry_ptr->remote_shard_id_   = _rrecv_msg_ptr->build_shard_id_;
     entry_ptr->remote_storage_id_   = _rrecv_msg_ptr->build_storage_id_;
-    entry_ptr->data_any_ = ApplicationData(_rrecv_msg_ptr->app_unique_, _rrecv_msg_ptr->build_unique_);
+    entry_ptr->data_any_ = ApplicationData(myapps::utility::hex_encode(_rrecv_msg_ptr->app_unique_), _rrecv_msg_ptr->build_unique_);
     entry_ptr->pmaster_  = entry_ptr.get();
 
     if (_rrecv_msg_ptr->configuration_.hasHiddenDirectoryFlag()) {
@@ -2158,7 +2158,7 @@ void Engine::Implementation::insertApplicationEntry(
 
     bool is_invisible = false;
     if (
-        _app.isFlagSet(myapps::utility::AppFlagE::Default) && _rrecv_msg_ptr->configuration_.exe_vec_.size() == 1 && _rrecv_msg_ptr->configuration_.exe_vec_[0] == "ola_updater.exe" && _rrecv_msg_ptr->configuration_.property_vec_.size() >= 2 && _rrecv_msg_ptr->configuration_.property_vec_[1].second == myapps::utility::version_full()) {
+        _app.isFlagSet(myapps::utility::AppFlagE::Default) && _rrecv_msg_ptr->configuration_.exe_vec_.size() == 1 && _rrecv_msg_ptr->configuration_.exe_vec_[0] == "myapps_updater.exe" && _rrecv_msg_ptr->configuration_.property_vec_.size() >= 2 && _rrecv_msg_ptr->configuration_.property_vec_[1].second == myapps::utility::version_full()) {
         entry_ptr->flagSet(EntryFlagsE::Invisible);
         is_invisible = true;
     }

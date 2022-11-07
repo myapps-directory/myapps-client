@@ -55,7 +55,7 @@ namespace fs = boost::filesystem;
 
 namespace {
 
-constexpr string_view service_name("ola_client_cli");
+constexpr string_view service_name("myapps_client_cli");
 const solid::LoggerT logger("cli");
 
 using AioSchedulerT = frame::Scheduler<frame::aio::Reactor>;
@@ -760,7 +760,7 @@ void handle_list_apps(istream& _ris, Engine &_reng){
         if(_rrecv_msg_ptr && _rrecv_msg_ptr->error_ == 0){
             cout<<"{\n";
             for(const auto& app_id: _rrecv_msg_ptr->app_vec_){
-                cout<<'\t'<<utility::base64_encode(app_id.id_)<<"\t"<<app_id.unique_<<'\t'<<app_id.name_<<endl;
+                cout<<'\t'<<utility::base64_encode(app_id.id_)<<"\t"<<utility::base64_encode(app_id.unique_)<<'\t'<<app_id.name_<<endl;
             }
             cout<<"}"<<endl;
         }else if(!_rrecv_msg_ptr){
@@ -2126,7 +2126,7 @@ void Engine::onConnectionInit(frame::mprpc::ConnectionContext &_ctx){
 //-----------------------------------------------------------------------------
 
 void Engine::onAuthResponse(frame::mprpc::ConnectionContext &_ctx, core::AuthResponse &_rresponse){
-    solid_check(_rresponse.error_ == 0, "Please authenticate using ola_client_auth");
+    solid_check(_rresponse.error_ == 0, "Please authenticate using myapps_client_auth");
 
     if(!_rresponse.message_.empty()){
         std::lock_guard<mutex> lock(mutex_);
