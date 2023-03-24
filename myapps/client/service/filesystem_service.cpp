@@ -37,7 +37,7 @@
 #include <userenv.h>
 #pragma comment(lib, "userenv.lib")
 
-#define PROGNAME "ola-fs"
+#define PROGNAME "myapps_service_filesystem"
 
 #define ALLOCATION_UNIT 4096
 #define FULLPATH_SIZE (MAX_PATH + FSP_FSCTL_TRANSACT_PATH_SIZEMAX / sizeof(WCHAR))
@@ -57,7 +57,7 @@ namespace fs = boost::filesystem;
 
 namespace {
 
-constexpr string_view service_name("ola_client_service");
+constexpr string_view service_name("myapps_service_filesystem");
 
 const solid::LoggerT logger("myapps::client::service");
 
@@ -280,7 +280,7 @@ int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR pCmdLin
 {
     int        argc;
     LPWSTR*    argv                  = CommandLineToArgvW(GetCommandLineW(), &argc);
-    const auto m_singleInstanceMutex = CreateMutex(NULL, TRUE, L"OLA_SERVICE_SHARED_MUTEX");
+    const auto m_singleInstanceMutex = CreateMutex(NULL, TRUE, L"MYAPPS_SERVICE_SHARED_MUTEX");
     if (m_singleInstanceMutex == NULL || GetLastError() == ERROR_ALREADY_EXISTS) {
         return -1; // Exit the app. For MFC, return false from InitInstance.
     }
@@ -887,7 +887,7 @@ bool CreateInteractiveProcess(const wstring &_cmd_line,
 
 void WriteEventLogEntry(PWSTR pszMessage, WORD wType) 
 { 
-	PWSTR m_name = L"ola_client_service"; 
+	const PWSTR m_name = L"myapps_service_filesystem"; 
     HANDLE hEventSource = NULL; 
     LPCWSTR lpszStrings[2] = { NULL, NULL }; 
  
@@ -1193,26 +1193,26 @@ wstring a2w(const string &_a) {
 
 void FileSystemService::guiStart(){
 	wostringstream oss;
-	oss<<L"ola_client_auth.exe";
+	oss<<L"myapps_auth.exe";
     DWORD dwExitCode;
     if (!CreateInteractiveProcess(oss.str(), FALSE, 0, 
         &dwExitCode))
     {
         // Log the error and exit.
-        WriteErrorLogEntry(L"CreateInteractiveProcess", GetLastError());
+        WriteErrorLogEntry((PWSTR)L"CreateInteractiveProcess", GetLastError());
         return;
     }
 }
 
 void FileSystemService::meStart(){
 	wostringstream oss;
-	oss<<L"ola_client_auth.exe";
+	oss<<L"myapps_auth.exe";
     DWORD dwExitCode;
     if (!CreateInteractiveProcess(oss.str(), FALSE, 0, 
         &dwExitCode))
     {
         // Log the error and exit.
-        WriteErrorLogEntry(L"CreateInteractiveProcess", GetLastError());
+        WriteErrorLogEntry((PWSTR)L"CreateInteractiveProcess", GetLastError());
         return;
     }
 }

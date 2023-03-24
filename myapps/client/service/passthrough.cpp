@@ -264,7 +264,7 @@ NTSTATUS Ptfs::GetFileInfoInternal(HANDLE Handle, FileInfo* FileInfo)
     if (!GetFileInformationByHandle(Handle, &ByHandleFileInfo))
         return NtStatusFromWin32(GetLastError());
 
-    FileInfo->FileAttributes = ByHandleFileInfo.dwFileAttributes;
+    FileInfo->FileAttributes = ByHandleFileInfo.dwFileAttributes /* | FILE_ATTRIBUTE_READONLY*/;
     FileInfo->ReparseTag     = 0;
     FileInfo->FileSize       = ((UINT64)ByHandleFileInfo.nFileSizeHigh << 32) | (UINT64)ByHandleFileInfo.nFileSizeLow;
     FileInfo->AllocationSize = (FileInfo->FileSize + ALLOCATION_UNIT - 1)
@@ -821,15 +821,15 @@ NTSTATUS Ptfs::ReadDirectoryEntry(
     memset(DirInfo, 0, sizeof *DirInfo);
     Length                           = (ULONG)wcslen(FindData.cFileName);
     DirInfo->Size                    = (UINT16)(FIELD_OFFSET(Ptfs::DirInfo, FileNameBuf) + Length * sizeof(WCHAR));
-    DirInfo->FileInfo.FileAttributes = FindData.dwFileAttributes;
+    DirInfo->FileInfo.FileAttributes = FindData.dwFileAttributes /* | FILE_ATTRIBUTE_READONLY*/;
     DirInfo->FileInfo.ReparseTag     = 0;
     DirInfo->FileInfo.FileSize       = ((UINT64)FindData.nFileSizeHigh << 32) | (UINT64)FindData.nFileSizeLow;
     DirInfo->FileInfo.AllocationSize = (DirInfo->FileInfo.FileSize + ALLOCATION_UNIT - 1)
         / ALLOCATION_UNIT * ALLOCATION_UNIT;
     DirInfo->FileInfo.CreationTime   = ((PLARGE_INTEGER)&FindData.ftCreationTime)->QuadPart;
-    DirInfo->FileInfo.LastAccessTime = ((PLARGE_INTEGER)&FindData.ftLastAccessTime)->QuadPart;
-    DirInfo->FileInfo.LastWriteTime  = ((PLARGE_INTEGER)&FindData.ftLastWriteTime)->QuadPart;
-    DirInfo->FileInfo.ChangeTime     = DirInfo->FileInfo.LastWriteTime;
+    DirInfo->FileInfo.LastAccessTime  = ((PLARGE_INTEGER)&FindData.ftLastAccessTime)->QuadPart;
+    DirInfo->FileInfo.LastWriteTime   = ((PLARGE_INTEGER)&FindData.ftLastWriteTime)->QuadPart;
+    DirInfo->FileInfo.ChangeTime      = DirInfo->FileInfo.LastWriteTime;
     DirInfo->FileInfo.IndexNumber    = 0;
     DirInfo->FileInfo.HardLinks      = 0;
     memcpy(DirInfo->FileNameBuf, FindData.cFileName, Length * sizeof(WCHAR));
