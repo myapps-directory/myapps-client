@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.15 FATAL_ERROR)
 cmake_policy(SET CMP0091 NEW)
 cmake_policy(SET CMP0115 NEW)
 
-project(MyAppsClient VERSION 0.13)
+project(MyAppsClient VERSION 0.14)
 
 set(EXTERNAL_DIR "" CACHE PATH "External dependencies folder")
 
