@@ -69,7 +69,7 @@ if(WIN32)
         Boost::filesystem
     )
 
-    add_executable(passthrough_c passthrough_c.cpp)
+    add_executable(passthrough_c passthrough.c)
 
     if(CMAKE_SIZEOF_VOID_P EQUAL 8)
         target_link_options(passthrough_c PRIVATE /DELAYLOAD:winfsp-x64.dll)

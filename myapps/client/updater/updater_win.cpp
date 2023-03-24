@@ -287,7 +287,7 @@ bool file_copy(LPWSTR _src_path, HWND _hProgCtrl, wstring& _rdes_path) {
 bool file_validate(const wstring& _des_path, HWND _hProgCtrl, const LPWSTR _sum) {
 	ifstream ifs(_des_path, ios_base::binary);
 	if (ifs) {
-		auto sha_sum = myapps::utility::sha256hex(ifs);
+        auto sha_sum = myapps::utility::hex_encode(myapps::utility::sha256(ifs));
 		::SendNotifyMessage(_hProgCtrl, PBM_SETPOS, (WPARAM)(INT)(100), 0);
 		return sha_sum == myapps::client::utility::narrow(_sum);
 	}

@@ -6,7 +6,7 @@
 #define NOMINMAX
 #endif
 #include <strsafe.h>
-#include <winfsp.hpp>
+#include <winfsp/winfsp.hpp>
 
 #include "solid/system/log.hpp"
 
@@ -37,7 +37,7 @@
 #include <userenv.h>
 #pragma comment(lib, "userenv.lib")
 
-#define PROGNAME "ola-fs"
+#define PROGNAME "myapps_service_filesystem"
 
 #define ALLOCATION_UNIT 4096
 #define FULLPATH_SIZE (MAX_PATH + FSP_FSCTL_TRANSACT_PATH_SIZEMAX / sizeof(WCHAR))
@@ -57,7 +57,7 @@ namespace fs = boost::filesystem;
 
 namespace {
 
-constexpr string_view service_name("ola_client_service");
+constexpr string_view service_name("myapps_service_filesystem");
 
 const solid::LoggerT logger("myapps::client::service");
 
@@ -273,14 +273,14 @@ private:
     void onGuiFail();
 #endif
 };
-} //namespace
+} // namespace
 
 #ifdef SOLID_ON_WINDOWS
 int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR pCmdLine, int nCmdShow)
 {
     int        argc;
     LPWSTR*    argv                  = CommandLineToArgvW(GetCommandLineW(), &argc);
-    const auto m_singleInstanceMutex = CreateMutex(NULL, TRUE, L"OLA_SERVICE_SHARED_MUTEX");
+    const auto m_singleInstanceMutex = CreateMutex(NULL, TRUE, L"MYAPPS_SERVICE_SHARED_MUTEX");
     if (m_singleInstanceMutex == NULL || GetLastError() == ERROR_ALREADY_EXISTS) {
         return -1; // Exit the app. For MFC, return false from InitInstance.
     }
@@ -295,7 +295,7 @@ int wmain(int argc, wchar_t** argv)
     const auto        rv = service.Run();
     if (!service.waitAuthentication()) {
     } else {
-        //we need to restart the service
+        // we need to restart the service
         TCHAR          szFileName[MAX_PATH];
         vector<WCHAR*> arg_vec;
         for (int i = 0; i < argc; ++i) {
@@ -323,7 +323,7 @@ std::ostream& operator<<(std::ostream& os, const std::vector<string>& vec)
 } // namespace std
 
 namespace {
-//TODO: find a better name
+// TODO: find a better name
 string env_config_path_prefix()
 {
     const char* v = getenv("APPDATA");
@@ -351,7 +351,7 @@ string env_app_data_path()
     return v;
 }
 
-//TODO: find a better name
+// TODO: find a better name
 string env_log_path_prefix()
 {
     const char* v = getenv("LOCALAPPDATA");
@@ -461,7 +461,7 @@ bool Parameters::parse(ULONG argc, PWSTR* argv)
         options_description config(string(service_name) + " configuration options");
         // clang-format off
         config.add_options()
-            ("debug-modules,M", value<std::vector<std::string>>(&this->debug_modules_)->default_value(std::vector<std::string>{"myapps::.*:VIEW", ".*:EWX"}), "Debug logging modules")
+            ("debug-modules,M", value<std::vector<std::string>>(&this->debug_modules_)->default_value(std::vector<std::string>{"myapps::.*:VIEW", ".*:EWX", "\\*:VIEWX"}), "Debug logging modules")
             ("debug-address,A", value<string>(&debug_addr_)->default_value(""), "Debug server address (e.g. on linux use: nc -l 9999)")
             ("debug-port,P", value<string>(&debug_port_)->default_value("9999"), "Debug server port (e.g. on linux use: nc -l 9999)")
             ("debug-console,C", value<bool>(&debug_console_)->implicit_value(true)->default_value(false), "Debug console")
@@ -608,6 +608,152 @@ FileSystemService::FileSystemService() : Service(L"" PROGNAME), fs_(engine_), ho
 {
 }
 
+string printOpenFlags(const uint32_t _flags)
+{
+    string str;
+    if (_flags & FILE_DIRECTORY_FILE) {
+        str += "FILE_DIRECTORY_FILE ";
+    }
+   
+    if (_flags & FILE_WRITE_THROUGH) {
+        str += "FILE_WRITE_THROUGH ";
+    }
+ 
+    if (_flags & FILE_SEQUENTIAL_ONLY) {
+        str += "FILE_SEQUENTIAL_ONLY ";
+    }
+ 
+    if (_flags & FILE_NO_INTERMEDIATE_BUFFERING) {
+        str += "FILE_NO_INTERMEDIATE_BUFFERING ";
+    }
+ 
+    if (_flags & FILE_SYNCHRONOUS_IO_ALERT) {
+        str += "FILE_SYNCHRONOUS_IO_ALERT ";
+    }
+ 
+    if (_flags & FILE_SYNCHRONOUS_IO_NONALERT) {
+        str += "FILE_SYNCHRONOUS_IO_NONALERT ";
+    }
+   
+    if (_flags & FILE_NON_DIRECTORY_FILE) {
+        str += "FILE_NON_DIRECTORY_FILE ";
+    }
+ 
+    if (_flags & FILE_CREATE_TREE_CONNECTION) {
+        str += "FILE_CREATE_TREE_CONNECTION ";
+    }
+    if (_flags & FILE_COMPLETE_IF_OPLOCKED) {
+        str += "FILE_COMPLETE_IF_OPLOCKED ";
+    }
+    if (_flags & FILE_NO_EA_KNOWLEDGE) {
+        str += "FILE_NO_EA_KNOWLEDGE ";
+    }
+    if (_flags & FILE_OPEN_REMOTE_INSTANCE) {
+        str += "FILE_OPEN_REMOTE_INSTANCE ";
+    }
+    if (_flags & FILE_RANDOM_ACCESS) {
+        str += "FILE_RANDOM_ACCESS ";
+    }
+    if (_flags & FILE_DELETE_ON_CLOSE) {
+        str += "FILE_DELETE_ON_CLOSE ";
+    }
+    if (_flags & FILE_OPEN_BY_FILE_ID) {
+        str += "FILE_OPEN_BY_FILE_ID ";
+    }
+    if (_flags & FILE_OPEN_FOR_BACKUP_INTENT) {
+        str += "FILE_OPEN_FOR_BACKUP_INTENT ";
+    }
+    if (_flags & FILE_NO_COMPRESSION) {
+        str += "FILE_NO_COMPRESSION ";
+    }
+    if (_flags & FILE_OPEN_REQUIRING_OPLOCK) {
+        str += "FILE_OPEN_REQUIRING_OPLOCK ";
+    }
+    if (_flags & FILE_RESERVE_OPFILTER) {
+        str += "FILE_RESERVE_OPFILTER ";
+    }
+    if (_flags & FILE_OPEN_REPARSE_POINT) {
+        str += "FILE_OPEN_REPARSE_POINT ";
+    }
+    if (_flags & FILE_OPEN_NO_RECALL) {
+        str += "FILE_OPEN_NO_RECALL ";
+    }
+    if (_flags & FILE_OPEN_FOR_FREE_SPACE_QUERY) {
+        str += "FILE_OPEN_FOR_FREE_SPACE_QUERY ";
+    }
+    return str;
+}
+
+string printFileAttributes(const uint32_t _flags)
+{
+    string str;
+    if (_flags & FILE_ATTRIBUTE_READONLY) {
+        str += "FILE_ATTRIBUTE_READONLY ";
+    }
+    if (_flags & FILE_ATTRIBUTE_SYSTEM) {
+        str += "FILE_ATTRIBUTE_SYSTEM ";
+    }
+    if (_flags & FILE_ATTRIBUTE_DIRECTORY) {
+        str += "FILE_ATTRIBUTE_DIRECTORY ";
+    }
+    if (_flags & FILE_ATTRIBUTE_ARCHIVE) {
+        str += "FILE_ATTRIBUTE_ARCHIVE ";
+    }
+    if (_flags & FILE_ATTRIBUTE_DEVICE) {
+        str += "FILE_ATTRIBUTE_DEVICE ";
+    }
+    if (_flags & FILE_ATTRIBUTE_NORMAL) {
+        str += "FILE_ATTRIBUTE_NORMAL ";
+    }
+    if (_flags & FILE_ATTRIBUTE_TEMPORARY) {
+        str += "FILE_ATTRIBUTE_TEMPORARY ";
+    }
+    if (_flags & FILE_ATTRIBUTE_SPARSE_FILE) {
+        str += "FILE_ATTRIBUTE_SPARSE_FILE ";
+    }
+    if (_flags & FILE_ATTRIBUTE_REPARSE_POINT) {
+        str += "FILE_ATTRIBUTE_REPARSE_POINT ";
+    }
+    if (_flags & FILE_ATTRIBUTE_COMPRESSED) {
+        str += "FILE_ATTRIBUTE_COMPRESSED ";
+    }
+    if (_flags & FILE_ATTRIBUTE_OFFLINE) {
+        str += "FILE_ATTRIBUTE_OFFLINE ";
+    }
+    if (_flags & FILE_ATTRIBUTE_NOT_CONTENT_INDEXED) {
+        str += "FILE_ATTRIBUTE_NOT_CONTENT_INDEXED ";
+    }
+    if (_flags & FILE_ATTRIBUTE_ENCRYPTED) {
+        str += "FILE_ATTRIBUTE_ENCRYPTED ";
+    }
+    if (_flags & FILE_ATTRIBUTE_INTEGRITY_STREAM) {
+        str += "FILE_ATTRIBUTE_INTEGRITY_STREAM ";
+    }
+    if (_flags & FILE_ATTRIBUTE_VIRTUAL) {
+        str += "FILE_ATTRIBUTE_VIRTUAL ";
+    }
+    if (_flags & FILE_ATTRIBUTE_NO_SCRUB_DATA) {
+        str += "FILE_ATTRIBUTE_NO_SCRUB_DATA ";
+    }
+    if (_flags & FILE_ATTRIBUTE_EA) {
+        str += "FILE_ATTRIBUTE_EA ";
+    }
+    if (_flags & FILE_ATTRIBUTE_PINNED) {
+        str += "FILE_ATTRIBUTE_PINNED ";
+    }
+    if (_flags & FILE_ATTRIBUTE_UNPINNED) {
+        str += "FILE_ATTRIBUTE_UNPINNED ";
+    }
+    if (_flags & FILE_ATTRIBUTE_RECALL_ON_OPEN) {
+        str += "FILE_ATTRIBUTE_RECALL_ON_OPEN ";
+    }
+    if (_flags & FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS) {
+        str += "FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS ";
+    }
+    return str;
+}
+
+
 DWORD GetSessionIdOfUser(PCWSTR pszUserName,  
                          PCWSTR pszDomain) 
 { 
@@ -741,7 +887,7 @@ bool CreateInteractiveProcess(const wstring &_cmd_line,
 
 void WriteEventLogEntry(PWSTR pszMessage, WORD wType) 
 { 
-	PWSTR m_name = L"ola_client_service"; 
+	const PWSTR m_name = L"myapps_service_filesystem"; 
     HANDLE hEventSource = NULL; 
     LPCWSTR lpszStrings[2] = { NULL, NULL }; 
  
@@ -988,40 +1134,20 @@ NTSTATUS FileSystemService::OnStart(ULONG argc, PWSTR *argv)
 
     cfg.invalidate_cache_fnc_ = [this](const std::string &_app){
         //TODO: fix - seems not to work for what is needed
-        union
-        {
-            FSP_FSCTL_NOTIFY_INFO V;
-            UINT8 B[1024];
-        } Buffer;
-
-        ULONG Length = 0;
         
-        union
-        {
-            FSP_FSCTL_NOTIFY_INFO V;
-            UINT8 B[sizeof(FSP_FSCTL_NOTIFY_INFO) + MAX_PATH * sizeof(WCHAR)];
-        } nf;
+        fs::path app_path = fs::path(params_.mount_point_) / utility::widen(_app);
 
-        NTSTATUS  Result = STATUS_SUCCESS;
+        engine_.post([app_path](myapps::client::service::Engine &){
+            boost::system::error_code err;
 
-        std::wstring wpath = params_.mount_point_ + L"\\" + utility::widen(_app);
-        
-        solid_log(solid::generic_logger, Info, "Invalidating cache for: "<<utility::narrow(wpath));
-        
-        Result = FspFileSystemNotifyBegin(host_.FileSystemHandle(), 4);
-        assert(Result == STATUS_SUCCESS);
+            solid_log(solid::generic_logger, Info, "Before remove_all application ["<<app_path.generic_string()<< "]");
+            
+            fs::remove_all(app_path, err);
 
-        nf.V.Size = (UINT16)(sizeof(FSP_FSCTL_NOTIFY_INFO) + wpath.size() * sizeof(WCHAR));
-        nf.V.Filter = FILE_NOTIFY_CHANGE_CREATION;
-        nf.V.Action = FILE_ACTION_REMOVED;
-        memcpy(nf.V.FileNameBuf, wpath.data(), nf.V.Size - sizeof(FSP_FSCTL_NOTIFY_INFO));
-        FspFileSystemAddNotifyInfo(&nf.V, &Buffer, sizeof Buffer, &Length);
-
-        Result = FspFileSystemNotify(host_.FileSystemHandle(), &Buffer.V, Length);
-        assert(Result == STATUS_SUCCESS);
-
-        Result = FspFileSystemNotifyEnd(host_.FileSystemHandle());
-        assert(Result == STATUS_SUCCESS);
+            if(err){
+                solid_log(solid::generic_logger, Error, "Error deleting application ["<<app_path.generic_string()<<"]: "<<err.message());
+            }
+        });
     };
     
     engine_.start(cfg);
@@ -1067,26 +1193,26 @@ wstring a2w(const string &_a) {
 
 void FileSystemService::guiStart(){
 	wostringstream oss;
-	oss<<L"ola_client_auth.exe";
+	oss<<L"myapps_auth.exe";
     DWORD dwExitCode;
     if (!CreateInteractiveProcess(oss.str(), FALSE, 0, 
         &dwExitCode))
     {
         // Log the error and exit.
-        WriteErrorLogEntry(L"CreateInteractiveProcess", GetLastError());
+        WriteErrorLogEntry((PWSTR)L"CreateInteractiveProcess", GetLastError());
         return;
     }
 }
 
 void FileSystemService::meStart(){
 	wostringstream oss;
-	oss<<L"ola_client_auth.exe";
+	oss<<L"myapps_auth.exe";
     DWORD dwExitCode;
     if (!CreateInteractiveProcess(oss.str(), FALSE, 0, 
         &dwExitCode))
     {
         // Log the error and exit.
-        WriteErrorLogEntry(L"CreateInteractiveProcess", GetLastError());
+        WriteErrorLogEntry((PWSTR)L"CreateInteractiveProcess", GetLastError());
         return;
     }
 }
@@ -1133,7 +1259,7 @@ NTSTATUS error_to_status(const ErrorE _err) {
 	};
 }
 
-uint32_t node_flags_to_attributes(myapps::client::service::NodeFlagsT _node_flags){
+inline uint32_t node_flags_to_attributes(const myapps::client::service::NodeFlagsT _node_flags){
 	using myapps::client::service::NodeFlagsE;
 	using myapps::client::service::NodeFlagsT;
 	uint32_t attr = 0;
@@ -1147,6 +1273,11 @@ uint32_t node_flags_to_attributes(myapps::client::service::NodeFlagsT _node_flag
 	if(_node_flags & node_flag(NodeFlagsE::Hidden)){
 		attr |= FILE_ATTRIBUTE_HIDDEN;
 	}
+    if((_node_flags & node_flag(NodeFlagsE::PendingDelete)) == 0){
+        attr |= FILE_ATTRIBUTE_READONLY | FILE_ATTRIBUTE_NOT_CONTENT_INDEXED;
+    }else{
+        attr |= 0;
+    }
 
 	return attr;
 }
@@ -1209,7 +1340,9 @@ NTSTATUS FileSystem::Init(PVOID Host0)
     Host->SetVolumeCreationTime(base_time_);
     Host->SetVolumeSerialNumber(0);
     Host->SetFlushAndPurgeOnCleanup(TRUE);
-    Host->SetRejectIrpPriorToTransact0(1);
+    Host->SetReparsePoints(TRUE);
+    Host->SetReparsePointsAccessCheck(FALSE);
+    //Host->SetRejectIrpPriorToTransact0(1);
 
 	return InitSecurityDescriptor();
 }
@@ -1240,7 +1373,7 @@ NTSTATUS FileSystem::GetSecurityByName(
 	    uint64_t size = 0;
         int64_t  base_time = 0;
         if (engine().info(FileName, node_flags, size, base_time)) {
-            *PFileAttributes = FILE_ATTRIBUTE_READONLY | FILE_ATTRIBUTE_NOT_CONTENT_INDEXED | node_flags_to_attributes(node_flags);
+            *PFileAttributes = node_flags_to_attributes(node_flags);
         }
         else {
             return NtStatusFromWin32(ERROR_PATH_NOT_FOUND);
@@ -1291,6 +1424,7 @@ NTSTATUS FileSystem::Open(
     *PFileDesc = engine().open(FileName, CreateOptions, GrantedAccess);
 
     if(*PFileDesc != nullptr){
+        solid_log(solid::generic_logger, Info, "Open ["<<utility::narrow(FileName)<<"] ["<<printOpenFlags(CreateOptions)<<']');
         return GetFileInfo(*PFileNode, *PFileDesc, &OpenFileInfo->FileInfo);
     }else{
         return NtStatusFromWin32(ERROR_FILE_NOT_FOUND);
@@ -1379,9 +1513,10 @@ NTSTATUS FileSystem::GetFileInfo(
     NodeFlagsT node_flags;
 	uint64_t size = 0;
     int64_t  base_time = 0;
+
 	engine().info(static_cast<service::Descriptor*>(pFileDesc), node_flags, size, base_time);
 
-	FileInfo->FileAttributes = FILE_ATTRIBUTE_READONLY | FILE_ATTRIBUTE_NOT_CONTENT_INDEXED | node_flags_to_attributes(node_flags);
+	FileInfo->FileAttributes = node_flags_to_attributes(node_flags);
     FileInfo->ReparseTag     = 0;
     FileInfo->FileSize       = size;
     FileInfo->AllocationSize = (FileInfo->FileSize + ALLOCATION_UNIT - 1)
@@ -1406,6 +1541,11 @@ NTSTATUS FileSystem::SetBasicInfo(
     UINT64 ChangeTime,
     FileInfo *FileInfo)
 {
+    if (FileAttributes != INVALID_FILE_ATTRIBUTES)
+    {
+        solid_log(solid::generic_logger, Info, "["<<pFileDesc<<"] Attributes ["<<printFileAttributes(FileAttributes)<<']');
+    }
+
     return STATUS_UNSUCCESSFUL;
 }
 
@@ -1424,7 +1564,7 @@ NTSTATUS FileSystem::CanDelete(
     PVOID pFileDesc,
     PWSTR FileName)
 {
-    return STATUS_UNSUCCESSFUL;
+    return STATUS_SUCCESS;
 }
 
 NTSTATUS FileSystem::Rename(
@@ -1496,11 +1636,11 @@ NTSTATUS FileSystem::ReadDirectoryEntry(
     wstring	    name;
 	uint64_t	size = 0;
     int64_t     base_time = base_time_;
-	uint32_t    attributes = FILE_ATTRIBUTE_READONLY | FILE_ATTRIBUTE_NOT_CONTENT_INDEXED;
+	uint32_t    attributes = 0;
 	NodeFlagsT	node_flags;
 
     if(engine().list(static_cast<service::Descriptor*>(pFileDesc), *pContext, name, node_flags, size, base_time)){
-		attributes |= node_flags_to_attributes(node_flags);
+		attributes = node_flags_to_attributes(node_flags);
 	}else{
 		return STATUS_NO_MORE_FILES;
 	}

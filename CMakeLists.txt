@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.15 FATAL_ERROR)
 cmake_policy(SET CMP0091 NEW)
 cmake_policy(SET CMP0115 NEW)
 
-project(MyAppsClient VERSION 0.13)
+project(MyAppsClient VERSION 0.14)
 
 set(EXTERNAL_DIR "" CACHE PATH "External dependencies folder")
 
@@ -52,7 +52,7 @@ if(CMAKE_BUILD_TYPE STREQUAL "debug")
     set(CONFIGURATION_TYPE "debug")
 endif(CMAKE_BUILD_TYPE STREQUAL "debug")
 
-set(QT5PREFIX_DIR "" CACHE PATH "QT Prefix directory")
+set(QTPREFIX_DIR "" CACHE PATH "QT Prefix directory")
 
 message("project build type: ${CMAKE_BUILD_TYPE}")
 
@@ -160,6 +160,7 @@ configure_file(${CMAKE_CURRENT_SOURCE_DIR}/cmake/config.hpp.in ${CMAKE_BINARY_DI
 ###############################################################################
 
 set (CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 ###############################################################################
 # Static Analisys
