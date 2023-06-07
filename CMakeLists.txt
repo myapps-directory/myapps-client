@@ -159,8 +159,8 @@ configure_file(${CMAKE_CURRENT_SOURCE_DIR}/cmake/config.hpp.in ${CMAKE_BINARY_DI
 # C++ Standard
 ###############################################################################
 
-set (CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_STANDARD 17)
+#set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 ###############################################################################
 # Static Analisys

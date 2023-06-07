@@ -23,7 +23,7 @@
 #include "solid/system/exception.hpp"
 #include "solid/utility/string.hpp"
 
-#include "solid/utility/workpool.hpp"
+#include "solid/utility/threadpool.hpp"
 
 #include "solid/frame/aio/aioresolver.hpp"
 
@@ -69,15 +69,17 @@ using namespace std;
 
 namespace fs = boost::filesystem;
 
-using AioSchedulerT = frame::Scheduler<frame::aio::Reactor>;
-using SchedulerT    = frame::Scheduler<frame::Reactor>;
-
 //-----------------------------------------------------------------------------
 //      Parameters
 //-----------------------------------------------------------------------------
 namespace {
 constexpr string_view service_name("myapps_auth");
 const solid::LoggerT logger("myapps::client::auth");
+
+
+using AioSchedulerT = frame::Scheduler<frame::aio::Reactor<frame::mprpc::EventT>>;
+using SchedulerT    = frame::Scheduler<frame::Reactor<Event<32>>>;
+using CallPoolT            = ThreadPool<Function<void()>, Function<void()>>;
 
 struct Parameters {
     vector<string> debug_modules;
@@ -292,8 +294,8 @@ int main(int argc, char* argv[])
 
     frame::mprpc::ServiceT front_rpc_service{manager};
 
-    lockfree::CallPoolT<void(), void> cwp{WorkPoolConfiguration(1)};
-    frame::aio::Resolver              resolver([&cwp](std::function<void()>&& _fnc) { cwp.push(std::move(_fnc)); });
+    CallPoolT                cwp{1, 1000, 0, [](const size_t) {}, [](const size_t) {}};
+    frame::aio::Resolver     resolver([&cwp](std::function<void()>&& _fnc) { cwp.pushOne(std::move(_fnc)); });
 
     client::auth::MainWindow main_window;
     Engine                   engine(main_window, front_rpc_service, params);

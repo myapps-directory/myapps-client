@@ -12,7 +12,7 @@
 #include "solid/frame/mprpc/mprpcsocketstub_openssl.hpp"
 #include "solid/frame/mprpc/mprpcprotocol_serialization_v3.hpp"
 
-#include "solid/utility/workpool.hpp"
+#include "solid/utility/threadpool.hpp"
 
 #include "myapps/common/utility/encode.hpp"
 #include "myapps/common/front_protocol_main.hpp"
@@ -58,7 +58,8 @@ namespace {
 constexpr string_view service_name("myapps_client_cli");
 const solid::LoggerT logger("cli");
 
-using AioSchedulerT = frame::Scheduler<frame::aio::Reactor>;
+using AioSchedulerT = frame::Scheduler<frame::aio::Reactor<frame::mprpc::EventT>>;
+using CallPoolT            = ThreadPool<Function<void()>, Function<void()>>;
 
 string env_config_path_prefix();
 string get_home_env();
@@ -257,8 +258,8 @@ int main(int argc, char* argv[])
     }
     AioSchedulerT          scheduler;
     frame::Manager         manager;
-    lockfree::CallPoolT<void(), void> cwp{WorkPoolConfiguration(1)};
-    frame::aio::Resolver              resolver([&cwp](std::function<void()>&& _fnc) { cwp.push(std::move(_fnc)); });
+    CallPoolT              cwp{1, 1000, 0, [](const size_t) {}, [](const size_t) {}};
+    frame::aio::Resolver   resolver([&cwp](std::function<void()>&& _fnc) { cwp.pushOne(std::move(_fnc)); });
     frame::mprpc::ServiceT rpc_service(manager);
     Engine                 engine(rpc_service, params);
 

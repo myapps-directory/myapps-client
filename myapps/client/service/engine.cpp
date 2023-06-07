@@ -13,7 +13,7 @@
 #include "solid/frame/mprpc/mprpcservice.hpp"
 #include "solid/frame/mprpc/mprpcsocketstub_openssl.hpp"
 
-#include "solid/utility/workpool.hpp"
+#include "solid/utility/threadpool.hpp"
 
 #include "myapps/common/utility/encode.hpp"
 
@@ -87,6 +87,8 @@ enum struct EntryStatusE : uint8_t {
     FetchError,
     Fetched
 };
+
+using CallPoolT            = ThreadPool<Function<void()>, Function<void()>>;
 
 /*
 struct Hash {
@@ -514,7 +516,7 @@ struct Entry {
     }
 };
 
-using AioSchedulerT = frame::Scheduler<frame::aio::Reactor>;
+using AioSchedulerT = frame::Scheduler<frame::aio::Reactor<frame::mprpc::EventT>>;
 
 EntryPointerT DirectoryData::find(const string& _path) const
 {
@@ -665,7 +667,7 @@ struct Engine::Implementation {
     Configuration                     config_;
     AioSchedulerT                     scheduler_;
     frame::Manager                    manager_;
-    lockfree::CallPoolT<void(), void> workpool_;
+    CallPoolT                         workpool_;
     frame::aio::Resolver              resolver_;
     frame::mprpc::ServiceT            front_rpc_service_;
     mutex                             mutex_;
@@ -692,8 +694,8 @@ public:
     Implementation(
         const Configuration& _rcfg)
         : config_(_rcfg)
-        , workpool_{WorkPoolConfiguration{1}}
-        , resolver_{[this](std::function<void()>&& _fnc) { workpool_.push(std::move(_fnc)); }}
+        , workpool_{1, 1000, 0, [](const size_t) {}, [](const size_t) {}}
+        , resolver_{[this](std::function<void()>&& _fnc) { workpool_.pushOne(std::move(_fnc)); }}
         , front_rpc_service_{manager_}
         , shortcut_creator_{config_.temp_folder_}
     {
@@ -930,7 +932,7 @@ void*& Engine::buffer(Descriptor& _rdesc)
 
 void Engine::post(std::function<void(Engine&)>&& _fnc)
 {
-    pimpl_->workpool_.push([this, fnc = std::move(_fnc)]() {
+    pimpl_->workpool_.pushOne([this, fnc = std::move(_fnc)]() {
         fnc(*this);
     });
 }
@@ -1818,7 +1820,7 @@ void Engine::Implementation::remoteFetchApplication(
 
             if (_rrecv_msg_ptr->error_ == 0) {
 
-                this->workpool_.push(
+                this->workpool_.pushOne(
                     [this, recv_msg_ptr = std::move(_rrecv_msg_ptr), is_last = _app_index >= app_id_vec.size(), app = app_id_vec[_app_index - 1]]() mutable {
                         insertApplicationEntry(recv_msg_ptr, app);
                         if (is_last) {
