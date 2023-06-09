@@ -9,6 +9,7 @@
 #include <QToolBar>
 #include <QToolButton>
 #include <QMessageBox>
+#include <QStyleHints>
 
 #include <string>
 #include <sstream>
@@ -76,14 +77,19 @@ struct MainWindow::Data {
     int                      dpi_y_          = QApplication::primaryScreen()->logicalDotsPerInchY();
     double                   scale_x_        = double(dpi_x_) / 120.0; //173.0 / double(dpi_x_);
     double                   scale_y_        = double(dpi_y_) / 120.0; //166.0 / double(dpi_y_);
-
+    
+    
+    static bool               isColorSchemeDark(){
+        return QGuiApplication::styleHints()->colorScheme() == Qt::ColorScheme::Dark;
+    }
+    
     Data(QMainWindow* _pw)
         : tool_bar_(_pw)
-        , back_action_(QIcon(":/images/back.png"), tr("&Back"), _pw)
-        , home_action_(QIcon(":/images/home.png"), tr("&Home"), _pw) 
-        , create_action_(QIcon(":/images/create.png"), tr("&Create"), _pw) 
-        , about_action_(QIcon(":/images/about.png"), tr("&About"), _pw)
-        , amend_action_(QIcon(":/images/amend.png"), tr("&Edit"), _pw) 
+        , back_action_(QIcon(isColorSchemeDark() ? ":/images/back_d.png" : ":/images/back.png"), tr("&Back"), _pw)
+        , home_action_(QIcon(isColorSchemeDark() ? ":/images/home_d.png":":/images/home.png"), tr("&Home"), _pw) 
+        , create_action_(QIcon(isColorSchemeDark() ? ":/images/create_d.png":":/images/create.png"), tr("&Create"), _pw) 
+        , about_action_(QIcon(isColorSchemeDark() ? ":/images/about_d.png" :":/images/about.png"), tr("&About"), _pw)
+        , amend_action_(QIcon(isColorSchemeDark() ? ":/images/amend_d.png" : ":/images/amend.png"), tr("&Edit"), _pw) 
     {
     }
 
@@ -255,9 +261,7 @@ MainWindow::MainWindow(QWidget* parent)
     pimpl_->reset_form_.label->setFixedSize(QSize(pimpl_->reset_form_.label->width() * pimpl_->scale_x_, pimpl_->reset_form_.label->height() * pimpl_->scale_y_));
 
 
-    //setWindowFlags(Qt::Drawer);
-    //setStyleSheet("background-color:black;");
-    {
+    if(false){
         int   aElements[2] = {COLOR_WINDOW, COLOR_ACTIVECAPTION};
         DWORD aOldColors[2];
 
@@ -271,6 +275,10 @@ MainWindow::MainWindow(QWidget* parent)
         setPalette(pal);
     }
     installEventFilter(this);
+
+    auto* hints = QGuiApplication::styleHints();
+
+    connect(hints, SIGNAL(colorSchemeChanged(Qt::ColorScheme)), this, SLOT(onColorSchemeChanged(Qt::ColorScheme)));
 
     connect(pimpl_->home_form_.authButton, SIGNAL(clicked()), this, SLOT(onAuthClick()));
     connect(pimpl_->home_form_.logoutButton, SIGNAL(clicked()), this, SLOT(onLogoutClick()));
@@ -768,11 +776,31 @@ void MainWindow::deleteAccountSlot(const QString& error)
     }
 }
 
+void MainWindow::onColorSchemeChanged(Qt::ColorScheme scheme)
+{
+    pimpl_->about_action_.setIcon(QIcon(Data::isColorSchemeDark() ? ":/images/about_d.png" : ":/images/about.png"));
+    pimpl_->home_action_.setIcon(QIcon(Data::isColorSchemeDark() ? ":/images/home_d.png" : ":/images/home.png"));
+    pimpl_->create_action_.setIcon(QIcon(Data::isColorSchemeDark() ? ":/images/create_d.png" : ":/images/create.png"));
+    pimpl_->amend_action_.setIcon(QIcon(Data::isColorSchemeDark() ? ":/images/amend_d.png" : ":/images/amend.png"));
+    pimpl_->back_action_.setIcon(QIcon(Data::isColorSchemeDark() ? ":/images/back_d.png" : ":/images/back.png"));
+    
+    QImage img = pimpl_->home_form_.label->pixmap().toImage();
+    img.invertPixels(QImage::InvertRgba);
+
+    auto pixmap = QPixmap::fromImage(img, Qt::AutoColor);
+    pimpl_->home_form_.label->setPixmap(pixmap);
+    pimpl_->create_form_.label->setPixmap(pixmap);
+    pimpl_->reset_form_.label->setPixmap(pixmap);
+}
+
 void MainWindow::captchaSlot(CaptchaPointerT _captcha_ptr)
 {
     solid_log(logger, Info, "size = " << _captcha_ptr->size());
     QImage img;
     if (img.loadFromData(reinterpret_cast<const uchar*>(_captcha_ptr->data()), _captcha_ptr->size())) {
+        if (Data::isColorSchemeDark()) {
+            img.invertPixels(QImage::InvertRgba); 
+        }
         auto pixmap = QPixmap::fromImage(img, Qt::AutoColor);
         pimpl_->home_form_.label->setPixmap(pixmap);
         pimpl_->create_form_.label->setPixmap(pixmap);

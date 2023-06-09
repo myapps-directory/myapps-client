@@ -5,5 +5,10 @@
         <file>images/create.png</file>
         <file>images/about.png</file>
         <file>images/amend.png</file>
+		<file>images/back_d.png</file>
+		<file>images/home_d.png</file>
+		<file>images/create_d.png</file>
+		<file>images/about_d.png</file>
+		<file>images/amend_d.png</file>
     </qresource>
 </RCC>

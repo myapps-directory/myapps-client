@@ -287,6 +287,8 @@ int main(int argc, char* argv[])
 
     QApplication app(argc, argv);
 
+    app.setStyle("fusion");
+
     AioSchedulerT aioscheduler;
 
     frame::Manager  manager;

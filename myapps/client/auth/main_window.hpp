@@ -109,6 +109,8 @@ private slots:
 
     void deleteAccountSlot(const QString& error);
 
+    void onColorSchemeChanged(Qt::ColorScheme scheme);
+
 private:
     void closeEvent(QCloseEvent*) override;
     bool eventFilter(QObject* obj, QEvent* event) override;
