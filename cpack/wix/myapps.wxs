@@ -34,6 +34,14 @@
         <?ifdef CPACK_WIX_UI_DIALOG?>
         <WixVariable Id="WixUIDialogBmp" Value="$(var.CPACK_WIX_UI_DIALOG)"/>
         <?endif?>
+        
+        
+        <Property Id="CPPRUNTIMEX64" Secure="yes">
+            <!-- C++ 2019 -->
+            <?foreach CPPRUNTIMEVERSIONPREFIX in 21;22;23;24;25;26;27;28;29;30;31;32;33;34;35;36;37;38;39;40?>
+                <RegistrySearch Id="mfc14_$(var.CPPRUNTIMEVERSIONPREFIX)x64" Root="HKCR" Key="Installer\Dependencies\VC,redist.x64,amd64,14.$(var.CPPRUNTIMEVERSIONPREFIX),bundle" Type="raw" />
+            <?endforeach?>
+        </Property>
 
         <FeatureRef Id="ProductFeature"/>
 

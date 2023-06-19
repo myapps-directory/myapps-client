@@ -3,4 +3,8 @@
 		<Binary Id="myapps_wix_custom_action_dll"
 			SourceFile="$<TARGET_FILE:myapps_wix_custom_action>"/>
 	</Fragment>
+	<Fragment>
+		<Binary Id="myapps_wix_install_custom_action_dll"
+			SourceFile="$<TARGET_FILE:myapps_wix_install_custom_action>"/>
+	</Fragment>
 </Wix>

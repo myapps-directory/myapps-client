@@ -28,8 +28,12 @@
       </DirectorySearch>
     </Property>
 
-    <Condition Message="This product requires WinFSP. Please install it from https://github.com/billziss-gh/winfsp/releases then try to install this product again.">
+    <Condition Message="WinFSP is missing. Please install it from https://github.com/billziss-gh/winfsp/releases then try to install $(var.CPACK_PACKAGE_NAME) again.">
       WINFSPDLL
+    </Condition>
+    
+    <Condition Message="Microsoft Visual C++ 2015-2022 (x64) Redistributable missing. Please install it from https://aka.ms/vs/17/release/vc_redist.x64.exe then try to install $(var.CPACK_PACKAGE_NAME) again.">
+        Installed OR (CPPRUNTIMEX64)
     </Condition>
 
     <Condition Message="All Users">
@@ -65,12 +69,14 @@
     </util:CloseApplication>
 
     <InstallExecuteSequence>
+      <Custom Action ="ValidateDependencies" Before ="InstallFiles"></Custom>
       <Custom Action='WixCloseApplications' Before='InstallInitialize'>REMOVE = "ALL"</Custom>
       <Custom Action='KillService' Before='WixCloseApplications'>REMOVE = "ALL"</Custom>
       <Custom Action='UninstallCleanup' After='WixCloseApplications'>REMOVE = "ALL" AND NOT UPGRADINGPRODUCTCODE</Custom>
     </InstallExecuteSequence>
     
     <CustomAction Id="UninstallCleanup" BinaryKey="myapps_wix_custom_action_dll" DllEntry="UninstallCleanup"/>
+    <CustomAction Id="ValidateDependencies" BinaryKey="myapps_wix_install_custom_action_dll" DllEntry="ValidateDependencies"/>
     
   </CPackWiXFragment>
 
