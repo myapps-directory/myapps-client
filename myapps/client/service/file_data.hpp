@@ -40,8 +40,8 @@ struct FileFetchStub {
     uint32_t current_chunk_offset_ = 0;
     const uint32_t compress_chunk_capacity_ = 0;
     const uint8_t  compress_algorithm_type_ = 0;
-    std::shared_ptr<front::main::FetchStoreRequest> request_ptr_;
-    std::shared_ptr<front::main::FetchStoreResponse>   response_ptr_[2];
+    solid::frame::mprpc::MessagePointerT<front::main::FetchStoreRequest> request_ptr_;
+    solid::frame::mprpc::MessagePointerT<front::main::FetchStoreResponse> response_ptr_[2];
     std::deque<uint32_t>  chunk_dq_;
     uint32_t            contiguous_chunk_count_ = 0;//used for prefetching
     uint32_t            last_chunk_index_ = 0;
@@ -158,7 +158,8 @@ struct FileFetchStub {
             erase(*pfront_);
         }
     }
-    void storeResponse(std::shared_ptr<front::main::FetchStoreResponse>& _rres_ptr) {
+    void storeResponse(solid::frame::mprpc::MessagePointerT<front::main::FetchStoreResponse>& _rres_ptr)
+    {
         if (!response_ptr_[0]) {
             response_ptr_[0] = _rres_ptr;
         }
@@ -226,11 +227,12 @@ struct FileData : file_cache::FileData {
         return fetch_stub_ptr_->current_chunk_index_ == _chunk_index && fetch_stub_ptr_->current_chunk_offset_ >= _chunk_offset;
     }
 
-    void storeResponse(std::shared_ptr<front::main::FetchStoreResponse>& _rres_ptr) {
+    void storeResponse(solid::frame::mprpc::MessagePointerT<front::main::FetchStoreResponse>& _rres_ptr)
+    {
         fetch_stub_ptr_->storeResponse(_rres_ptr);
     }
     
-    void storeRequest(std::shared_ptr<front::main::FetchStoreRequest>&& _rres_ptr)
+    void storeRequest(solid::frame::mprpc::MessagePointerT<front::main::FetchStoreRequest>&& _rres_ptr)
     {
         fetch_stub_ptr_->request_ptr_ = std::move(_rres_ptr);
     }

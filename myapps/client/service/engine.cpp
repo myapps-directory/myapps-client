@@ -694,7 +694,7 @@ public:
     Implementation(
         const Configuration& _rcfg)
         : config_(_rcfg)
-        , workpool_{1, 1000, 0, [](const size_t) {}, [](const size_t) {}}
+        , workpool_{{1, 1000, 0}, [](const size_t) {}, [](const size_t) {}}
         , resolver_{[this](std::function<void()>&& _fnc) { workpool_.pushOne(std::move(_fnc)); }}
         , front_rpc_service_{manager_}
         , shortcut_creator_{config_.temp_folder_}
@@ -721,13 +721,13 @@ public:
     void onFrontAuthResponse(
         frame::mprpc::ConnectionContext&     _ctx,
         const front::core::AuthRequest&      _rreq,
-        std::shared_ptr<core::AuthResponse>& _rrecv_msg_ptr);
+        frame::mprpc::MessagePointerT<core::AuthResponse>& _rrecv_msg_ptr);
 
     void loadAuthData();
 
     void onFrontListAppsResponse(
         frame::mprpc::ConnectionContext&         _ctx,
-        std::shared_ptr<main::ListAppsResponse>& _rrecv_msg_ptr);
+        frame::mprpc::MessagePointerT<main::ListAppsResponse>& _rrecv_msg_ptr);
 
     void onAllApplicationsFetched();
     void cleanFileCache();
@@ -757,11 +757,11 @@ public:
 
     void asyncFetchStoreFileHandleResponse(
         frame::mprpc::ConnectionContext& _rctx, EntryPointerT& _rentry_ptr,
-        std::shared_ptr<main::FetchStoreRequest>&  _rsent_msg_ptr,
-        std::shared_ptr<main::FetchStoreResponse>& _rrecv_msg_ptr);
+        frame::mprpc::MessagePointerT<main::FetchStoreRequest>&  _rsent_msg_ptr,
+        frame::mprpc::MessagePointerT<main::FetchStoreResponse>& _rrecv_msg_ptr);
     void asyncFetchStoreFile(
         frame::mprpc::ConnectionContext* _pctx, EntryPointerT& _rentry_ptr,
-        std::shared_ptr<main::FetchStoreRequest>& _rreq_msg_ptr,
+        frame::mprpc::MessagePointerT<main::FetchStoreRequest>& _rreq_msg_ptr,
         const uint32_t _chunk_index, const uint32_t _chunk_offset);
 
     bool list(
@@ -787,7 +787,7 @@ private:
     void tryAuthenticate(frame::mprpc::ConnectionContext& _ctx);
 
     void insertApplicationEntry(
-        std::shared_ptr<main::FetchBuildConfigurationResponse>& _rrecv_msg_ptr,
+        frame::mprpc::MessagePointerT<main::FetchBuildConfigurationResponse>& _rrecv_msg_ptr,
         const myapps::utility::ApplicationListItem&             _app);
     void insertMountEntry(EntryPointerT& _rparent_ptr, const fs::path& _local, const string& _remote);
 
@@ -804,7 +804,7 @@ private:
 
     void remoteFetchApplication(
         main::ListAppsResponse::AppVectorT&                    _rapp_id_vec,
-        std::shared_ptr<main::FetchBuildConfigurationRequest>& _rsent_msg_ptr,
+        frame::mprpc::MessagePointerT<main::FetchBuildConfigurationRequest>& _rsent_msg_ptr,
         size_t                                                 _app_index);
 };
 
@@ -817,8 +817,8 @@ namespace {
 template <class M>
 void complete_message(
     frame::mprpc::ConnectionContext& _rctx,
-    std::shared_ptr<M>&              _rsent_msg_ptr,
-    std::shared_ptr<M>&              _rrecv_msg_ptr,
+    frame::mprpc::MessagePointerT<M>&              _rsent_msg_ptr,
+    frame::mprpc::MessagePointerT<M>&              _rrecv_msg_ptr,
     ErrorConditionT const&           _rerror)
 {
 }
@@ -903,18 +903,18 @@ void Engine::start(const Configuration& _rcfg)
     if (!err) {
         auto lambda = [pimpl = pimpl_.get()](
                           frame::mprpc::ConnectionContext&         _rctx,
-                          std::shared_ptr<main::ListAppsRequest>&  _rsent_msg_ptr,
-                          std::shared_ptr<main::ListAppsResponse>& _rrecv_msg_ptr,
+                          frame::mprpc::MessagePointerT<main::ListAppsRequest>&  _rsent_msg_ptr,
+                          frame::mprpc::MessagePointerT<main::ListAppsResponse>& _rrecv_msg_ptr,
                           ErrorConditionT const&                   _rerror) {
             if (_rrecv_msg_ptr) {
                 pimpl->onFrontListAppsResponse(_rctx, _rrecv_msg_ptr);
             }
         };
 
-        auto req_ptr     = make_shared<main::ListAppsRequest>();
+        auto req_ptr     = frame::mprpc::make_message<main::ListAppsRequest>();
         req_ptr->choice_ = 'a';
 
-        err = pimpl_->front_rpc_service_.sendRequest(pimpl_->config_.auth_endpoint_.c_str(), req_ptr, lambda);
+        err = pimpl_->front_rpc_service_.sendRequest({pimpl_->config_.auth_endpoint_}, req_ptr, lambda);
         solid_check_log(!err, logger, "err = " << err.message());
         pimpl_->running_ = true;
     }
@@ -947,15 +947,15 @@ void Engine::relogin()
 
     auto lambda = [this](
                       frame::mprpc::ConnectionContext&     _rctx,
-                      std::shared_ptr<core::AuthRequest>&  _rsent_msg_ptr,
-                      std::shared_ptr<core::AuthResponse>& _rrecv_msg_ptr,
+                      frame::mprpc::MessagePointerT<core::AuthRequest>&  _rsent_msg_ptr,
+                      frame::mprpc::MessagePointerT<core::AuthResponse>& _rrecv_msg_ptr,
                       ErrorConditionT const&               _rerror) {
         if (_rrecv_msg_ptr) {
             pimpl_->onFrontAuthResponse(_rctx, *_rsent_msg_ptr, _rrecv_msg_ptr);
         }
     };
 
-    auto req_ptr   = std::make_shared<core::AuthRequest>();
+    auto req_ptr   = frame::mprpc::make_message<core::AuthRequest>();
     req_ptr->pass_ = pimpl_->config_.auth_get_token_fnc_();
 
     for (const auto& recipient_id : auth_recipient_vec) {
@@ -1110,8 +1110,8 @@ bool Engine::Implementation::fetch(EntryPointerT& _rentry_ptr, unique_lock<mutex
         _rentry_ptr->status_ = EntryStatusE::FetchPending;
         auto lambda          = [entry_ptr = _rentry_ptr, this](
                           frame::mprpc::ConnectionContext&          _rctx,
-                          std::shared_ptr<main::ListStoreRequest>&  _rsent_msg_ptr,
-                          std::shared_ptr<main::ListStoreResponse>& _rrecv_msg_ptr,
+                          frame::mprpc::MessagePointerT<main::ListStoreRequest>&  _rsent_msg_ptr,
+                          frame::mprpc::MessagePointerT<main::ListStoreResponse>& _rrecv_msg_ptr,
                           ErrorConditionT const&                    _rerror) mutable {
             auto&              m = entry_ptr->mutex();
             unique_lock<mutex> lock{m};
@@ -1132,13 +1132,13 @@ bool Engine::Implementation::fetch(EntryPointerT& _rentry_ptr, unique_lock<mutex
             entry_ptr->conditionVariable().notify_all();
         };
 
-        auto req_ptr         = make_shared<main::ListStoreRequest>();
+        auto req_ptr         = frame::mprpc::make_message<main::ListStoreRequest>();
         req_ptr->path_       = _remote_path;
         req_ptr->shard_id_ =  _rentry_ptr->pmaster_->remote_shard_id_;
         req_ptr->storage_id_ = _rentry_ptr->pmaster_->remote_storage_id_;
 
 
-        front_rpc_service_.sendRequest(config_.auth_endpoint_.c_str(), req_ptr, lambda);
+        front_rpc_service_.sendRequest({config_.auth_endpoint_}, req_ptr, lambda);
     }
 
     if (_rentry_ptr->status_ == EntryStatusE::FetchPending) {
@@ -1348,7 +1348,7 @@ void Engine::Implementation::releaseApplication(Entry& _rapp_entry)
     }
 
     if (!new_app_id_vec.empty()) {
-        auto req_ptr = make_shared<main::FetchBuildConfigurationRequest>();
+        auto req_ptr = frame::mprpc::make_message<main::FetchBuildConfigurationRequest>();
 
         // TODO:
         req_ptr->lang_  = "US_en";
@@ -1584,7 +1584,7 @@ void Engine::Implementation::tryFetch(EntryPointerT& _rentry_ptr)
     rfile_data.prepareFetchingChunk();
     rfile_data.pendingRequest(true);
 
-    auto req_ptr = make_shared<main::FetchStoreRequest>();
+    auto req_ptr = frame::mprpc::make_message<main::FetchStoreRequest>();
 
     req_ptr->path_         = rfile_data.remote_path_;
     req_ptr->shard_id_   = _rentry_ptr->pmaster_->remote_shard_id_;
@@ -1597,8 +1597,8 @@ void Engine::Implementation::tryFetch(EntryPointerT& _rentry_ptr)
 
 void Engine::Implementation::asyncFetchStoreFileHandleResponse(
     frame::mprpc::ConnectionContext& _rctx, EntryPointerT& _rentry_ptr,
-    std::shared_ptr<main::FetchStoreRequest>&  _rsent_msg_ptr,
-    std::shared_ptr<main::FetchStoreResponse>& _rrecv_msg_ptr)
+    frame::mprpc::MessagePointerT<main::FetchStoreRequest>&  _rsent_msg_ptr,
+    frame::mprpc::MessagePointerT<main::FetchStoreResponse>& _rrecv_msg_ptr)
 {
     FileData&      rfile_data          = _rentry_ptr->fileData();
     bool           should_wake_readers = false;
@@ -1659,14 +1659,14 @@ void Engine::Implementation::asyncFetchStoreFileHandleResponse(
 
 void Engine::Implementation::asyncFetchStoreFile(
     frame::mprpc::ConnectionContext* _pctx, EntryPointerT& _rentry_ptr,
-    std::shared_ptr<main::FetchStoreRequest>& _rreq_msg_ptr,
+    frame::mprpc::MessagePointerT<main::FetchStoreRequest>& _rreq_msg_ptr,
     const uint32_t _chunk_index, const uint32_t _chunk_offset)
 {
     solid_log(logger, Info, _rentry_ptr->name_ << " " << _chunk_index << " " << _chunk_offset);
     auto lambda = [entry_ptr = _rentry_ptr, this /*, _chunk_index, _chunk_offset*/](
                       frame::mprpc::ConnectionContext&           _rctx,
-                      std::shared_ptr<main::FetchStoreRequest>&  _rsent_msg_ptr,
-                      std::shared_ptr<main::FetchStoreResponse>& _rrecv_msg_ptr,
+                      frame::mprpc::MessagePointerT<main::FetchStoreRequest>&  _rsent_msg_ptr,
+                      frame::mprpc::MessagePointerT<main::FetchStoreResponse>& _rrecv_msg_ptr,
                       ErrorConditionT const&                     _rerror) mutable {
         FileData&          rfile_data = entry_ptr->fileData();
         auto&              m          = entry_ptr->mutex();
@@ -1697,11 +1697,11 @@ void Engine::Implementation::asyncFetchStoreFile(
     FileData& rfile_data = _rentry_ptr->fileData();
     if (_pctx) {
 
-        std::shared_ptr<main::FetchStoreRequest> req_ptr;
+        frame::mprpc::MessagePointerT<main::FetchStoreRequest> req_ptr;
         if (rfile_data.requestPointer()) {
             req_ptr = std::move(rfile_data.requestPointer());
         } else {
-            req_ptr              = make_shared<main::FetchStoreRequest>();
+            req_ptr              = frame::mprpc::make_message<main::FetchStoreRequest>();
             req_ptr->shard_id_ = _rreq_msg_ptr->shard_id_;
             req_ptr->storage_id_ = _rreq_msg_ptr->storage_id_;
             req_ptr->path_       = _rreq_msg_ptr->path_;
@@ -1714,7 +1714,7 @@ void Engine::Implementation::asyncFetchStoreFile(
             _rentry_ptr->conditionVariable().notify_all();
         }
     } else {
-        const auto err = front_rpc_service_.sendRequest(config_.auth_endpoint_.c_str(), _rreq_msg_ptr, lambda);
+        const auto err = front_rpc_service_.sendRequest({config_.auth_endpoint_}, _rreq_msg_ptr, lambda);
         if (err) {
             rfile_data.error(-1);
             _rentry_ptr->conditionVariable().notify_all();
@@ -1729,12 +1729,12 @@ void Engine::Implementation::tryAuthenticate(frame::mprpc::ConnectionContext& _r
     string auth_token = config_.auth_get_token_fnc_();
 
     if (!auth_token.empty()) {
-        auto req_ptr   = std::make_shared<core::AuthRequest>();
+        auto req_ptr   = frame::mprpc::make_message<core::AuthRequest>();
         req_ptr->pass_ = auth_token;
         auto lambda    = [this](
                           frame::mprpc::ConnectionContext&     _rctx,
-                          std::shared_ptr<core::AuthRequest>&  _rsent_msg_ptr,
-                          std::shared_ptr<core::AuthResponse>& _rrecv_msg_ptr,
+                          frame::mprpc::MessagePointerT<core::AuthRequest>&  _rsent_msg_ptr,
+                          frame::mprpc::MessagePointerT<core::AuthResponse>& _rrecv_msg_ptr,
                           ErrorConditionT const&               _rerror) {
             if (_rrecv_msg_ptr) {
                 onFrontAuthResponse(_rctx, *_rsent_msg_ptr, _rrecv_msg_ptr);
@@ -1750,11 +1750,11 @@ void Engine::Implementation::tryAuthenticate(frame::mprpc::ConnectionContext& _r
 
 void Engine::Implementation::onFrontConnectionStart(frame::mprpc::ConnectionContext& _ctx)
 {
-    auto req_ptr = std::make_shared<main::InitRequest>();
+    auto req_ptr = frame::mprpc::make_message<main::InitRequest>();
     auto lambda  = [this](
                       frame::mprpc::ConnectionContext&     _rctx,
-                      std::shared_ptr<main::InitRequest>&  _rsent_msg_ptr,
-                      std::shared_ptr<core::InitResponse>& _rrecv_msg_ptr,
+                      frame::mprpc::MessagePointerT<main::InitRequest>&  _rsent_msg_ptr,
+                      frame::mprpc::MessagePointerT<core::InitResponse>& _rrecv_msg_ptr,
                       ErrorConditionT const&               _rerror) {
         if (_rrecv_msg_ptr) {
             if (_rrecv_msg_ptr->error_ == 0) {
@@ -1774,7 +1774,7 @@ void Engine::Implementation::onFrontConnectionInit(frame::mprpc::ConnectionConte
 void Engine::Implementation::onFrontAuthResponse(
     frame::mprpc::ConnectionContext&     _rctx,
     const core::AuthRequest&             _rreq,
-    std::shared_ptr<core::AuthResponse>& _rrecv_msg_ptr)
+    frame::mprpc::MessagePointerT<core::AuthResponse>& _rrecv_msg_ptr)
 {
     if (!_rrecv_msg_ptr)
         return;
@@ -1803,7 +1803,7 @@ void Engine::Implementation::onFrontAuthResponse(
 
 void Engine::Implementation::remoteFetchApplication(
     main::ListAppsResponse::AppVectorT&                    _rapp_id_vec,
-    std::shared_ptr<main::FetchBuildConfigurationRequest>& _rsent_msg_ptr,
+    frame::mprpc::MessagePointerT<main::FetchBuildConfigurationRequest>& _rsent_msg_ptr,
     size_t                                                 _app_index)
 {
     _rsent_msg_ptr->application_id_   = _rapp_id_vec[_app_index].id_;
@@ -1811,8 +1811,8 @@ void Engine::Implementation::remoteFetchApplication(
 
     auto lambda = [this, _app_index, app_id_vec = std::move(_rapp_id_vec)](
                       frame::mprpc::ConnectionContext&                        _rctx,
-                      std::shared_ptr<main::FetchBuildConfigurationRequest>&  _rsent_msg_ptr,
-                      std::shared_ptr<main::FetchBuildConfigurationResponse>& _rrecv_msg_ptr,
+                      frame::mprpc::MessagePointerT<main::FetchBuildConfigurationRequest>&  _rsent_msg_ptr,
+                      frame::mprpc::MessagePointerT<main::FetchBuildConfigurationResponse>& _rrecv_msg_ptr,
                       ErrorConditionT const&                                  _rerror) mutable {
         if (_rrecv_msg_ptr) {
 
@@ -1838,7 +1838,7 @@ void Engine::Implementation::remoteFetchApplication(
         }
     };
 
-    front_rpc_service_.sendRequest(config_.auth_endpoint_.c_str(), _rsent_msg_ptr, lambda);
+    front_rpc_service_.sendRequest({config_.auth_endpoint_}, _rsent_msg_ptr, lambda);
 }
 
 void Engine::Implementation::cleanFileCache()
@@ -1864,11 +1864,11 @@ void Engine::Implementation::update()
     UpdatesMapT updates_map;
     auto        list_lambda = [this, &done, &updates_map](
                            frame::mprpc::ConnectionContext&         _rctx,
-                           std::shared_ptr<main::ListAppsRequest>&  _rsent_msg_ptr,
-                           std::shared_ptr<main::ListAppsResponse>& _rrecv_msg_ptr,
+                           frame::mprpc::MessagePointerT<main::ListAppsRequest>&  _rsent_msg_ptr,
+                           frame::mprpc::MessagePointerT<main::ListAppsResponse>& _rrecv_msg_ptr,
                            ErrorConditionT const&                   _rerror) {
         if (_rrecv_msg_ptr) {
-            auto req_ptr = make_shared<main::FetchBuildUpdatesRequest>();
+            auto req_ptr = frame::mprpc::make_message<main::FetchBuildUpdatesRequest>();
             req_ptr->app_id_vec_.reserve(_rrecv_msg_ptr->app_vec_.size());
             for (auto&& a : _rrecv_msg_ptr->app_vec_) {
                 auto build_req = app_list_.find(a.unique_).name_;
@@ -1881,8 +1881,8 @@ void Engine::Implementation::update()
 
             auto lambda = [this, &done, &updates_map](
                               frame::mprpc::ConnectionContext&                  _rctx,
-                              std::shared_ptr<main::FetchBuildUpdatesRequest>&  _rsent_msg_ptr,
-                              std::shared_ptr<main::FetchBuildUpdatesResponse>& _rrecv_msg_ptr,
+                              frame::mprpc::MessagePointerT<main::FetchBuildUpdatesRequest>&  _rsent_msg_ptr,
+                              frame::mprpc::MessagePointerT<main::FetchBuildUpdatesResponse>& _rrecv_msg_ptr,
                               ErrorConditionT const&                            _rerror) {
                 if (_rrecv_msg_ptr) {
                     updates_map.clear();
@@ -1905,7 +1905,7 @@ void Engine::Implementation::update()
                 }
             };
 
-            const auto err = front_rpc_service_.sendRequest(config_.auth_endpoint_.c_str(), req_ptr, lambda);
+            const auto err = front_rpc_service_.sendRequest({config_.auth_endpoint_}, req_ptr, lambda);
             if (!err) {
                 return;
             }
@@ -1933,10 +1933,10 @@ void Engine::Implementation::update()
 
         app_list_.load(config_.app_list_path_);
 
-        auto req_ptr     = make_shared<main::ListAppsRequest>();
+        auto req_ptr     = frame::mprpc::make_message<main::ListAppsRequest>();
         req_ptr->choice_ = 'a';
 
-        const auto err = front_rpc_service_.sendRequest(config_.auth_endpoint_.c_str(), req_ptr, list_lambda);
+        const auto err = front_rpc_service_.sendRequest({config_.auth_endpoint_}, req_ptr, list_lambda);
         if (!err) {
             unique_lock<mutex> lock(root_mutex_);
 
@@ -2022,7 +2022,7 @@ void Engine::Implementation::updateApplications(const UpdatesMapT& _updates_map)
     }
 
     if (!new_app_id_vec.empty()) {
-        auto req_ptr = make_shared<main::FetchBuildConfigurationRequest>();
+        auto req_ptr = frame::mprpc::make_message<main::FetchBuildConfigurationRequest>();
 
         // TODO:
         req_ptr->lang_  = "en_US";
@@ -2054,7 +2054,7 @@ void Engine::Implementation::onAllApplicationsFetched()
 
 void Engine::Implementation::onFrontListAppsResponse(
     frame::mprpc::ConnectionContext&         _ctx,
-    std::shared_ptr<main::ListAppsResponse>& _rrecv_msg_ptr)
+    frame::mprpc::MessagePointerT<main::ListAppsResponse>& _rrecv_msg_ptr)
 {
     if (_rrecv_msg_ptr->app_vec_.empty()) {
 
@@ -2065,7 +2065,7 @@ void Engine::Implementation::onFrontListAppsResponse(
         return;
     }
 
-    auto req_ptr = make_shared<main::FetchBuildConfigurationRequest>();
+    auto req_ptr = frame::mprpc::make_message<main::FetchBuildConfigurationRequest>();
 
     // TODO:
     req_ptr->lang_  = "en_US";
@@ -2139,7 +2139,7 @@ string to_system_path(const string& _path)
 }
 
 void Engine::Implementation::insertApplicationEntry(
-    std::shared_ptr<main::FetchBuildConfigurationResponse>& _rrecv_msg_ptr,
+    frame::mprpc::MessagePointerT<main::FetchBuildConfigurationResponse>& _rrecv_msg_ptr,
     const myapps::utility::ApplicationListItem&             _app)
 {
     // NOTE: because of the entry_ptr, which after inserting it into root entry

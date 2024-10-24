@@ -214,10 +214,11 @@ int wmain(int argc, wchar_t** argv)
         sa.nLength              = sizeof(SECURITY_ATTRIBUTES);
         sa.lpSecurityDescriptor = pSD;
         sa.bInheritHandle       = FALSE;
-
-        HANDLE hFile = CreateFile(L"test.log", FILE_APPEND_DATA, FILE_SHARE_WRITE, &sa, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, 0);
-        wprintf(L"CreateFile Error: %u\n", GetLastError());
-        assert(hFile != INVALID_HANDLE_VALUE);
+        {
+            HANDLE hFile = CreateFile(L"test.log", FILE_APPEND_DATA, FILE_SHARE_WRITE, &sa, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, 0);
+            wprintf(L"CreateFile Error: %u\n", GetLastError());
+            assert(hFile != INVALID_HANDLE_VALUE);
+        }
     Cleanup:
         wprintf(L"fail\n");
     }

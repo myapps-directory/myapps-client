@@ -11,7 +11,7 @@ if(WIN32)
     )
 
     set_source_files_properties(engine.cpp PROPERTIES COMPILE_FLAGS -bigobj)
-    set_source_files_properties(filesystem_service.cpp PROPERTIES COMPILE_FLAGS "-DOLA_FRONT_URL=\\\"${OLA_FRONT_URL}\\\"")
+    set_source_files_properties(filesystem_service.cpp PROPERTIES COMPILE_FLAGS "-DMYAPPS_FRONT_URL=\\\"${MYAPPS_FRONT_URL}\\\" /Zc:strictStrings-")
 
     if(CMAKE_SIZEOF_VOID_P EQUAL 8)
         target_link_options(myapps_service_filesystem PRIVATE /DELAYLOAD:winfsp-x64.dll)
@@ -68,6 +68,8 @@ if(WIN32)
         Boost::system
         Boost::filesystem
     )
+
+    set_source_files_properties(passthrough.cpp PROPERTIES COMPILE_FLAGS "/Zc:strictStrings-")
 
     add_executable(passthrough_c passthrough.c)
 

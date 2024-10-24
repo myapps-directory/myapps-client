@@ -258,7 +258,7 @@ int main(int argc, char* argv[])
     }
     AioSchedulerT          scheduler;
     frame::Manager         manager;
-    CallPoolT              cwp{1, 1000, 0, [](const size_t) {}, [](const size_t) {}};
+    CallPoolT              cwp{{1, 1000, 0}, [](const size_t) {}, [](const size_t) {}};
     frame::aio::Resolver   resolver([&cwp](std::function<void()>&& _fnc) { cwp.pushOne(std::move(_fnc)); });
     frame::mprpc::ServiceT rpc_service(manager);
     Engine                 engine(rpc_service, params);
@@ -609,8 +609,8 @@ void Parameters::writeConfigurationFile(string _path, const boost::program_optio
 template <class M>
 void complete_message(
     frame::mprpc::ConnectionContext& _rctx,
-    std::shared_ptr<M>&              _rsent_msg_ptr,
-    std::shared_ptr<M>&              _rrecv_msg_ptr,
+    frame::mprpc::MessagePointerT<M>&              _rsent_msg_ptr,
+    frame::mprpc::MessagePointerT<M>&              _rrecv_msg_ptr,
     ErrorConditionT const&           _rerror)
 {
     //solid_check(false); //this method should not be called
@@ -712,28 +712,31 @@ void handle_help(istream& _ris, Engine &_reng){
 //-----------------------------------------------------------------------------
 
 void handle_list_oses(istream& /*_ris*/, Engine &_reng){
-    auto req_ptr = make_shared<main::ListOSesRequest>();
+    auto req_ptr = frame::mprpc::make_message<main::ListOSesRequest>();
     
     promise<void> prom;
-    
-    auto lambda = [&prom](
+    const auto start = std::chrono::high_resolution_clock::now();
+    auto lambda = [&prom, &start](
         frame::mprpc::ConnectionContext&        _rctx,
-        std::shared_ptr<main::ListOSesRequest>&  _rsent_msg_ptr,
-        std::shared_ptr<main::ListOSesResponse>& _rrecv_msg_ptr,
+        frame::mprpc::MessagePointerT<main::ListOSesRequest>&  _rsent_msg_ptr,
+        frame::mprpc::MessagePointerT<main::ListOSesResponse>& _rrecv_msg_ptr,
         ErrorConditionT const&                  _rerror
     ){
+        using namespace std::chrono;
         if(_rrecv_msg_ptr){
+            const auto now = std::chrono::high_resolution_clock::now();
             cout<<"{\n";
             for(const auto & os: _rrecv_msg_ptr->osvec_){
                 cout<<os<<'\n';
             }
-            cout<<'}'<<endl;
+            const auto duration = duration_cast<microseconds>(now - start).count();
+            cout<<"} "<<duration<<"us"<<endl;
         }else{
             cout<<"Error - no response: "<<_rerror.message()<<endl;
         }
         prom.set_value();
     };
-    _reng.rpcService().sendRequest(_reng.serverEndpoint().c_str(), req_ptr, lambda);
+    _reng.rpcService().sendRequest({_reng.serverEndpoint()}, req_ptr, lambda);
     
     auto fut = prom.get_future();
     solid_check(fut.wait_for(chrono::seconds(100)) == future_status::ready, "Taking too long - waited 100 secs");
@@ -743,7 +746,9 @@ void handle_list_oses(istream& /*_ris*/, Engine &_reng){
 //-----------------------------------------------------------------------------
 
 void handle_list_apps(istream& _ris, Engine &_reng){
-    auto req_ptr = make_shared<main::ListAppsRequest>();
+    using namespace std::chrono;
+
+    auto req_ptr = frame::mprpc::make_message<main::ListAppsRequest>();
     
     //o - owned applications
     //a - aquired applications
@@ -751,19 +756,22 @@ void handle_list_apps(istream& _ris, Engine &_reng){
     _ris>>req_ptr->choice_;
     
     promise<void> prom;
+    const auto start = std::chrono::high_resolution_clock::now();
     
-    auto lambda = [&prom](
+    auto lambda = [&prom, &start](
         frame::mprpc::ConnectionContext&        _rctx,
-        std::shared_ptr<main::ListAppsRequest>&  _rsent_msg_ptr,
-        std::shared_ptr<main::ListAppsResponse>& _rrecv_msg_ptr,
+        frame::mprpc::MessagePointerT<main::ListAppsRequest>&  _rsent_msg_ptr,
+        frame::mprpc::MessagePointerT<main::ListAppsResponse>& _rrecv_msg_ptr,
         ErrorConditionT const&                  _rerror
     ){
         if(_rrecv_msg_ptr && _rrecv_msg_ptr->error_ == 0){
+            const auto now = std::chrono::high_resolution_clock::now();
             cout<<"{\n";
             for(const auto& app_id: _rrecv_msg_ptr->app_vec_){
                 cout<<'\t'<<utility::base64_encode(app_id.id_)<<"\t"<<utility::base64_encode(app_id.unique_)<<'\t'<<app_id.name_<<endl;
             }
-            cout<<"}"<<endl;
+            const auto duration = duration_cast<microseconds>(now - start).count();
+            cout<<"} "<<duration<<"us"<<endl;
         }else if(!_rrecv_msg_ptr){
             cout<<"Error - no response: "<<_rerror.message()<<endl;
         }else{
@@ -771,7 +779,7 @@ void handle_list_apps(istream& _ris, Engine &_reng){
         }
         prom.set_value();
     };
-    _reng.rpcService().sendRequest(_reng.serverEndpoint().c_str(), req_ptr, lambda);
+    _reng.rpcService().sendRequest({_reng.serverEndpoint()}, req_ptr, lambda);
     
     auto fut = prom.get_future();
     solid_check(fut.wait_for(chrono::seconds(100)) == future_status::ready, "Taking too long - waited 100 secs");
@@ -782,7 +790,8 @@ void handle_list_apps(istream& _ris, Engine &_reng){
 //-----------------------------------------------------------------------------
 
 void handle_list_store(istream& _ris, Engine &_reng){
-    auto req_ptr = make_shared<main::ListStoreRequest>();
+    using namespace std::chrono;
+    auto req_ptr = frame::mprpc::make_message<main::ListStoreRequest>();
     
     _ris>>req_ptr->shard_id_;
     _ris>>std::quoted(req_ptr->storage_id_);
@@ -792,19 +801,22 @@ void handle_list_store(istream& _ris, Engine &_reng){
     
     
     promise<void> prom;
+    const auto start = std::chrono::high_resolution_clock::now();
     
-    auto lambda = [&prom](
+    auto lambda = [&prom, &start](
         frame::mprpc::ConnectionContext&        _rctx,
-        std::shared_ptr<main::ListStoreRequest>&  _rsent_msg_ptr,
-        std::shared_ptr<main::ListStoreResponse>& _rrecv_msg_ptr,
+        frame::mprpc::MessagePointerT<main::ListStoreRequest>&  _rsent_msg_ptr,
+        frame::mprpc::MessagePointerT<main::ListStoreResponse>& _rrecv_msg_ptr,
         ErrorConditionT const&                  _rerror
     ){
         if(_rrecv_msg_ptr && _rrecv_msg_ptr->error_ == 0){
+            const auto now = std::chrono::high_resolution_clock::now();
             cout<<"{\n";
             for(const auto& node: _rrecv_msg_ptr->node_dq_){
                 cout<<'\t'<<node.name_<<'\t'<<node.size_<<endl;
             }
-            cout<<"}"<<endl;
+            const auto duration = duration_cast<microseconds>(now - start).count();
+            cout<<"} "<<duration<<"us"<<endl;
         }else if(!_rrecv_msg_ptr){
             cout<<"Error - no response: "<<_rerror.message()<<endl;
         }else{
@@ -812,7 +824,7 @@ void handle_list_store(istream& _ris, Engine &_reng){
         }
         prom.set_value();
     };
-    _reng.rpcService().sendRequest(_reng.serverEndpoint().c_str(), req_ptr, lambda);
+    _reng.rpcService().sendRequest({_reng.serverEndpoint()}, req_ptr, lambda);
     
     auto fut = prom.get_future();
     solid_check(fut.wait_for(chrono::seconds(100)) == future_status::ready, "Taking too long - waited 100 secs");
@@ -840,7 +852,7 @@ void handle_list(istream& _ris, Engine &_reng){
 //-----------------------------------------------------------------------------
 
 void handle_change_state(istream& _ris, Engine& _reng) {
-    auto req_ptr = make_shared<main::ChangeAppItemStateRequest>();
+    auto req_ptr = frame::mprpc::make_message<main::ChangeAppItemStateRequest>();
 
     char item_type = '\0';//m/M->media, b/B->build
     string state_name;
@@ -872,8 +884,8 @@ void handle_change_state(istream& _ris, Engine& _reng) {
 
     auto lambda = [&prom](
         frame::mprpc::ConnectionContext& _rctx,
-        std::shared_ptr<myapps::front::main::ChangeAppItemStateRequest>& _rsent_msg_ptr,
-        std::shared_ptr<myapps::front::core::Response>& _rrecv_msg_ptr,
+        frame::mprpc::MessagePointerT<myapps::front::main::ChangeAppItemStateRequest>& _rsent_msg_ptr,
+        frame::mprpc::MessagePointerT<myapps::front::core::Response>& _rrecv_msg_ptr,
         ErrorConditionT const& _rerror) {
 
         if (_rrecv_msg_ptr && _rrecv_msg_ptr->error_ == 0) {
@@ -888,7 +900,7 @@ void handle_change_state(istream& _ris, Engine& _reng) {
         prom.set_value();
     };
 
-    _reng.rpcService().sendRequest(_reng.serverEndpoint().c_str(), req_ptr, lambda);
+    _reng.rpcService().sendRequest({_reng.serverEndpoint()}, req_ptr, lambda);
     auto fut = prom.get_future();
     solid_check(fut.wait_for(chrono::seconds(100)) == future_status::ready, "Taking too long - waited 100 secs");
     fut.get();
@@ -914,7 +926,7 @@ ostream& operator<<(ostream &_ros, const utility::Application &_cfg){
 }
 
 void handle_fetch_app(istream& _ris, Engine &_reng){
-     auto req_ptr = make_shared<main::FetchAppRequest>();
+     auto req_ptr = frame::mprpc::make_message<main::FetchAppRequest>();
     
     _ris>>std::quoted(req_ptr->application_id_);
     _ris>>std::quoted(req_ptr->os_id_);
@@ -925,8 +937,8 @@ void handle_fetch_app(istream& _ris, Engine &_reng){
     
     auto lambda = [&prom](
         frame::mprpc::ConnectionContext&        _rctx,
-        std::shared_ptr<main::FetchAppRequest>&  _rsent_msg_ptr,
-        std::shared_ptr<main::FetchAppResponse>& _rrecv_msg_ptr,
+        frame::mprpc::MessagePointerT<main::FetchAppRequest>&  _rsent_msg_ptr,
+        frame::mprpc::MessagePointerT<main::FetchAppResponse>& _rrecv_msg_ptr,
         ErrorConditionT const&                  _rerror
     ){
         if(_rrecv_msg_ptr && _rrecv_msg_ptr->error_ == 0){
@@ -947,7 +959,7 @@ void handle_fetch_app(istream& _ris, Engine &_reng){
         }
         prom.set_value();
     };
-    _reng.rpcService().sendRequest(_reng.serverEndpoint().c_str(), req_ptr, lambda);
+    _reng.rpcService().sendRequest({_reng.serverEndpoint()}, req_ptr, lambda);
     
     auto fut = prom.get_future();
     solid_check(fut.wait_for(chrono::seconds(100)) == future_status::ready, "Taking too long - waited 100 secs");
@@ -1024,7 +1036,7 @@ ostream& operator<<(ostream &_ros, const utility::Build &_cfg){
 }
 
 void handle_fetch_build(istream& _ris, Engine &_reng){
-    auto req_ptr = make_shared<main::FetchBuildRequest>();
+    auto req_ptr = frame::mprpc::make_message<main::FetchBuildRequest>();
     
     _ris>>std::quoted(req_ptr->application_id_);
     _ris>>std::quoted(req_ptr->build_id_);
@@ -1036,8 +1048,8 @@ void handle_fetch_build(istream& _ris, Engine &_reng){
     
     auto lambda = [&prom](
         frame::mprpc::ConnectionContext&        _rctx,
-        std::shared_ptr<main::FetchBuildRequest>&  _rsent_msg_ptr,
-        std::shared_ptr<main::FetchBuildResponse>& _rrecv_msg_ptr,
+        frame::mprpc::MessagePointerT<main::FetchBuildRequest>&  _rsent_msg_ptr,
+        frame::mprpc::MessagePointerT<main::FetchBuildResponse>& _rrecv_msg_ptr,
         ErrorConditionT const&                  _rerror
     ){
         if(_rrecv_msg_ptr && _rrecv_msg_ptr->error_ == 0){
@@ -1055,7 +1067,7 @@ void handle_fetch_build(istream& _ris, Engine &_reng){
         }
         prom.set_value();
     };
-    _reng.rpcService().sendRequest(_reng.serverEndpoint().c_str(), req_ptr, lambda);
+    _reng.rpcService().sendRequest({_reng.serverEndpoint()}, req_ptr, lambda);
     
     auto fut = prom.get_future();
     solid_check(fut.wait_for(chrono::seconds(100)) == future_status::ready, "Taking too long - waited 100 secs");
@@ -1063,7 +1075,7 @@ void handle_fetch_build(istream& _ris, Engine &_reng){
 }
 
 void handle_fetch_config(istream& _ris, Engine &_reng){
-    auto req_ptr = make_shared<main::FetchBuildConfigurationRequest>();
+    auto req_ptr = frame::mprpc::make_message<main::FetchBuildConfigurationRequest>();
     
     _ris>>std::quoted(req_ptr->application_id_);
     _ris>>std::quoted(req_ptr->lang_);
@@ -1083,8 +1095,8 @@ void handle_fetch_config(istream& _ris, Engine &_reng){
     
     auto lambda = [&prom](
         frame::mprpc::ConnectionContext&        _rctx,
-        std::shared_ptr<main::FetchBuildConfigurationRequest>&  _rsent_msg_ptr,
-        std::shared_ptr<main::FetchBuildConfigurationResponse>& _rrecv_msg_ptr,
+        frame::mprpc::MessagePointerT<main::FetchBuildConfigurationRequest>&  _rsent_msg_ptr,
+        frame::mprpc::MessagePointerT<main::FetchBuildConfigurationResponse>& _rrecv_msg_ptr,
         ErrorConditionT const&                  _rerror
     ){
         if(_rrecv_msg_ptr && _rrecv_msg_ptr->error_ == 0){
@@ -1105,7 +1117,7 @@ void handle_fetch_config(istream& _ris, Engine &_reng){
         }
         prom.set_value();
     };
-    _reng.rpcService().sendRequest(_reng.serverEndpoint().c_str(), req_ptr, lambda);
+    _reng.rpcService().sendRequest({_reng.serverEndpoint()}, req_ptr, lambda);
     
     auto fut = prom.get_future();
     solid_check(fut.wait_for(chrono::seconds(100)) == future_status::ready, "Taking too long - waited 100 secs");
@@ -1154,8 +1166,8 @@ struct StoreFetchStub {
     uint32_t current_chunk_offset_ = 0;
     uint32_t compress_chunk_capacity_ = 0;
     uint8_t  compress_algorithm_type_ = 0;
-    std::shared_ptr<main::FetchStoreRequest> request_ptr_;
-    std::shared_ptr<main::FetchStoreResponse>   response_ptr_[2];
+    frame::mprpc::MessagePointerT<main::FetchStoreRequest> request_ptr_;
+    frame::mprpc::MessagePointerT<main::FetchStoreResponse>   response_ptr_[2];
     bool pending_request_ = false;
 
 
@@ -1196,7 +1208,7 @@ struct StoreFetchStub {
         return current_chunk_index_ + 1;
     }
 
-    void storeResponse(std::shared_ptr<front::main::FetchStoreResponse>& _rres_ptr) {
+    void storeResponse(frame::mprpc::MessagePointerT<front::main::FetchStoreResponse>& _rres_ptr) {
         if (!response_ptr_[0]) {
             response_ptr_[0] = _rres_ptr;
         }
@@ -1206,7 +1218,7 @@ struct StoreFetchStub {
         }
     }
 
-    void storeRequest(std::shared_ptr<front::main::FetchStoreRequest>&& _rres_ptr)
+    void storeRequest(frame::mprpc::MessagePointerT<front::main::FetchStoreRequest>&& _rres_ptr)
     {
         request_ptr_ = std::move(_rres_ptr);
     }
@@ -1263,7 +1275,7 @@ void fetch_remote_file(
     Engine& _reng,
     promise<uint32_t>& _rprom,
     StoreFetchStub& _rfetch_stub,
-    std::shared_ptr<main::FetchStoreRequest>& _rreq_msg_ptr,
+    frame::mprpc::MessagePointerT<main::FetchStoreRequest>& _rreq_msg_ptr,
     const uint32_t _chunk_index = 0, const uint32_t _chunk_offset = 0);
 
 void handle_response(
@@ -1271,8 +1283,8 @@ void handle_response(
     Engine& _reng,
     promise<uint32_t>& _rprom,
     StoreFetchStub& _rfetch_stub,
-    std::shared_ptr<main::FetchStoreRequest>& _rsent_msg_ptr,
-    std::shared_ptr<main::FetchStoreResponse>& _rrecv_msg_ptr
+    frame::mprpc::MessagePointerT<main::FetchStoreRequest>& _rsent_msg_ptr,
+    frame::mprpc::MessagePointerT<main::FetchStoreResponse>& _rrecv_msg_ptr
 ) {
     const uint32_t received_size = _rfetch_stub.copy(_rrecv_msg_ptr->ioss_, _rrecv_msg_ptr->chunk_.size_, _rrecv_msg_ptr->chunk_.isCompressed());
 
@@ -1337,13 +1349,13 @@ void fetch_remote_file(
     Engine &_reng,
     promise<uint32_t> &_rprom,
     StoreFetchStub&_rfetch_stub,
-    std::shared_ptr<main::FetchStoreRequest>&  _rreq_msg_ptr,
+    frame::mprpc::MessagePointerT<main::FetchStoreRequest>&  _rreq_msg_ptr,
     const uint32_t _chunk_index, const uint32_t _chunk_offset){
     
     auto lambda = [&_rprom, &_rfetch_stub, &_reng, _chunk_index, _chunk_offset](
         frame::mprpc::ConnectionContext&        _rctx,
-        std::shared_ptr<main::FetchStoreRequest>&  _rsent_msg_ptr,
-        std::shared_ptr<main::FetchStoreResponse>& _rrecv_msg_ptr,
+        frame::mprpc::MessagePointerT<main::FetchStoreRequest>&  _rsent_msg_ptr,
+        frame::mprpc::MessagePointerT<main::FetchStoreResponse>& _rrecv_msg_ptr,
         ErrorConditionT const&                  _rerror
     )mutable{
         
@@ -1367,24 +1379,24 @@ void fetch_remote_file(
     };
 
     if (_pctx) {
-        std::shared_ptr<main::FetchStoreRequest> req_ptr;
+        frame::mprpc::MessagePointerT<main::FetchStoreRequest> req_ptr;
         if (_rfetch_stub.request_ptr_) {
             req_ptr = std::move(_rfetch_stub.request_ptr_);
         }
         else {
-            req_ptr = make_shared<main::FetchStoreRequest>();
+            req_ptr = frame::mprpc::make_message<main::FetchStoreRequest>();
             req_ptr->shard_id_ = _rreq_msg_ptr->shard_id_;
             req_ptr->storage_id_ = _rreq_msg_ptr->storage_id_;
             req_ptr->path_ = _rreq_msg_ptr->path_;
         }
         req_ptr->chunk_index_ = _chunk_index;
         req_ptr->chunk_offset_ = _chunk_offset;
-        const auto err = _pctx->service().sendRequest(_pctx->recipientId(), req_ptr, lambda);
+        const auto err = _pctx->service().sendRequest({_pctx->recipientId()}, req_ptr, lambda);
         if (err) {
             _rprom.set_value(-1);
         }
     }else{
-        const auto err = _reng.rpcService().sendRequest(_reng.serverEndpoint().c_str(), _rreq_msg_ptr, lambda);
+        const auto err = _reng.rpcService().sendRequest({_reng.serverEndpoint()}, _rreq_msg_ptr, lambda);
         if (err) {
             _rprom.set_value(-1);
         }
@@ -1392,7 +1404,7 @@ void fetch_remote_file(
 }
 
 void handle_fetch_store(istream& _ris, Engine &_reng){
-    auto req_ptr = make_shared<main::FetchStoreRequest>();
+    auto req_ptr = frame::mprpc::make_message<main::FetchStoreRequest>();
     string local_path;
     
     _ris>>req_ptr->shard_id_;
@@ -1405,7 +1417,7 @@ void handle_fetch_store(istream& _ris, Engine &_reng){
     StoreFetchStub fetch_stub;
 
     {
-        auto lst_req_ptr = make_shared<main::ListStoreRequest>();
+        auto lst_req_ptr = frame::mprpc::make_message<main::ListStoreRequest>();
 
         lst_req_ptr->path_ = req_ptr->path_;
         lst_req_ptr->storage_id_ = req_ptr->storage_id_;
@@ -1414,8 +1426,8 @@ void handle_fetch_store(istream& _ris, Engine &_reng){
 
         auto lambda = [&prom, &fetch_stub](
             frame::mprpc::ConnectionContext& _rctx,
-            std::shared_ptr<main::ListStoreRequest>& _rsent_msg_ptr,
-            std::shared_ptr<main::ListStoreResponse>& _rrecv_msg_ptr,
+            frame::mprpc::MessagePointerT<main::ListStoreRequest>& _rsent_msg_ptr,
+            frame::mprpc::MessagePointerT<main::ListStoreResponse>& _rrecv_msg_ptr,
             ErrorConditionT const& _rerror
             ) {
                 if (_rrecv_msg_ptr && _rrecv_msg_ptr->error_ == 0) {
@@ -1433,7 +1445,7 @@ void handle_fetch_store(istream& _ris, Engine &_reng){
                     prom.set_value(_rrecv_msg_ptr->error_);
                 }
         };
-        _reng.rpcService().sendRequest(_reng.serverEndpoint().c_str(), lst_req_ptr, lambda);
+        _reng.rpcService().sendRequest({_reng.serverEndpoint()}, lst_req_ptr, lambda);
 
         auto fut = prom.get_future();
         solid_check(fut.wait_for(chrono::seconds(100)) == future_status::ready, "Taking too long - waited 100 secs");
@@ -1469,7 +1481,7 @@ void handle_fetch_store(istream& _ris, Engine &_reng){
 }
 
 void handle_fetch_updates(istream& _ris, Engine &_reng){
-    auto req_ptr = make_shared<main::FetchBuildUpdatesRequest>();
+    auto req_ptr = frame::mprpc::make_message<main::FetchBuildUpdatesRequest>();
     
     _ris>>std::quoted(req_ptr->lang_);
     _ris>>std::quoted(req_ptr->os_id_);
@@ -1492,8 +1504,8 @@ void handle_fetch_updates(istream& _ris, Engine &_reng){
     promise<void> prom;
     auto lambda = [&prom](
         frame::mprpc::ConnectionContext&        _rctx,
-        std::shared_ptr<main::FetchBuildUpdatesRequest>&  _rsent_msg_ptr,
-        std::shared_ptr<main::FetchBuildUpdatesResponse>& _rrecv_msg_ptr,
+        frame::mprpc::MessagePointerT<main::FetchBuildUpdatesRequest>&  _rsent_msg_ptr,
+        frame::mprpc::MessagePointerT<main::FetchBuildUpdatesResponse>& _rrecv_msg_ptr,
         ErrorConditionT const&                  _rerror
     ){
         if(_rrecv_msg_ptr && _rrecv_msg_ptr->error_ == 0){
@@ -1510,7 +1522,7 @@ void handle_fetch_updates(istream& _ris, Engine &_reng){
         }
         prom.set_value();
     };
-    _reng.rpcService().sendRequest(_reng.serverEndpoint().c_str(), req_ptr, lambda);
+    _reng.rpcService().sendRequest({_reng.serverEndpoint()}, req_ptr, lambda);
     
     auto fut = prom.get_future();
     solid_check(fut.wait_for(chrono::seconds(100)) == future_status::ready, "Taking too long - waited 100 secs");
@@ -1547,7 +1559,7 @@ bool store_app_config(const myapps::utility::Application &_rcfg, const string &_
 string generate_temp_name();
 
 void handle_create_app ( istream& _ris, Engine &_reng){
-    auto req_ptr = make_shared<main::CreateAppRequest>();
+    auto req_ptr = frame::mprpc::make_message<main::CreateAppRequest>();
     
 #ifdef APP_CONFIG
     string config_path;
@@ -1564,8 +1576,8 @@ void handle_create_app ( istream& _ris, Engine &_reng){
     
     auto lambda = [&prom](
         frame::mprpc::ConnectionContext&     _rctx,
-        std::shared_ptr<main::CreateAppRequest>&  _rsent_msg_ptr,
-        std::shared_ptr<core::Response>&          _rrecv_msg_ptr,
+        frame::mprpc::MessagePointerT<main::CreateAppRequest>&  _rsent_msg_ptr,
+        frame::mprpc::MessagePointerT<core::Response>&          _rrecv_msg_ptr,
         ErrorConditionT const&              _rerror
     ){
         if(_rrecv_msg_ptr){
@@ -1582,7 +1594,7 @@ void handle_create_app ( istream& _ris, Engine &_reng){
         }
         prom.set_value();
     };
-    _reng.rpcService().sendRequest(_reng.serverEndpoint().c_str(), req_ptr, lambda);
+    _reng.rpcService().sendRequest({_reng.serverEndpoint()}, req_ptr, lambda);
     
     auto fut = prom.get_future();
     solid_check(fut.wait_for(chrono::seconds(100)) == future_status::ready, "Taking too long - waited 100 secs");
@@ -1596,8 +1608,8 @@ bool store_build_config(const myapps::utility::Build &_rbuild_cfg, const string 
 
 void on_upload_receive_last_response(
     frame::mprpc::ConnectionContext& _rctx,
-    std::shared_ptr<main::UploadRequest>&        _rsent_msg_ptr,
-    std::shared_ptr<core::Response>&       _rrecv_msg_ptr,
+    frame::mprpc::MessagePointerT<main::UploadRequest>&        _rsent_msg_ptr,
+    frame::mprpc::MessagePointerT<core::Response>&       _rrecv_msg_ptr,
     ErrorConditionT const&           _rerror,
     promise<void> &prom,
     const string &zip_path)
@@ -1621,8 +1633,8 @@ void on_upload_receive_last_response(
 
 void on_upload_receive_response(
     frame::mprpc::ConnectionContext& _rctx,
-    std::shared_ptr<main::UploadRequest>&        _rsent_msg_ptr,
-    std::shared_ptr<core::Response>&       _rrecv_msg_ptr,
+    frame::mprpc::MessagePointerT<main::UploadRequest>&        _rsent_msg_ptr,
+    frame::mprpc::MessagePointerT<core::Response>&       _rrecv_msg_ptr,
     ErrorConditionT const&           _rerror,
     promise<void> &prom,
     const string &zip_path)
@@ -1631,8 +1643,8 @@ void on_upload_receive_response(
     if (!_rsent_msg_ptr->ifs_.eof()) {
         auto lambda = [&prom, &zip_path](
             frame::mprpc::ConnectionContext&        _rctx,
-            std::shared_ptr<main::UploadRequest>&  _rsent_msg_ptr,
-            std::shared_ptr<core::Response>& _rrecv_msg_ptr,
+            frame::mprpc::MessagePointerT<main::UploadRequest>&  _rsent_msg_ptr,
+            frame::mprpc::MessagePointerT<core::Response>& _rrecv_msg_ptr,
             ErrorConditionT const&                  _rerror
         ){
             on_upload_receive_response(_rctx, _rsent_msg_ptr, _rrecv_msg_ptr, _rerror, prom, zip_path);
@@ -1644,8 +1656,8 @@ void on_upload_receive_response(
     } else {
         auto lambda = [&prom, &zip_path](
             frame::mprpc::ConnectionContext&        _rctx,
-            std::shared_ptr<main::UploadRequest>&  _rsent_msg_ptr,
-            std::shared_ptr<core::Response>& _rrecv_msg_ptr,
+            frame::mprpc::MessagePointerT<main::UploadRequest>&  _rsent_msg_ptr,
+            frame::mprpc::MessagePointerT<core::Response>& _rrecv_msg_ptr,
             ErrorConditionT const&                  _rerror
         ){
             on_upload_receive_last_response(_rctx, _rsent_msg_ptr, _rrecv_msg_ptr, _rerror, prom, zip_path);
@@ -1699,7 +1711,7 @@ int64_t get_file_base_time(const string& _file_path)
 }
 }//namespace
 void handle_create_build(istream& _ris, Engine &_reng){
-    auto req_ptr = make_shared<main::CreateBuildRequest>();
+    auto req_ptr = frame::mprpc::make_message<main::CreateBuildRequest>();
     
     string config_path, build_path, icon_path;
     _ris>>std::quoted(req_ptr->app_id_)>>std::quoted(req_ptr->unique_);
@@ -1747,8 +1759,8 @@ void handle_create_build(istream& _ris, Engine &_reng){
     
     auto lambda = [&prom, &zip_path](
         frame::mprpc::ConnectionContext&        _rctx,
-        std::shared_ptr<main::CreateBuildRequest>&  _rsent_msg_ptr,
-        std::shared_ptr<core::Response>& _rrecv_msg_ptr,
+        frame::mprpc::MessagePointerT<main::CreateBuildRequest>&  _rsent_msg_ptr,
+        frame::mprpc::MessagePointerT<core::Response>& _rrecv_msg_ptr,
         ErrorConditionT const&                  _rerror
     ){
         if(_rrecv_msg_ptr){
@@ -1758,7 +1770,7 @@ void handle_create_build(istream& _ris, Engine &_reng){
             }else{
                 cout<<"Start uploading build file: "<<zip_path<<" for build tagged: "<<_rsent_msg_ptr->unique_<<endl;
                 //now we must upload the file
-                auto req_ptr = make_shared<main::UploadRequest>();
+                auto req_ptr = frame::mprpc::make_message<main::UploadRequest>();
                 req_ptr->ifs_.open(zip_path, std::ifstream::binary);
                 solid_check(req_ptr->ifs_, "failed open file: "<<zip_path);
                 req_ptr->header(_rrecv_msg_ptr->header());
@@ -1767,8 +1779,8 @@ void handle_create_build(istream& _ris, Engine &_reng){
                     
                     auto lambda = [&prom, &zip_path](
                         frame::mprpc::ConnectionContext&        _rctx,
-                        std::shared_ptr<main::UploadRequest>&  _rsent_msg_ptr,
-                        std::shared_ptr<core::Response>& _rrecv_msg_ptr,
+                        frame::mprpc::MessagePointerT<main::UploadRequest>&  _rsent_msg_ptr,
+                        frame::mprpc::MessagePointerT<core::Response>& _rrecv_msg_ptr,
                         ErrorConditionT const&                  _rerror
                     ){
                         on_upload_receive_response(_rctx, _rsent_msg_ptr, _rrecv_msg_ptr, _rerror, prom, zip_path);
@@ -1782,8 +1794,8 @@ void handle_create_build(istream& _ris, Engine &_reng){
                 } else {
                     auto lambda = [&prom, &zip_path](
                         frame::mprpc::ConnectionContext&        _rctx,
-                        std::shared_ptr<main::UploadRequest>&  _rsent_msg_ptr,
-                        std::shared_ptr<core::Response>& _rrecv_msg_ptr,
+                        frame::mprpc::MessagePointerT<main::UploadRequest>&  _rsent_msg_ptr,
+                        frame::mprpc::MessagePointerT<core::Response>& _rrecv_msg_ptr,
                         ErrorConditionT const&                  _rerror
                     ){
                         on_upload_receive_last_response(_rctx, _rsent_msg_ptr, _rrecv_msg_ptr, _rerror, prom, zip_path);
@@ -1799,7 +1811,7 @@ void handle_create_build(istream& _ris, Engine &_reng){
             prom.set_value();
         }
     };
-    _reng.rpcService().sendRequest(_reng.serverEndpoint().c_str(), req_ptr, lambda);
+    _reng.rpcService().sendRequest({_reng.serverEndpoint()}, req_ptr, lambda);
     
     auto fut = prom.get_future();
     solid_check(fut.wait_for(chrono::seconds(600)) == future_status::ready, "Taking too long - waited 600 secs");
@@ -1809,7 +1821,7 @@ void handle_create_build(istream& _ris, Engine &_reng){
 //-----------------------------------------------------------------------------
 
 void handle_create_media(istream& _ris, Engine &_reng){
-    auto req_ptr = make_shared<main::CreateMediaRequest>();
+    auto req_ptr = frame::mprpc::make_message<main::CreateMediaRequest>();
     
     string media_path;
     _ris>>std::quoted(req_ptr->app_id_)>>std::quoted(req_ptr->unique_);
@@ -1852,8 +1864,8 @@ void handle_create_media(istream& _ris, Engine &_reng){
     
     auto lambda = [&prom, &zip_path](
         frame::mprpc::ConnectionContext&        _rctx,
-        std::shared_ptr<main::CreateMediaRequest>&  _rsent_msg_ptr,
-        std::shared_ptr<core::Response>& _rrecv_msg_ptr,
+        frame::mprpc::MessagePointerT<main::CreateMediaRequest>&  _rsent_msg_ptr,
+        frame::mprpc::MessagePointerT<core::Response>& _rrecv_msg_ptr,
         ErrorConditionT const&                  _rerror
     ){
         if(_rrecv_msg_ptr){
@@ -1863,7 +1875,7 @@ void handle_create_media(istream& _ris, Engine &_reng){
             }else{
                 cout<<"Start uploading media file: "<<zip_path<<" for build tagged: "<<_rsent_msg_ptr->unique_<<endl;
                 //now we must upload the file
-                auto req_ptr = make_shared<main::UploadRequest>();
+                auto req_ptr = frame::mprpc::make_message<main::UploadRequest>();
                 req_ptr->ifs_.open(zip_path, std::ifstream::binary);
                 solid_check(req_ptr->ifs_, "failed open file: "<<zip_path);
                 req_ptr->header(_rrecv_msg_ptr->header());
@@ -1872,8 +1884,8 @@ void handle_create_media(istream& _ris, Engine &_reng){
                     
                     auto lambda = [&prom, &zip_path](
                         frame::mprpc::ConnectionContext&        _rctx,
-                        std::shared_ptr<main::UploadRequest>&  _rsent_msg_ptr,
-                        std::shared_ptr<core::Response>& _rrecv_msg_ptr,
+                        frame::mprpc::MessagePointerT<main::UploadRequest>&  _rsent_msg_ptr,
+                        frame::mprpc::MessagePointerT<core::Response>& _rrecv_msg_ptr,
                         ErrorConditionT const&                  _rerror
                     ){
                         on_upload_receive_response(_rctx, _rsent_msg_ptr, _rrecv_msg_ptr, _rerror, prom, zip_path);
@@ -1887,8 +1899,8 @@ void handle_create_media(istream& _ris, Engine &_reng){
                 } else {
                     auto lambda = [&prom, &zip_path](
                         frame::mprpc::ConnectionContext&        _rctx,
-                        std::shared_ptr<main::UploadRequest>&  _rsent_msg_ptr,
-                        std::shared_ptr<core::Response>& _rrecv_msg_ptr,
+                        frame::mprpc::MessagePointerT<main::UploadRequest>&  _rsent_msg_ptr,
+                        frame::mprpc::MessagePointerT<core::Response>& _rrecv_msg_ptr,
                         ErrorConditionT const&                  _rerror
                     ){
                         on_upload_receive_last_response(_rctx, _rsent_msg_ptr, _rrecv_msg_ptr, _rerror, prom, zip_path);
@@ -1904,7 +1916,7 @@ void handle_create_media(istream& _ris, Engine &_reng){
             prom.set_value();
         }
     };
-    _reng.rpcService().sendRequest(_reng.serverEndpoint().c_str(), req_ptr, lambda);
+    _reng.rpcService().sendRequest({_reng.serverEndpoint()}, req_ptr, lambda);
     
     auto fut = prom.get_future();
     solid_check(fut.wait_for(chrono::seconds(100)) == future_status::ready, "Taking too long - waited 100 secs");
@@ -2049,7 +2061,7 @@ void handle_parse(istream& _ris, Engine& _reng) {
 //-----------------------------------------------------------------------------
 
 void handle_acquire(istream& _ris, Engine &_reng){
-    auto req_ptr = make_shared<main::AcquireAppRequest>();
+    auto req_ptr = frame::mprpc::make_message<main::AcquireAppRequest>();
 
     _ris >> std::quoted(req_ptr->app_id_);
     
@@ -2059,8 +2071,8 @@ void handle_acquire(istream& _ris, Engine &_reng){
 
     auto lambda = [&prom](
         frame::mprpc::ConnectionContext& _rctx,
-        std::shared_ptr<main::AcquireAppRequest>& _rsent_msg_ptr,
-        std::shared_ptr<core::Response>& _rrecv_msg_ptr,
+        frame::mprpc::MessagePointerT<main::AcquireAppRequest>& _rsent_msg_ptr,
+        frame::mprpc::MessagePointerT<core::Response>& _rrecv_msg_ptr,
         ErrorConditionT const& _rerror
         ) {
             if (_rrecv_msg_ptr) {
@@ -2071,7 +2083,7 @@ void handle_acquire(istream& _ris, Engine &_reng){
             }
             prom.set_value();
     };
-    _reng.rpcService().sendRequest(_reng.serverEndpoint().c_str(), req_ptr, lambda);
+    _reng.rpcService().sendRequest({_reng.serverEndpoint()}, req_ptr, lambda);
 
     auto fut = prom.get_future();
     solid_check(fut.wait_for(chrono::seconds(100)) == future_status::ready, "Taking too long - waited 100 secs");
@@ -2085,11 +2097,11 @@ void handle_acquire(istream& _ris, Engine &_reng){
 //-----------------------------------------------------------------------------
 
 void Engine::onConnectionStart(frame::mprpc::ConnectionContext &_ctx){
-    auto req_ptr = std::make_shared<main::InitRequest>();
+    auto req_ptr = frame::mprpc::make_message<main::InitRequest>();
     auto lambda = [this](
         frame::mprpc::ConnectionContext&        _rctx,
-        std::shared_ptr<main::InitRequest>&  _rsent_msg_ptr,
-        std::shared_ptr<core::InitResponse>& _rrecv_msg_ptr,
+        frame::mprpc::MessagePointerT<main::InitRequest>&  _rsent_msg_ptr,
+        frame::mprpc::MessagePointerT<core::InitResponse>& _rrecv_msg_ptr,
         ErrorConditionT const&                  _rerror
     ){
         if(_rrecv_msg_ptr){
@@ -2108,12 +2120,12 @@ void Engine::onConnectionStart(frame::mprpc::ConnectionContext &_ctx){
 void Engine::onConnectionInit(frame::mprpc::ConnectionContext &_ctx){
     solid_check(!auth_token_.empty());
     std::lock_guard<mutex> lock(mutex_);
-    auto req_ptr = std::make_shared<core::AuthRequest>();
+    auto req_ptr = frame::mprpc::make_message<core::AuthRequest>();
     req_ptr->pass_ = auth_token_;
     auto lambda = [this](
         frame::mprpc::ConnectionContext&        _rctx,
-        std::shared_ptr<core::AuthRequest>&  _rsent_msg_ptr,
-        std::shared_ptr<core::AuthResponse>& _rrecv_msg_ptr,
+        frame::mprpc::MessagePointerT<core::AuthRequest>&  _rsent_msg_ptr,
+        frame::mprpc::MessagePointerT<core::AuthResponse>& _rrecv_msg_ptr,
         ErrorConditionT const&                  _rerror
     ){
         if(_rrecv_msg_ptr){

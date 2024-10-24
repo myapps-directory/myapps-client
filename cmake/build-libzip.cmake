@@ -5,7 +5,7 @@ ExternalProject_Add(
         build-zlib
         EXCLUDE_FROM_ALL 1
         PREFIX ${zlib_PREFIX}
-        URL https://zlib.net/zlib-1.2.13.tar.gz
+        URL https://zlib.net/zlib-1.3.1.tar.gz
         CMAKE_ARGS
             -DCMAKE_INSTALL_PREFIX:PATH=${CMAKE_BINARY_DIR}/external
 )
@@ -15,7 +15,7 @@ ExternalProject_Add(
     DEPENDS build-zlib
     EXCLUDE_FROM_ALL 1
     PREFIX ${libzip_PREFIX}
-    URL https://libzip.org/download/libzip-1.5.1.tar.gz
+    URL https://libzip.org/download/libzip-1.11.1.tar.gz
     DOWNLOAD_NO_PROGRESS ON
     CMAKE_ARGS
         -DCMAKE_INSTALL_PREFIX:PATH=${CMAKE_BINARY_DIR}/external -DCMAKE_INSTALL_LIBDIR=lib -DOPENSSL_ROOT_DIR=${EXTERNAL_DIR} -DBUILD_SHARED_LIBS:BOOL=false -DBUILD_TOOLS=OFF -DBUILD_REGRESS=OFF  -DBUILD_EXAMPLES=OFF -DBUILD_DOC=OFF

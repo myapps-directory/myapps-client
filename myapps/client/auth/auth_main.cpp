@@ -153,16 +153,16 @@ struct Engine {
 
     void onCaptchaResponse(
         frame::mprpc::ConnectionContext& _rctx,
-        std::shared_ptr<front::auth::CaptchaRequest>&                _rsent_msg_ptr,
-        std::shared_ptr<front::auth::CaptchaResponse>& _rrecv_msg_ptr,
+        frame::mprpc::MessagePointerT<front::auth::CaptchaRequest>&                _rsent_msg_ptr,
+        frame::mprpc::MessagePointerT<front::auth::CaptchaResponse>& _rrecv_msg_ptr,
         ErrorConditionT const&                              _rerror);
     void onAuthResponse(
         frame::mprpc::ConnectionContext&      _rctx,
-        std::shared_ptr<front::core::AuthResponse>& _rrecv_msg_ptr,
+        frame::mprpc::MessagePointerT<front::core::AuthResponse>& _rrecv_msg_ptr,
         ErrorConditionT const&                _rerror);
     void onDeleteAccountResponse(
         frame::mprpc::ConnectionContext&        _rctx,
-        std::shared_ptr<front::core::Response>& _rrecv_msg_ptr,
+        frame::mprpc::MessagePointerT<front::core::Response>& _rrecv_msg_ptr,
         ErrorConditionT const&                  _rerror);
     void loadAuthData();
     void storeAuthData();
@@ -296,7 +296,7 @@ int main(int argc, char* argv[])
 
     frame::mprpc::ServiceT front_rpc_service{manager};
 
-    CallPoolT                cwp{1, 1000, 0, [](const size_t) {}, [](const size_t) {}};
+    CallPoolT            cwp{{1, 1000, 0}, [](const size_t) {}, [](const size_t) {}};
     frame::aio::Resolver     resolver([&cwp](std::function<void()>&& _fnc) { cwp.pushOne(std::move(_fnc)); });
 
     client::auth::MainWindow main_window;
@@ -583,8 +583,8 @@ void Parameters::writeConfigurationFile(string _path, const boost::program_optio
 template <class M>
 void complete_message(
     frame::mprpc::ConnectionContext& _rctx,
-    std::shared_ptr<M>&              _rsent_msg_ptr,
-    std::shared_ptr<M>&              _rrecv_msg_ptr,
+    frame::mprpc::MessagePointerT<M>&              _rsent_msg_ptr,
+    frame::mprpc::MessagePointerT<M>&              _rrecv_msg_ptr,
     ErrorConditionT const&           _rerror)
 {
     //solid_check(false); //this method should not be called
@@ -654,7 +654,7 @@ bool Engine::onAuthStart(const string& _login, const string& _pass, const string
     //on gui thread
     {
         lock_guard<mutex> lock(mutex_);
-        auto req_ptr = std::make_shared<front::core::AuthRequest>();
+        auto req_ptr = frame::mprpc::make_message<front::core::AuthRequest>();
         req_ptr->captcha_text_ = _code;
         req_ptr->captcha_token_ = captcha_token_;
         req_ptr->user_          = _login;
@@ -663,8 +663,8 @@ bool Engine::onAuthStart(const string& _login, const string& _pass, const string
         if (!front_recipient_id_.empty()) {
             auto lambda = [this](
                               frame::mprpc::ConnectionContext&      _rctx,
-                              std::shared_ptr<front::core::AuthRequest>&  _rsent_msg_ptr,
-                              std::shared_ptr<front::core::AuthResponse>& _rrecv_msg_ptr,
+                              frame::mprpc::MessagePointerT<front::core::AuthRequest>&  _rsent_msg_ptr,
+                              frame::mprpc::MessagePointerT<front::core::AuthResponse>& _rrecv_msg_ptr,
                               ErrorConditionT const&                _rerror) {
                 onAuthResponse(_rctx, _rrecv_msg_ptr, _rerror);
             };
@@ -682,7 +682,7 @@ bool Engine::onCreateStart(const string& _user, const string& _email, const stri
 {
     {
         lock_guard<mutex> lock(mutex_);
-        auto req_ptr = std::make_shared<front::auth::CreateRequest>();
+        auto req_ptr = frame::mprpc::make_message<front::auth::CreateRequest>();
         req_ptr->captcha_text_  = _code;
         req_ptr->captcha_token_ = captcha_token_;
         req_ptr->user_          = _user;
@@ -692,8 +692,8 @@ bool Engine::onCreateStart(const string& _user, const string& _email, const stri
         if (!front_recipient_id_.empty()) {
             auto lambda = [this](
                               frame::mprpc::ConnectionContext&      _rctx,
-                              std::shared_ptr<front::auth::CreateRequest>&  _rsent_msg_ptr,
-                              std::shared_ptr<front::core::AuthResponse>& _rrecv_msg_ptr,
+                              frame::mprpc::MessagePointerT<front::auth::CreateRequest>&  _rsent_msg_ptr,
+                              frame::mprpc::MessagePointerT<front::core::AuthResponse>& _rrecv_msg_ptr,
                               ErrorConditionT const&                _rerror) {
                 onAuthResponse(_rctx, _rrecv_msg_ptr, _rerror);
             };
@@ -707,15 +707,15 @@ bool Engine::onCreateStart(const string& _user, const string& _email, const stri
 }
 bool Engine::onAuthFetchStart()
 {
-    auto req_ptr = std::make_shared<front::auth::FetchRequest>();
+    auto req_ptr = frame::mprpc::make_message<front::auth::FetchRequest>();
     lock_guard<mutex> lock(mutex_);
     auth_user_.clear();
     auth_email_.clear();
 
     auto lambda = [this](
                         frame::mprpc::ConnectionContext&           _rctx,
-                        std::shared_ptr<front::auth::FetchRequest>& _rsent_msg_ptr,
-                        std::shared_ptr<front::auth::FetchResponse>&      _rrecv_msg_ptr,
+                        frame::mprpc::MessagePointerT<front::auth::FetchRequest>& _rsent_msg_ptr,
+                        frame::mprpc::MessagePointerT<front::auth::FetchResponse>&      _rrecv_msg_ptr,
                         ErrorConditionT const&                     _rerror) {
         lock_guard<mutex> lock(mutex_);
         if (_rrecv_msg_ptr) {
@@ -737,7 +737,7 @@ bool Engine::onAmendStart(string _user, string _email, const string& _pass, cons
         return false;
     }
 
-    auto req_ptr = std::make_shared<front::auth::AmendRequest>();
+    auto req_ptr = frame::mprpc::make_message<front::auth::AmendRequest>();
     req_ptr->ticket_ = auth_token_;
     if (_user != auth_user_) {
         auth_user_ = _user;
@@ -752,8 +752,8 @@ bool Engine::onAmendStart(string _user, string _email, const string& _pass, cons
 
     auto lambda = [this](
                       frame::mprpc::ConnectionContext&           _rctx,
-                      std::shared_ptr<front::auth::AmendRequest>&  _rsent_msg_ptr,
-                      std::shared_ptr<front::core::AuthResponse>& _rrecv_msg_ptr,
+                      frame::mprpc::MessagePointerT<front::auth::AmendRequest>&  _rsent_msg_ptr,
+                      frame::mprpc::MessagePointerT<front::core::AuthResponse>& _rrecv_msg_ptr,
                       ErrorConditionT const&                     _rerror) {
         {
             lock_guard<mutex> lock(mutex_);
@@ -769,7 +769,7 @@ bool Engine::onAmendStart(string _user, string _email, const string& _pass, cons
 
 bool Engine::onDeleteAccountStart(const string& _pass, const string& _reason)
 {
-    auto req_ptr = std::make_shared<front::auth::DeleteRequest>();
+    auto req_ptr = frame::mprpc::make_message<front::auth::DeleteRequest>();
     req_ptr->ticket_ = auth_token_;
     req_ptr->pass_ = _pass;
     if(_reason.size() <= 1000){
@@ -780,8 +780,8 @@ bool Engine::onDeleteAccountStart(const string& _pass, const string& _reason)
 
     auto lambda = [this](
                       frame::mprpc::ConnectionContext&           _rctx,
-                      std::shared_ptr<front::auth::DeleteRequest>&  _rsent_msg_ptr,
-                      std::shared_ptr<front::core::Response>& _rrecv_msg_ptr,
+                      frame::mprpc::MessagePointerT<front::auth::DeleteRequest>&  _rsent_msg_ptr,
+                      frame::mprpc::MessagePointerT<front::core::Response>& _rrecv_msg_ptr,
                       ErrorConditionT const&                     _rerror) {
        
         
@@ -795,7 +795,7 @@ bool Engine::onDeleteAccountStart(const string& _pass, const string& _reason)
 
 void Engine::onDeleteAccountResponse(
     frame::mprpc::ConnectionContext&      _rctx,
-    std::shared_ptr<front::core::Response>& _rrecv_msg_ptr,
+    frame::mprpc::MessagePointerT<front::core::Response>& _rrecv_msg_ptr,
     ErrorConditionT const&                _rerror)
 {
     if(_rrecv_msg_ptr){
@@ -809,7 +809,7 @@ void Engine::onDeleteAccountResponse(
 
 bool Engine::onValidateStart(const string& _code)
 {
-    auto req_ptr = std::make_shared<front::auth::ValidateRequest>();
+    auto req_ptr = frame::mprpc::make_message<front::auth::ValidateRequest>();
     req_ptr->text_ = _code;
     req_ptr->ticket_ = auth_token_;
     
@@ -817,8 +817,8 @@ bool Engine::onValidateStart(const string& _code)
     if (!front_recipient_id_.empty()) {
         auto lambda = [this](
                           frame::mprpc::ConnectionContext&           _rctx,
-                          std::shared_ptr<front::auth::ValidateRequest>& _rsent_msg_ptr,
-                          std::shared_ptr<front::core::AuthResponse>&      _rrecv_msg_ptr,
+                          frame::mprpc::MessagePointerT<front::auth::ValidateRequest>& _rsent_msg_ptr,
+                          frame::mprpc::MessagePointerT<front::core::AuthResponse>&      _rrecv_msg_ptr,
                           ErrorConditionT const&                     _rerror) {
             if (_rsent_msg_ptr->text_.empty()) {
                 //validation email resend request
@@ -837,11 +837,11 @@ bool Engine::onValidateStart(const string& _code)
 
 void Engine::onConnectionStart(frame::mprpc::ConnectionContext& _ctx)
 {
-    auto req_ptr = std::make_shared<front::auth::InitRequest>();
+    auto req_ptr = frame::mprpc::make_message<front::auth::InitRequest>();
     auto lambda  = [this](
                       frame::mprpc::ConnectionContext&      _rctx,
-                      std::shared_ptr<front::auth::InitRequest>&  _rsent_msg_ptr,
-                      std::shared_ptr<front::core::InitResponse>& _rrecv_msg_ptr,
+                      frame::mprpc::MessagePointerT<front::auth::InitRequest>&  _rsent_msg_ptr,
+                      frame::mprpc::MessagePointerT<front::core::InitResponse>& _rrecv_msg_ptr,
                       ErrorConditionT const&                _rerror) {
         if (_rrecv_msg_ptr) {
             if (_rrecv_msg_ptr->error_ == 0) {
@@ -863,25 +863,25 @@ void Engine::onConnectionInit(frame::mprpc::ConnectionContext& _ctx)
         front_recipient_id_ = _ctx.recipientId();
 
         if (auth_token_.empty()) {
-            auto req_ptr = std::make_shared<front::auth::CaptchaRequest>();
+            auto req_ptr = frame::mprpc::make_message<front::auth::CaptchaRequest>();
 
             auto lambda = [this](
                               frame::mprpc::ConnectionContext&         _rctx,
-                              std::shared_ptr<front::auth::CaptchaRequest>&  _rsent_msg_ptr,
-                              std::shared_ptr<front::auth::CaptchaResponse>& _rrecv_msg_ptr,
+                              frame::mprpc::MessagePointerT<front::auth::CaptchaRequest>&  _rsent_msg_ptr,
+                              frame::mprpc::MessagePointerT<front::auth::CaptchaResponse>& _rrecv_msg_ptr,
                               ErrorConditionT const&                   _rerror) {
                 onCaptchaResponse(_rctx, _rsent_msg_ptr, _rrecv_msg_ptr, _rerror);
             };
 
             _ctx.service().sendRequest(_ctx.recipientId(), req_ptr, lambda);
         } else {
-            auto req_ptr = std::make_shared < front::core:: AuthRequest > ();
+            auto req_ptr = frame::mprpc::make_message < front::core:: AuthRequest > ();
             req_ptr->pass_ = auth_token_;
 
             auto lambda = [this](
                               frame::mprpc::ConnectionContext&         _rctx,
-                              std::shared_ptr<front::core::AuthRequest>&     _rsent_msg_ptr,
-                              std::shared_ptr<front::core::AuthResponse>& _rrecv_msg_ptr,
+                              frame::mprpc::MessagePointerT<front::core::AuthRequest>&     _rsent_msg_ptr,
+                              frame::mprpc::MessagePointerT<front::core::AuthResponse>& _rrecv_msg_ptr,
                               ErrorConditionT const&                   _rerror) {
                 if (_rrecv_msg_ptr) {
                     if (_rrecv_msg_ptr->error_ != 0) {
@@ -910,8 +910,8 @@ void Engine::onConnectionStop(frame::mprpc::ConnectionContext& _ctx)
 
 void Engine::onCaptchaResponse(
     frame::mprpc::ConnectionContext&         _rctx,
-    std::shared_ptr<front::auth::CaptchaRequest>&  _rsent_msg_ptr,
-    std::shared_ptr<front::auth::CaptchaResponse>& _rrecv_msg_ptr,
+    frame::mprpc::MessagePointerT<front::auth::CaptchaRequest>&  _rsent_msg_ptr,
+    frame::mprpc::MessagePointerT<front::auth::CaptchaResponse>& _rrecv_msg_ptr,
     ErrorConditionT const&                   _rerror)
 {
     if (_rrecv_msg_ptr && !_rrecv_msg_ptr->captcha_image_.empty() && !_rrecv_msg_ptr->captcha_token_.empty()) {
@@ -925,7 +925,7 @@ void Engine::onCaptchaResponse(
 
 void Engine::onAuthResponse(
     frame::mprpc::ConnectionContext&      _rctx,
-    std::shared_ptr<front::core::AuthResponse>& _rrecv_msg_ptr,
+    frame::mprpc::MessagePointerT<front::core::AuthResponse>& _rrecv_msg_ptr,
     ErrorConditionT const&                _rerror)
 {
     if (_rrecv_msg_ptr) {
@@ -1003,7 +1003,7 @@ void Engine::storeAuthData()
 
 bool Engine::passwordForgot(const string& _login, const string& _code)
 {
-    auto req_ptr     = std::make_shared<front::auth::ResetRequest>();
+    auto req_ptr     = frame::mprpc::make_message<front::auth::ResetRequest>();
     req_ptr->login_   = _login;
     req_ptr->captcha_text_ = _code;
     req_ptr->captcha_token_ = captcha_token_;
@@ -1012,8 +1012,8 @@ bool Engine::passwordForgot(const string& _login, const string& _code)
     if (!front_recipient_id_.empty()) {
         auto lambda = [this](
                           frame::mprpc::ConnectionContext&             _rctx,
-                          std::shared_ptr<front::auth::ResetRequest>& _rsent_msg_ptr,
-                          std::shared_ptr<front::core::AuthResponse>&        _rrecv_msg_ptr,
+                          frame::mprpc::MessagePointerT<front::auth::ResetRequest>& _rsent_msg_ptr,
+                          frame::mprpc::MessagePointerT<front::core::AuthResponse>&        _rrecv_msg_ptr,
                           ErrorConditionT const&                       _rerror) {
             main_window_.authSignal(false);
             //this_thread::sleep_for(chrono::seconds(2));
@@ -1026,7 +1026,7 @@ bool Engine::passwordForgot(const string& _login, const string& _code)
 }
 bool Engine::passwordReset(const string& _token, const string& _pass, const string &_code)
 {
-    auto req_ptr            = std::make_shared<front::auth::ResetRequest>();
+    auto req_ptr            = frame::mprpc::make_message<front::auth::ResetRequest>();
     req_ptr->login_         = utility::base64_decode(_token);
     req_ptr->pass_          = _pass;
     req_ptr->captcha_text_  = _code;
@@ -1036,8 +1036,8 @@ bool Engine::passwordReset(const string& _token, const string& _pass, const stri
     if (!front_recipient_id_.empty()) {
         auto lambda = [this](
                           frame::mprpc::ConnectionContext&          _rctx,
-                          std::shared_ptr<front::auth::ResetRequest>& _rsent_msg_ptr,
-                          std::shared_ptr<front::core::AuthResponse>&     _rrecv_msg_ptr,
+                          frame::mprpc::MessagePointerT<front::auth::ResetRequest>& _rsent_msg_ptr,
+                          frame::mprpc::MessagePointerT<front::core::AuthResponse>&     _rrecv_msg_ptr,
                           ErrorConditionT const&                    _rerror) {
             if (_rrecv_msg_ptr) {
                 if (_rrecv_msg_ptr->error_ != 0) {
