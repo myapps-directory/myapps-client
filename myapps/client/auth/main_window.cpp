@@ -798,13 +798,17 @@ void MainWindow::captchaSlot(CaptchaPointerT _captcha_ptr)
     solid_log(logger, Info, "size = " << _captcha_ptr->size());
     QImage img;
     if (img.loadFromData(reinterpret_cast<const uchar*>(_captcha_ptr->data()), _captcha_ptr->size())) {
-        if (Data::isColorSchemeDark()) {
-            img.invertPixels(QImage::InvertRgba); 
-        }
+        //if (Data::isColorSchemeDark()) {
+        //    img.invertPixels(QImage::InvertRgba); 
+        //}
         auto pixmap = QPixmap::fromImage(img, Qt::AutoColor);
+        
         pimpl_->home_form_.label->setPixmap(pixmap);
         pimpl_->create_form_.label->setPixmap(pixmap);
         pimpl_->reset_form_.label->setPixmap(pixmap);
+        pimpl_->home_form_.label->setScaledContents(true);
+        pimpl_->create_form_.label->setScaledContents(true);
+        pimpl_->reset_form_.label->setScaledContents(true);
     }
 }
 
