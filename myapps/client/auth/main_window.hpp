@@ -67,7 +67,8 @@ public:
 signals:
     void closeSignal();
     void onlineSignal(bool);
-    void authSignal(bool);
+    //void authSignal(bool);
+    void authSignal(const QString&);
     void authValidateSignal();
 
     void captchaSignal(CaptchaPointerT);
@@ -87,7 +88,7 @@ private slots:
     void onResetPasswordClick();
 
     void onOnline(bool);
-    void onAuthSlot(bool);
+    void onAuthSlot(const QString&);
     void onAuthValidate();
 
     void goAuthSlot(bool);

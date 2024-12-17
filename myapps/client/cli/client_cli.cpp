@@ -8,17 +8,17 @@
 
 #include "solid/frame/mprpc/mprpccompression_snappy.hpp"
 #include "solid/frame/mprpc/mprpcconfiguration.hpp"
+#include "solid/frame/mprpc/mprpcprotocol_serialization_v3.hpp"
 #include "solid/frame/mprpc/mprpcservice.hpp"
 #include "solid/frame/mprpc/mprpcsocketstub_openssl.hpp"
-#include "solid/frame/mprpc/mprpcprotocol_serialization_v3.hpp"
 
 #include "solid/utility/threadpool.hpp"
 
-#include "myapps/common/utility/encode.hpp"
 #include "myapps/common/front_protocol_main.hpp"
+#include "myapps/common/utility/encode.hpp"
 
-#include "myapps/common/utility/version.hpp"
 #include "myapps/common/utility/archive.hpp"
+#include "myapps/common/utility/version.hpp"
 
 #include "myapps/client/utility/auth_file.hpp"
 
@@ -56,10 +56,10 @@ namespace fs = boost::filesystem;
 namespace {
 
 constexpr string_view service_name("myapps_client_cli");
-const solid::LoggerT logger("cli");
+const solid::LoggerT  logger("cli");
 
 using AioSchedulerT = frame::Scheduler<frame::aio::Reactor<frame::mprpc::EventT>>;
-using CallPoolT            = ThreadPool<Function<void()>, Function<void()>>;
+using CallPoolT     = ThreadPool<Function<void()>, Function<void()>>;
 
 string env_config_path_prefix();
 string get_home_env();
@@ -93,18 +93,19 @@ struct Parameters {
         return secure_prefix + '/' + _name;
     }
 
-    string         path_prefix_;
+    string path_prefix_;
 
-    string configPath(const string& _path_prefix)const;
+    string configPath(const string& _path_prefix) const;
     template <class F>
-    Parameters(int argc, char* argv[], F _f) {
+    Parameters(int argc, char* argv[], F _f)
+    {
         parse(argc, argv);
         _f(*this);
     }
 
-    void parse(int argc, char* argv[]);
+    void                                  parse(int argc, char* argv[]);
     boost::program_options::variables_map bootstrapCommandLine(int argc, char* argv[]);
-    void writeConfigurationFile(string _path, const boost::program_options::options_description& _od, const boost::program_options::variables_map& _vm)const;
+    void                                  writeConfigurationFile(string _path, const boost::program_options::options_description& _od, const boost::program_options::variables_map& _vm) const;
 };
 
 //-----------------------------------------------------------------------------
@@ -144,15 +145,14 @@ struct Engine {
 
     void start()
     {
-        
+
         if (rparams_.auth_token.empty()) {
             const auto path = authDataFilePath();
             myapps::client::utility::auth_read(path, auth_endpoint_, auth_user_, auth_token_);
-        }
-        else {
+        } else {
             solid_check(!rparams_.front_endpoint.empty(), "front_enpoint required");
             auth_endpoint_ = rparams_.front_endpoint;
-            auth_token_ = myapps::utility::base64_decode(rparams_.auth_token);
+            auth_token_    = myapps::utility::base64_decode(rparams_.auth_token);
         }
         solid_check(!auth_token_.empty(), "Please authenticate using myapps_auth application");
     }
@@ -213,11 +213,11 @@ string env_log_path_prefix()
     }
 
     string r = v;
-    r += "\\MyApps.space\\client";
+    r += "\\MyApps.dir\\client";
     return r;
 }
 
-} //namespace
+} // namespace
 
 int main(int argc, char* argv[])
 {
@@ -228,12 +228,11 @@ int main(int argc, char* argv[])
 
             GetModuleFileName(NULL, szFileName, MAX_PATH);
 
-            fs::path exe_path{ szFileName };
+            fs::path exe_path{szFileName};
 
             _rparams.secure_prefix = (exe_path.parent_path() / _rparams.secure_prefix).generic_string();
 #endif
-        }
-    );
+        });
 
 #ifndef SOLID_ON_WINDOWS
     signal(SIGPIPE, SIG_IGN);
@@ -391,34 +390,33 @@ int main(int argc, char* argv[])
 
 #endif
     engine.stop();
-    rpc_service.stop(); //need this because rpc_service uses the engine
+    rpc_service.stop(); // need this because rpc_service uses the engine
     return 0;
 }
 
-
 namespace std {
-    std::ostream& operator<<(std::ostream& os, const std::vector<string>& vec)
-    {
-        for (auto item : vec) {
-            os << item << ",";
-        }
-        return os;
+std::ostream& operator<<(std::ostream& os, const std::vector<string>& vec)
+{
+    for (auto item : vec) {
+        os << item << ",";
     }
+    return os;
+}
 } // namespace std
-
 
 namespace {
 //-----------------------------------------------------------------------------
 // Parameters
 //-----------------------------------------------------------------------------
-string Parameters::configPath(const std::string& _path_prefix)const {
+string Parameters::configPath(const std::string& _path_prefix) const
+{
     return _path_prefix + "\\config\\" + string(service_name) + ".config";
 }
 //-----------------------------------------------------------------------------
 boost::program_options::variables_map Parameters::bootstrapCommandLine(int argc, char* argv[])
 {
     using namespace boost::program_options;
-    boost::program_options::options_description desc{ "Bootstrap Options" };
+    boost::program_options::options_description desc{"Bootstrap Options"};
     // clang-format off
     desc.add_options()
         ("version,v", "Version string")
@@ -460,7 +458,7 @@ void Parameters::parse(int argc, char* argv[])
             ("debug-buffered,S", value<bool>(&this->debug_buffered)->implicit_value(true)->default_value(true), "Debug unbuffered")
             ("secure,s", value<bool>(&secure)->implicit_value(true)->default_value(true), "Use SSL to secure communication")
             ("compress", value<bool>(&compress)->implicit_value(true)->default_value(false), "Use Snappy to compress communication")
-            ("front-endpoint", value<std::string>(&front_endpoint)->default_value(string(MYAPPS_FRONT_URL)), "MyApps.space Front Endpoint")
+            ("front-endpoint", value<std::string>(&front_endpoint)->default_value(string(MYAPPS_FRONT_URL)), "MyApps.directory Front Endpoint")
             ("no-history", value<bool>(&no_history)->implicit_value(true)->default_value(false), "Disable history log")
             ("secure-prefix", value<std::string>(&secure_prefix)->default_value("certs"), "Secure Path prefix")
             ("path-prefix", value<std::string>(&path_prefix_)->default_value(env_config_path_prefix()), "Path prefix")
@@ -643,6 +641,9 @@ void configure_service(Engine &_reng, AioSchedulerT &_rsch, frame::aio::Resolver
 
     cfg.client.name_resolve_fnc = frame::mprpc::InternetResolverF(_rres, myapps::front::default_port());
     cfg.client.connection_start_state = frame::mprpc::ConnectionState::Passive;
+    cfg.client.connection_timeout_keepalive = std::chrono::seconds(10);
+    cfg.pool_max_active_connection_count  = 1;
+    cfg.pool_max_pending_connection_count = 1;
     {
 //         auto connection_stop_lambda = [&_rctx](frame::mpipc::ConnectionContext &_ctx){
 //             engine_ptr->onConnectionStop(_ctx);
@@ -664,7 +665,7 @@ void configure_service(Engine &_reng, AioSchedulerT &_rsch, frame::aio::Resolver
                 //_rctx.loadPrivateKeyFile(_reng.params().securePath("ola-client-front-key.pem").c_str());
                 return ErrorCodeT();
             },
-            frame::mprpc::openssl::NameCheckSecureStart{"front.myapps.space"});
+            frame::mprpc::openssl::NameCheckSecureStart{"front.myapps.directory"});
     }
     
     if(_reng.params().compress){
@@ -2189,10 +2190,10 @@ string env_config_path_prefix()
     }
 
     string r = v;
-    r += "\\MyApps.space";
+    r += "\\MyApps.dir";
     return r;
 #else
-    return get_home_env() + "/.myapps.space";
+    return get_home_env() + "/.myapps.dir";
 #endif
 }
 

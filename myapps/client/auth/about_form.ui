@@ -34,7 +34,7 @@
       </font>
      </property>
      <property name="text">
-      <string>&lt;a href=https://myapps.space&gt;&lt;b&gt;MyApps.space&lt;/b&gt;&lt;/a&gt;</string>
+      <string>&lt;a href=https://myapps.directory&gt;&lt;b&gt;MyApps.directory&lt;/b&gt;&lt;/a&gt;</string>
      </property>
      <property name="openExternalLinks">
       <bool>true</bool>

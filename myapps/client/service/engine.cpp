@@ -88,7 +88,7 @@ enum struct EntryStatusE : uint8_t {
     Fetched
 };
 
-using CallPoolT            = ThreadPool<Function<void()>, Function<void()>>;
+using CallPoolT = ThreadPool<Function<void()>, Function<void()>>;
 
 /*
 struct Hash {
@@ -664,31 +664,31 @@ struct Engine::Implementation {
     using MutexDequeT      = std::deque<mutex>;
     using CVDequeT         = std::deque<condition_variable>;
 
-    Configuration                     config_;
-    AioSchedulerT                     scheduler_;
-    frame::Manager                    manager_;
-    CallPoolT                         workpool_;
-    frame::aio::Resolver              resolver_;
-    frame::mprpc::ServiceT            front_rpc_service_;
-    mutex                             mutex_;
-    mutex                             root_mutex_;
-    condition_variable                root_cv_;
-    RecipientVectorT                  auth_recipient_vec_;
-    bool                              running_         = true;
-    bool                              app_list_update_ = false;
-    EntryPointerT                     root_entry_ptr_;
-    EntryPointerT                     media_entry_ptr_;
-    atomic<size_t>                    current_mutex_index_ = 0;
-    MutexDequeT                       mutex_dq_;
-    CVDequeT                          cv_dq_;
-    string                            os_id_;
-    string                            language_id_;
-    ShortcutCreator                   shortcut_creator_;
-    file_cache::Engine                file_cache_engine_;
-    atomic<size_t>                    open_count_ = 0;
-    thread                            update_thread_;
-    atomic<bool>                      first_run_{true};
-    AppListFileT                      app_list_;
+    Configuration          config_;
+    AioSchedulerT          scheduler_;
+    frame::Manager         manager_;
+    CallPoolT              workpool_;
+    frame::aio::Resolver   resolver_;
+    frame::mprpc::ServiceT front_rpc_service_;
+    mutex                  mutex_;
+    mutex                  root_mutex_;
+    condition_variable     root_cv_;
+    RecipientVectorT       auth_recipient_vec_;
+    bool                   running_         = true;
+    bool                   app_list_update_ = false;
+    EntryPointerT          root_entry_ptr_;
+    EntryPointerT          media_entry_ptr_;
+    atomic<size_t>         current_mutex_index_ = 0;
+    MutexDequeT            mutex_dq_;
+    CVDequeT               cv_dq_;
+    string                 os_id_;
+    string                 language_id_;
+    ShortcutCreator        shortcut_creator_;
+    file_cache::Engine     file_cache_engine_;
+    atomic<size_t>         open_count_ = 0;
+    thread                 update_thread_;
+    atomic<bool>           first_run_{true};
+    AppListFileT           app_list_;
 
 public:
     Implementation(
@@ -719,14 +719,14 @@ public:
     void onFrontConnectionStart(frame::mprpc::ConnectionContext& _ctx);
     void onFrontConnectionInit(frame::mprpc::ConnectionContext& _ctx);
     void onFrontAuthResponse(
-        frame::mprpc::ConnectionContext&     _ctx,
-        const front::core::AuthRequest&      _rreq,
+        frame::mprpc::ConnectionContext&                   _ctx,
+        const front::core::AuthRequest&                    _rreq,
         frame::mprpc::MessagePointerT<core::AuthResponse>& _rrecv_msg_ptr);
 
     void loadAuthData();
 
     void onFrontListAppsResponse(
-        frame::mprpc::ConnectionContext&         _ctx,
+        frame::mprpc::ConnectionContext&                       _ctx,
         frame::mprpc::MessagePointerT<main::ListAppsResponse>& _rrecv_msg_ptr);
 
     void onAllApplicationsFetched();
@@ -788,7 +788,7 @@ private:
 
     void insertApplicationEntry(
         frame::mprpc::MessagePointerT<main::FetchBuildConfigurationResponse>& _rrecv_msg_ptr,
-        const myapps::utility::ApplicationListItem&             _app);
+        const myapps::utility::ApplicationListItem&                           _app);
     void insertMountEntry(EntryPointerT& _rparent_ptr, const fs::path& _local, const string& _remote);
 
     bool readFromFile(
@@ -803,9 +803,9 @@ private:
         uint64_t _offset, unsigned long _length, unsigned long& _rbytes_transfered);
 
     void remoteFetchApplication(
-        main::ListAppsResponse::AppVectorT&                    _rapp_id_vec,
+        main::ListAppsResponse::AppVectorT&                                  _rapp_id_vec,
         frame::mprpc::MessagePointerT<main::FetchBuildConfigurationRequest>& _rsent_msg_ptr,
-        size_t                                                 _app_index);
+        size_t                                                               _app_index);
 };
 
 Engine::Engine() {}
@@ -816,10 +816,10 @@ namespace {
 
 template <class M>
 void complete_message(
-    frame::mprpc::ConnectionContext& _rctx,
-    frame::mprpc::MessagePointerT<M>&              _rsent_msg_ptr,
-    frame::mprpc::MessagePointerT<M>&              _rrecv_msg_ptr,
-    ErrorConditionT const&           _rerror)
+    frame::mprpc::ConnectionContext&  _rctx,
+    frame::mprpc::MessagePointerT<M>& _rsent_msg_ptr,
+    frame::mprpc::MessagePointerT<M>& _rrecv_msg_ptr,
+    ErrorConditionT const&            _rerror)
 {
 }
 
@@ -864,7 +864,9 @@ void Engine::start(const Configuration& _rcfg)
 
         cfg.client.name_resolve_fnc = frame::mprpc::InternetResolverF(pimpl_->resolver_, myapps::front::default_port());
 
-        cfg.client.connection_start_state = frame::mprpc::ConnectionState::Passive;
+        cfg.client.connection_start_state     = frame::mprpc::ConnectionState::Passive;
+        cfg.pool_max_active_connection_count  = 4;
+        cfg.pool_max_pending_connection_count = 4;
 
         {
             auto connection_start_lambda = [this](frame::mprpc::ConnectionContext& _rctx) {
@@ -902,10 +904,10 @@ void Engine::start(const Configuration& _rcfg)
 
     if (!err) {
         auto lambda = [pimpl = pimpl_.get()](
-                          frame::mprpc::ConnectionContext&         _rctx,
+                          frame::mprpc::ConnectionContext&                       _rctx,
                           frame::mprpc::MessagePointerT<main::ListAppsRequest>&  _rsent_msg_ptr,
                           frame::mprpc::MessagePointerT<main::ListAppsResponse>& _rrecv_msg_ptr,
-                          ErrorConditionT const&                   _rerror) {
+                          ErrorConditionT const&                                 _rerror) {
             if (_rrecv_msg_ptr) {
                 pimpl->onFrontListAppsResponse(_rctx, _rrecv_msg_ptr);
             }
@@ -946,10 +948,10 @@ void Engine::relogin()
     }
 
     auto lambda = [this](
-                      frame::mprpc::ConnectionContext&     _rctx,
+                      frame::mprpc::ConnectionContext&                   _rctx,
                       frame::mprpc::MessagePointerT<core::AuthRequest>&  _rsent_msg_ptr,
                       frame::mprpc::MessagePointerT<core::AuthResponse>& _rrecv_msg_ptr,
-                      ErrorConditionT const&               _rerror) {
+                      ErrorConditionT const&                             _rerror) {
         if (_rrecv_msg_ptr) {
             pimpl_->onFrontAuthResponse(_rctx, *_rsent_msg_ptr, _rrecv_msg_ptr);
         }
@@ -1009,8 +1011,8 @@ bool Engine::info(const fs::path& _path, NodeFlagsT& _rnode_flags, uint64_t& _rs
     return false;
 }
 
-//#define OLA_VALIDATE_READ
-//#define OLA_VALIDATE_TIME
+// #define OLA_VALIDATE_READ
+// #define OLA_VALIDATE_TIME
 
 #if defined(OLA_VALIDATE_READ) || defined(OLA_VALIDATE_TIME)
 
@@ -1109,10 +1111,10 @@ bool Engine::Implementation::fetch(EntryPointerT& _rentry_ptr, unique_lock<mutex
     if (_rentry_ptr->status_ == EntryStatusE::FetchRequired) {
         _rentry_ptr->status_ = EntryStatusE::FetchPending;
         auto lambda          = [entry_ptr = _rentry_ptr, this](
-                          frame::mprpc::ConnectionContext&          _rctx,
+                          frame::mprpc::ConnectionContext&                        _rctx,
                           frame::mprpc::MessagePointerT<main::ListStoreRequest>&  _rsent_msg_ptr,
                           frame::mprpc::MessagePointerT<main::ListStoreResponse>& _rrecv_msg_ptr,
-                          ErrorConditionT const&                    _rerror) mutable {
+                          ErrorConditionT const&                                  _rerror) mutable {
             auto&              m = entry_ptr->mutex();
             unique_lock<mutex> lock{m};
             if (_rrecv_msg_ptr && _rrecv_msg_ptr->error_ == 0) {
@@ -1134,9 +1136,8 @@ bool Engine::Implementation::fetch(EntryPointerT& _rentry_ptr, unique_lock<mutex
 
         auto req_ptr         = frame::mprpc::make_message<main::ListStoreRequest>();
         req_ptr->path_       = _remote_path;
-        req_ptr->shard_id_ =  _rentry_ptr->pmaster_->remote_shard_id_;
+        req_ptr->shard_id_   = _rentry_ptr->pmaster_->remote_shard_id_;
         req_ptr->storage_id_ = _rentry_ptr->pmaster_->remote_storage_id_;
-
 
         front_rpc_service_.sendRequest({config_.auth_endpoint_}, req_ptr, lambda);
     }
@@ -1223,9 +1224,9 @@ bool Engine::Implementation::entry(const fs::path& _path, EntryPointerT& _rentry
         if (it == _path.end()) {
             return false;
         }
-        const uint32_t shard_id           = std::stol(it->generic_string());
+        const uint32_t shard_id = std::stol(it->generic_string());
         ++it;
-        const::string encoded_storage_id = it->generic_string();
+        const ::string encoded_storage_id = it->generic_string();
         ++it;
         while (it != _path.end()) {
             remote_path += it->generic_string();
@@ -1243,11 +1244,11 @@ bool Engine::Implementation::entry(const fs::path& _path, EntryPointerT& _rentry
 
             string storage_id = myapps::utility::hex_decode(encoded_storage_id);
 
-            entry_ptr           = createEntry(_rentry_ptr, name);
-            entry_ptr->pmaster_ = entry_ptr.get();
+            entry_ptr                     = createEntry(_rentry_ptr, name);
+            entry_ptr->pmaster_           = entry_ptr.get();
             entry_ptr->remote_shard_id_   = shard_id;
-            entry_ptr->remote_storage_id_  = std::move(storage_id);
-            entry_ptr->status_  = EntryStatusE::FetchRequired;
+            entry_ptr->remote_storage_id_ = std::move(storage_id);
+            entry_ptr->status_            = EntryStatusE::FetchRequired;
             entry_ptr->flagSet(EntryFlagsE::Volatile);
             entry_ptr->flagSet(EntryFlagsE::Media);
 
@@ -1587,7 +1588,7 @@ void Engine::Implementation::tryFetch(EntryPointerT& _rentry_ptr)
     auto req_ptr = frame::mprpc::make_message<main::FetchStoreRequest>();
 
     req_ptr->path_         = rfile_data.remote_path_;
-    req_ptr->shard_id_   = _rentry_ptr->pmaster_->remote_shard_id_;
+    req_ptr->shard_id_     = _rentry_ptr->pmaster_->remote_shard_id_;
     req_ptr->storage_id_   = _rentry_ptr->pmaster_->remote_storage_id_;
     req_ptr->chunk_index_  = rfile_data.currentChunkIndex();
     req_ptr->chunk_offset_ = 0;
@@ -1664,10 +1665,10 @@ void Engine::Implementation::asyncFetchStoreFile(
 {
     solid_log(logger, Info, _rentry_ptr->name_ << " " << _chunk_index << " " << _chunk_offset);
     auto lambda = [entry_ptr = _rentry_ptr, this /*, _chunk_index, _chunk_offset*/](
-                      frame::mprpc::ConnectionContext&           _rctx,
+                      frame::mprpc::ConnectionContext&                         _rctx,
                       frame::mprpc::MessagePointerT<main::FetchStoreRequest>&  _rsent_msg_ptr,
                       frame::mprpc::MessagePointerT<main::FetchStoreResponse>& _rrecv_msg_ptr,
-                      ErrorConditionT const&                     _rerror) mutable {
+                      ErrorConditionT const&                                   _rerror) mutable {
         FileData&          rfile_data = entry_ptr->fileData();
         auto&              m          = entry_ptr->mutex();
         unique_lock<mutex> lock(m);
@@ -1702,7 +1703,7 @@ void Engine::Implementation::asyncFetchStoreFile(
             req_ptr = std::move(rfile_data.requestPointer());
         } else {
             req_ptr              = frame::mprpc::make_message<main::FetchStoreRequest>();
-            req_ptr->shard_id_ = _rreq_msg_ptr->shard_id_;
+            req_ptr->shard_id_   = _rreq_msg_ptr->shard_id_;
             req_ptr->storage_id_ = _rreq_msg_ptr->storage_id_;
             req_ptr->path_       = _rreq_msg_ptr->path_;
         }
@@ -1732,10 +1733,10 @@ void Engine::Implementation::tryAuthenticate(frame::mprpc::ConnectionContext& _r
         auto req_ptr   = frame::mprpc::make_message<core::AuthRequest>();
         req_ptr->pass_ = auth_token;
         auto lambda    = [this](
-                          frame::mprpc::ConnectionContext&     _rctx,
+                          frame::mprpc::ConnectionContext&                   _rctx,
                           frame::mprpc::MessagePointerT<core::AuthRequest>&  _rsent_msg_ptr,
                           frame::mprpc::MessagePointerT<core::AuthResponse>& _rrecv_msg_ptr,
-                          ErrorConditionT const&               _rerror) {
+                          ErrorConditionT const&                             _rerror) {
             if (_rrecv_msg_ptr) {
                 onFrontAuthResponse(_rctx, *_rsent_msg_ptr, _rrecv_msg_ptr);
             }
@@ -1752,10 +1753,10 @@ void Engine::Implementation::onFrontConnectionStart(frame::mprpc::ConnectionCont
 {
     auto req_ptr = frame::mprpc::make_message<main::InitRequest>();
     auto lambda  = [this](
-                      frame::mprpc::ConnectionContext&     _rctx,
+                      frame::mprpc::ConnectionContext&                   _rctx,
                       frame::mprpc::MessagePointerT<main::InitRequest>&  _rsent_msg_ptr,
                       frame::mprpc::MessagePointerT<core::InitResponse>& _rrecv_msg_ptr,
-                      ErrorConditionT const&               _rerror) {
+                      ErrorConditionT const&                             _rerror) {
         if (_rrecv_msg_ptr) {
             if (_rrecv_msg_ptr->error_ == 0) {
                 onFrontConnectionInit(_rctx);
@@ -1772,8 +1773,8 @@ void Engine::Implementation::onFrontConnectionInit(frame::mprpc::ConnectionConte
 }
 
 void Engine::Implementation::onFrontAuthResponse(
-    frame::mprpc::ConnectionContext&     _rctx,
-    const core::AuthRequest&             _rreq,
+    frame::mprpc::ConnectionContext&                   _rctx,
+    const core::AuthRequest&                           _rreq,
     frame::mprpc::MessagePointerT<core::AuthResponse>& _rrecv_msg_ptr)
 {
     if (!_rrecv_msg_ptr)
@@ -1802,18 +1803,18 @@ void Engine::Implementation::onFrontAuthResponse(
 }
 
 void Engine::Implementation::remoteFetchApplication(
-    main::ListAppsResponse::AppVectorT&                    _rapp_id_vec,
+    main::ListAppsResponse::AppVectorT&                                  _rapp_id_vec,
     frame::mprpc::MessagePointerT<main::FetchBuildConfigurationRequest>& _rsent_msg_ptr,
-    size_t                                                 _app_index)
+    size_t                                                               _app_index)
 {
-    _rsent_msg_ptr->application_id_   = _rapp_id_vec[_app_index].id_;
-    _rsent_msg_ptr->build_id_ = app_list_.find(_rapp_id_vec[_app_index].unique_).name_;
+    _rsent_msg_ptr->application_id_ = _rapp_id_vec[_app_index].id_;
+    _rsent_msg_ptr->build_id_       = app_list_.find(_rapp_id_vec[_app_index].unique_).name_;
 
     auto lambda = [this, _app_index, app_id_vec = std::move(_rapp_id_vec)](
-                      frame::mprpc::ConnectionContext&                        _rctx,
+                      frame::mprpc::ConnectionContext&                                      _rctx,
                       frame::mprpc::MessagePointerT<main::FetchBuildConfigurationRequest>&  _rsent_msg_ptr,
                       frame::mprpc::MessagePointerT<main::FetchBuildConfigurationResponse>& _rrecv_msg_ptr,
-                      ErrorConditionT const&                                  _rerror) mutable {
+                      ErrorConditionT const&                                                _rerror) mutable {
         if (_rrecv_msg_ptr) {
 
             ++_app_index;
@@ -1863,10 +1864,10 @@ void Engine::Implementation::update()
     int         done = 0;
     UpdatesMapT updates_map;
     auto        list_lambda = [this, &done, &updates_map](
-                           frame::mprpc::ConnectionContext&         _rctx,
+                           frame::mprpc::ConnectionContext&                       _rctx,
                            frame::mprpc::MessagePointerT<main::ListAppsRequest>&  _rsent_msg_ptr,
                            frame::mprpc::MessagePointerT<main::ListAppsResponse>& _rrecv_msg_ptr,
-                           ErrorConditionT const&                   _rerror) {
+                           ErrorConditionT const&                                 _rerror) {
         if (_rrecv_msg_ptr) {
             auto req_ptr = frame::mprpc::make_message<main::FetchBuildUpdatesRequest>();
             req_ptr->app_id_vec_.reserve(_rrecv_msg_ptr->app_vec_.size());
@@ -1880,10 +1881,10 @@ void Engine::Implementation::update()
             req_ptr->os_id_ = "Windows10x86_64";
 
             auto lambda = [this, &done, &updates_map](
-                              frame::mprpc::ConnectionContext&                  _rctx,
+                              frame::mprpc::ConnectionContext&                                _rctx,
                               frame::mprpc::MessagePointerT<main::FetchBuildUpdatesRequest>&  _rsent_msg_ptr,
                               frame::mprpc::MessagePointerT<main::FetchBuildUpdatesResponse>& _rrecv_msg_ptr,
-                              ErrorConditionT const&                            _rerror) {
+                              ErrorConditionT const&                                          _rerror) {
                 if (_rrecv_msg_ptr) {
                     updates_map.clear();
                     for (size_t i = 0; i < _rrecv_msg_ptr->app_vec_.size(); ++i) {
@@ -2053,7 +2054,7 @@ void Engine::Implementation::onAllApplicationsFetched()
 }
 
 void Engine::Implementation::onFrontListAppsResponse(
-    frame::mprpc::ConnectionContext&         _ctx,
+    frame::mprpc::ConnectionContext&                       _ctx,
     frame::mprpc::MessagePointerT<main::ListAppsResponse>& _rrecv_msg_ptr)
 {
     if (_rrecv_msg_ptr->app_vec_.empty()) {
@@ -2122,7 +2123,7 @@ void Engine::Implementation::insertMountEntry(EntryPointerT& _rparent_ptr, const
     }
     remote_path += _remote;
     entry_ptr->remote_storage_id_ = std::move(remote_path);
-    entry_ptr->status_ = EntryStatusE::FetchRequired;
+    entry_ptr->status_            = EntryStatusE::FetchRequired;
 }
 
 string to_system_path(const string& _path)
@@ -2140,7 +2141,7 @@ string to_system_path(const string& _path)
 
 void Engine::Implementation::insertApplicationEntry(
     frame::mprpc::MessagePointerT<main::FetchBuildConfigurationResponse>& _rrecv_msg_ptr,
-    const myapps::utility::ApplicationListItem&             _app)
+    const myapps::utility::ApplicationListItem&                           _app)
 {
     // NOTE: because of the entry_ptr, which after inserting it into root entry
     // will have use count == 2, the application cannot be deleted on releaseApplication
@@ -2150,9 +2151,9 @@ void Engine::Implementation::insertApplicationEntry(
         EntryTypeE::Application);
 
     entry_ptr->remote_shard_id_   = _rrecv_msg_ptr->build_shard_id_;
-    entry_ptr->remote_storage_id_   = _rrecv_msg_ptr->build_storage_id_;
-    entry_ptr->data_any_ = ApplicationData(myapps::utility::hex_encode(_rrecv_msg_ptr->app_unique_), _rrecv_msg_ptr->build_unique_);
-    entry_ptr->pmaster_  = entry_ptr.get();
+    entry_ptr->remote_storage_id_ = _rrecv_msg_ptr->build_storage_id_;
+    entry_ptr->data_any_          = ApplicationData(myapps::utility::hex_encode(_rrecv_msg_ptr->app_unique_), _rrecv_msg_ptr->build_unique_);
+    entry_ptr->pmaster_           = entry_ptr.get();
 
     if (_rrecv_msg_ptr->configuration_.hasHiddenDirectoryFlag()) {
         entry_ptr->flagSet(EntryFlagsE::Hidden);

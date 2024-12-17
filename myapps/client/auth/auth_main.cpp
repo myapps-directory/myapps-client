@@ -19,8 +19,8 @@
 #include "solid/frame/scheduler.hpp"
 #include "solid/frame/service.hpp"
 
-#include "solid/system/log.hpp"
 #include "solid/system/exception.hpp"
+#include "solid/system/log.hpp"
 #include "solid/utility/string.hpp"
 
 #include "solid/utility/threadpool.hpp"
@@ -32,9 +32,9 @@
 
 #include "solid/frame/mprpc/mprpccompression_snappy.hpp"
 #include "solid/frame/mprpc/mprpcconfiguration.hpp"
+#include "solid/frame/mprpc/mprpcprotocol_serialization_v3.hpp"
 #include "solid/frame/mprpc/mprpcservice.hpp"
 #include "solid/frame/mprpc/mprpcsocketstub_openssl.hpp"
-#include "solid/frame/mprpc/mprpcprotocol_serialization_v3.hpp"
 
 #include "myapps/common/utility/encode.hpp"
 #include "myapps/common/utility/version.hpp"
@@ -42,15 +42,15 @@
 #include "myapps/client/utility/auth_file.hpp"
 #include "myapps/client/utility/locale.hpp"
 
-#include "myapps/common/front_protocol_main.hpp"
 #include "myapps/common/front_protocol_auth.hpp"
+#include "myapps/common/front_protocol_main.hpp"
 
 #include "boost/filesystem.hpp"
 #include "boost/program_options.hpp"
 
 #include <QApplication>
-#include <QtGui>
 #include <QStyleFactory>
+#include <QtGui>
 
 #include <signal.h>
 
@@ -74,12 +74,11 @@ namespace fs = boost::filesystem;
 //-----------------------------------------------------------------------------
 namespace {
 constexpr string_view service_name("myapps_auth");
-const solid::LoggerT logger("myapps::client::auth");
-
+const solid::LoggerT  logger("myapps::client::auth");
 
 using AioSchedulerT = frame::Scheduler<frame::aio::Reactor<frame::mprpc::EventT>>;
 using SchedulerT    = frame::Scheduler<frame::Reactor<Event<32>>>;
-using CallPoolT            = ThreadPool<Function<void()>, Function<void()>>;
+using CallPoolT     = ThreadPool<Function<void()>, Function<void()>>;
 
 struct Parameters {
     vector<string> debug_modules;
@@ -97,30 +96,30 @@ struct Parameters {
     {
         return secure_prefix + '/' + _name;
     }
-    string configPath(const string& _path_prefix)const;
+    string configPath(const string& _path_prefix) const;
 
-    bool parse(ULONG argc, PWSTR* argv);
+    bool                                  parse(ULONG argc, PWSTR* argv);
     boost::program_options::variables_map bootstrapCommandLine(ULONG argc, PWSTR* argv);
-    void writeConfigurationFile(string _path, const boost::program_options::options_description& _od, const boost::program_options::variables_map& _vm)const;
+    void                                  writeConfigurationFile(string _path, const boost::program_options::options_description& _od, const boost::program_options::variables_map& _vm) const;
 };
 
 struct Engine {
-    client::auth::MainWindow&             main_window_;
-    frame::mprpc::ServiceT&               front_rpc_service_;
-    Parameters&                           params_;
-    frame::mprpc::RecipientId             front_recipient_id_;
-    mutex                                 mutex_;
-    string                                captcha_token_;
-    string                                auth_token_;
-    string                                auth_login_;
-    string                                auth_endpoint_;
-    string                                auth_user_;
-    string                                auth_email_;
+    client::auth::MainWindow& main_window_;
+    frame::mprpc::ServiceT&   front_rpc_service_;
+    Parameters&               params_;
+    frame::mprpc::RecipientId front_recipient_id_;
+    mutex                     mutex_;
+    string                    captcha_token_;
+    string                    auth_token_;
+    string                    auth_login_;
+    string                    auth_endpoint_;
+    string                    auth_user_;
+    string                    auth_email_;
 
     Engine(
-        client::auth::MainWindow&   _main_window,
-        frame::mprpc::ServiceT& _front_rpc_service,
-        Parameters&             _params)
+        client::auth::MainWindow& _main_window,
+        frame::mprpc::ServiceT&   _front_rpc_service,
+        Parameters&               _params)
         : main_window_(_main_window)
         , front_rpc_service_(_front_rpc_service)
         , params_(_params)
@@ -150,20 +149,19 @@ struct Engine {
     bool onAuthFetchStart();
     bool onDeleteAccountStart(const string& _pass, const string& _reason);
 
-
     void onCaptchaResponse(
-        frame::mprpc::ConnectionContext& _rctx,
-        frame::mprpc::MessagePointerT<front::auth::CaptchaRequest>&                _rsent_msg_ptr,
+        frame::mprpc::ConnectionContext&                             _rctx,
+        frame::mprpc::MessagePointerT<front::auth::CaptchaRequest>&  _rsent_msg_ptr,
         frame::mprpc::MessagePointerT<front::auth::CaptchaResponse>& _rrecv_msg_ptr,
-        ErrorConditionT const&                              _rerror);
+        ErrorConditionT const&                                       _rerror);
     void onAuthResponse(
-        frame::mprpc::ConnectionContext&      _rctx,
+        frame::mprpc::ConnectionContext&                          _rctx,
         frame::mprpc::MessagePointerT<front::core::AuthResponse>& _rrecv_msg_ptr,
-        ErrorConditionT const&                _rerror);
+        ErrorConditionT const&                                    _rerror);
     void onDeleteAccountResponse(
-        frame::mprpc::ConnectionContext&        _rctx,
+        frame::mprpc::ConnectionContext&                      _rctx,
         frame::mprpc::MessagePointerT<front::core::Response>& _rrecv_msg_ptr,
-        ErrorConditionT const&                  _rerror);
+        ErrorConditionT const&                                _rerror);
     void loadAuthData();
     void storeAuthData();
 
@@ -175,7 +173,7 @@ struct Engine {
 
 void front_configure_service(Engine& _rengine, const Parameters& _params, frame::mprpc::ServiceT& _rsvc, AioSchedulerT& _rsch, frame::aio::Resolver& _rres);
 
-//TODO: find a better name
+// TODO: find a better name
 string envLogPathPrefix()
 {
     const char* v = getenv("LOCALAPPDATA");
@@ -187,7 +185,7 @@ string envLogPathPrefix()
     }
 
     string r = v;
-    r += "\\MyApps.space\\client";
+    r += "\\MyApps.dir\\client";
     return r;
 }
 string env_config_path_prefix()
@@ -201,11 +199,11 @@ string env_config_path_prefix()
     }
 
     string r = v;
-    r += "\\MyApps.space";
+    r += "\\MyApps.dir";
     return r;
 }
 
-} //namespace
+} // namespace
 //-----------------------------------------------------------------------------
 //      main
 //-----------------------------------------------------------------------------
@@ -219,10 +217,11 @@ string get_current_process_path()
     return string(path);
 }
 
-QString get_qt_plugin_path() {
+QString get_qt_plugin_path()
+{
     boost::filesystem::path path = get_current_process_path();
     const string            p    = (path.parent_path() / "plugins").string();
-    solid_log(logger, Info, "qt plugin path: "<<p);
+    solid_log(logger, Info, "qt plugin path: " << p);
     return QString::fromStdString(p);
 }
 
@@ -233,11 +232,10 @@ int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR pCmdLin
     int     argc    = 1;
     char*   argv[1] = {GetCommandLineA()};
 
-
     {
         const auto m_singleInstanceMutex = CreateMutex(NULL, TRUE, L"OLA_AUTH_SHARED_MUTEX");
         if (m_singleInstanceMutex == NULL || GetLastError() == ERROR_ALREADY_EXISTS) {
-            HWND existingApp = FindWindow(0, L"MyApps.space");
+            HWND existingApp = FindWindow(0, L"MyApps.directory");
             if (existingApp) {
                 SetForegroundWindow(existingApp);
             }
@@ -276,12 +274,11 @@ int main(int argc, char* argv[])
 
     qRegisterMetaType<myapps::client::auth::CaptchaPointerT>("CaptchaPointerT");
 
-    //QApplication::setHighDpiScaleFactorRoundingPolicy(Qt::HighDpiScaleFactorRoundingPolicy::PassThrough);
-    //QApplication::setAttribute(Qt::AA_EnableHighDpiScaling);
-    //QApplication::setAttribute(Qt::AA_DisableHighDpiScaling);
-    //SetProcessDPIAware();
+    // QApplication::setHighDpiScaleFactorRoundingPolicy(Qt::HighDpiScaleFactorRoundingPolicy::PassThrough);
+    // QApplication::setAttribute(Qt::AA_EnableHighDpiScaling);
+    // QApplication::setAttribute(Qt::AA_DisableHighDpiScaling);
+    // SetProcessDPIAware();
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
-
 
     QApplication::addLibraryPath(get_qt_plugin_path());
 
@@ -297,23 +294,23 @@ int main(int argc, char* argv[])
     frame::mprpc::ServiceT front_rpc_service{manager};
 
     CallPoolT            cwp{{1, 1000, 0}, [](const size_t) {}, [](const size_t) {}};
-    frame::aio::Resolver     resolver([&cwp](std::function<void()>&& _fnc) { cwp.pushOne(std::move(_fnc)); });
+    frame::aio::Resolver resolver([&cwp](std::function<void()>&& _fnc) { cwp.pushOne(std::move(_fnc)); });
 
     client::auth::MainWindow main_window;
     Engine                   engine(main_window, front_rpc_service, params);
 
     aioscheduler.start(1);
-    
+
     main_window.setWindowIcon(QIcon(":/auth.ico"));
 
     engine.loadAuthData();
- 
+
     {
         client::auth::Configuration config;
         config.authenticate_fnc_ = [&engine](const string& _user, const string& _pass, const string& _code) {
-            return engine.onAuthStart(_user, myapps::utility::hex_encode(myapps::utility::sha256(_pass)), _code);
+            return engine.onAuthStart(_user, _pass.empty() ? _pass : myapps::utility::hex_encode(myapps::utility::sha256(_pass)), _code);
         };
-        config.create_fnc_ = [&engine](const string& _user, const string &_email, const string& _pass, const string& _code) {
+        config.create_fnc_ = [&engine](const string& _user, const string& _email, const string& _pass, const string& _code) {
             return engine.onCreateStart(_user, _email, myapps::utility::hex_encode(myapps::utility::sha256(_pass)), _code);
         };
 
@@ -321,7 +318,7 @@ int main(int argc, char* argv[])
             return engine.onAmendStart(_user, _email, myapps::utility::hex_encode(myapps::utility::sha256(_pass)), _new_pass.empty() ? _new_pass : myapps::utility::hex_encode(myapps::utility::sha256(_pass)));
         };
 
-        config.delete_account_fnc_ = [&engine](const string& _pass, const string& _reason)  {
+        config.delete_account_fnc_ = [&engine](const string& _pass, const string& _reason) {
             return engine.onDeleteAccountStart(myapps::utility::hex_encode(myapps::utility::sha256(_pass)), _reason);
         };
 
@@ -341,7 +338,7 @@ int main(int argc, char* argv[])
             return engine.logout();
         };
 
-        config.forgot_fnc_ = [&engine](const string &_login, const string &_code) {
+        config.forgot_fnc_ = [&engine](const string& _login, const string& _code) {
             return engine.passwordForgot(_login, _code);
         };
 
@@ -354,16 +351,16 @@ int main(int argc, char* argv[])
         main_window.start(std::move(config));
     }
 
-    SetWindowText(GetActiveWindow(), L"MyApps.space");
+    SetWindowText(GetActiveWindow(), L"MyApps.directory");
 
     front_configure_service(engine, params, front_rpc_service, aioscheduler, resolver);
     {
-        HWND existingApp = FindWindow(0, L"MyApps.space");
+        HWND existingApp = FindWindow(0, L"MyApps.directory");
         if (existingApp) {
             SetForegroundWindow(existingApp);
         }
     }
-    //app.setStyle("Fusion");
+    // app.setStyle("Fusion");
     const int rv = app.exec();
     front_rpc_service.stop();
     return rv;
@@ -372,13 +369,13 @@ int main(int argc, char* argv[])
 //-----------------------------------------------------------------------------
 
 namespace std {
-    std::ostream& operator<<(std::ostream& os, const std::vector<string>& vec)
-    {
-        for (auto item : vec) {
-            os << item << ",";
-        }
-        return os;
+std::ostream& operator<<(std::ostream& os, const std::vector<string>& vec)
+{
+    for (auto item : vec) {
+        os << item << ",";
     }
+    return os;
+}
 } // namespace std
 
 //-----------------------------------------------------------------------------
@@ -388,14 +385,15 @@ namespace {
 //-----------------------------------------------------------------------------
 // Parameters
 //-----------------------------------------------------------------------------
-string Parameters::configPath(const std::string& _path_prefix)const {
+string Parameters::configPath(const std::string& _path_prefix) const
+{
     return _path_prefix + "\\config\\" + string(service_name) + ".config";
 }
 //-----------------------------------------------------------------------------
 boost::program_options::variables_map Parameters::bootstrapCommandLine(ULONG argc, PWSTR* argv)
 {
     using namespace boost::program_options;
-    boost::program_options::options_description desc{ "Bootstrap Options" };
+    boost::program_options::options_description desc{"Bootstrap Options"};
     // clang-format off
     desc.add_options()
         ("version,v", "Version string")
@@ -438,7 +436,7 @@ bool Parameters::parse(ULONG argc, PWSTR* argv)
             ("compress", value<bool>(&compress)->implicit_value(true)->default_value(false), "Use Snappy to compress communication")
             ("secure-prefix", value<std::string>(&secure_prefix)->default_value("certs"), "Secure Path prefix")
             ("path-prefix", value<std::string>(&path_prefix)->default_value(env_config_path_prefix()), "Path prefix")
-            ("front,f", value<std::string>(&front_endpoint)->default_value(string(MYAPPS_FRONT_URL)), "MyApps.space Front Endpoint")
+            ("front,f", value<std::string>(&front_endpoint)->default_value(string(MYAPPS_FRONT_URL)), "MyApps.directory Front Endpoint")
             ;
         // clang-format off
 
@@ -937,7 +935,7 @@ void Engine::onAuthResponse(
             }
             main_window_.authValidateSignal();
         }else if(_rrecv_msg_ptr->error_){
-            main_window_.authSignal(false);
+            main_window_.authSignal(QString::fromStdString(!_rrecv_msg_ptr->message_.empty() ?  _rrecv_msg_ptr->message_ : "Unknown error"));
             //this_thread::sleep_for(chrono::seconds(2));
             onConnectionInit(_rctx);
         } else {
@@ -947,7 +945,7 @@ void Engine::onAuthResponse(
                 storeAuthData();
             }
 
-            main_window_.authSignal(true);
+            main_window_.authSignal({});
 
             //main_window_.closeSignal();
         }
@@ -964,7 +962,7 @@ bool Engine::logout() {
     if (!front_recipient_id_.empty()) {
         front_rpc_service_.closeConnection(front_recipient_id_);
     }
-    main_window_.authSignal(false);
+    main_window_.authSignal("Logged out");
     return true;
 }
 
@@ -1015,7 +1013,7 @@ bool Engine::passwordForgot(const string& _login, const string& _code)
                           frame::mprpc::MessagePointerT<front::auth::ResetRequest>& _rsent_msg_ptr,
                           frame::mprpc::MessagePointerT<front::core::AuthResponse>&        _rrecv_msg_ptr,
                           ErrorConditionT const&                       _rerror) {
-            main_window_.authSignal(false);
+            main_window_.authSignal("Forgot password");
             //this_thread::sleep_for(chrono::seconds(2));
             onConnectionInit(_rctx);
         };

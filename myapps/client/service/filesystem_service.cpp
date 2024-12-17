@@ -335,7 +335,7 @@ string env_config_path_prefix()
     }
 
     string r = v;
-    r += "\\MyApps.space";
+    r += "\\MyApps.dir";
     return r;
 }
 
@@ -363,7 +363,7 @@ string env_log_path_prefix()
     }
 
     string r = v;
-    r += "\\MyApps.space\\client";
+    r += "\\MyApps.dir\\client";
     return r;
 }
 
@@ -466,7 +466,7 @@ bool Parameters::parse(ULONG argc, PWSTR* argv)
             ("debug-port,P", value<string>(&debug_port_)->default_value("9999"), "Debug server port (e.g. on linux use: nc -l 9999)")
             ("debug-console,C", value<bool>(&debug_console_)->implicit_value(true)->default_value(false), "Debug console")
             ("debug-buffered,S", value<bool>(&this->debug_buffered_)->implicit_value(true)->default_value(true), "Debug unbuffered")
-            ("mount-point,m", wvalue<wstring>(&mount_point_)->default_value(L"C:\\MyApps.space", "C:\\MyApps.space"), "Mount point")
+            ("mount-point,m", wvalue<wstring>(&mount_point_)->default_value(L"C:\\MyApps.dir", "C:\\MyApps.dir"), "Mount point")
             ("secure,s", value<bool>(&secure_)->implicit_value(true)->default_value(true), "Use SSL to secure communication")
             ("compress", value<bool>(&compress_)->implicit_value(true)->default_value(false), "Use Snappy to compress communication")
             ("secure-prefix", value<std::string>(&secure_prefix_)->default_value("certs"), "Secure Path prefix")

@@ -77,6 +77,8 @@ struct MainWindow::Data {
     int                      dpi_y_          = QApplication::primaryScreen()->logicalDotsPerInchY();
     double                   scale_x_        = double(dpi_x_) / 120.0; //173.0 / double(dpi_x_);
     double                   scale_y_        = double(dpi_y_) / 120.0; //166.0 / double(dpi_y_);
+    const QString            login_str_{"Login"};
+    const QString            demo_login_str_{"Demo Login"};
     
     
     static bool               isColorSchemeDark(){
@@ -291,7 +293,8 @@ MainWindow::MainWindow(QWidget* parent)
     connect(pimpl_->reset_form_.resetButton, SIGNAL(clicked()), this, SLOT(onResetPasswordClick()));
 
     connect(this, SIGNAL(onlineSignal(bool)), this, SLOT(onOnline(bool)), Qt::QueuedConnection);
-    connect(this, SIGNAL(authSignal(bool)), this, SLOT(onAuthSlot(bool)), Qt::QueuedConnection);;
+    connect(this, SIGNAL(authSignal(const QString&)), this, SLOT(onAuthSlot(const QString&)), Qt::QueuedConnection);
+    ;
     connect(this, SIGNAL(authValidateSignal()), this, SLOT(onAuthValidate()), Qt::QueuedConnection);
     connect(this, SIGNAL(closeSignal()), this, SLOT(close()), Qt::QueuedConnection);
     connect(this, &MainWindow::captchaSignal, this, &MainWindow::captchaSlot, Qt::QueuedConnection);
@@ -356,6 +359,7 @@ MainWindow::MainWindow(QWidget* parent)
     pimpl_->tool_bar_.addAction(&pimpl_->about_action_);
 
     pimpl_->home_form_.authButton->setEnabled(false);
+    pimpl_->home_form_.authButton->setText(pimpl_->demo_login_str_);
     pimpl_->create_form_.createButton->setEnabled(false);
     pimpl_->home_form_.validateEmailButton->setEnabled(false);
 
@@ -456,7 +460,7 @@ void MainWindow::onAuthClick()
 {
     solid_log(logger, Verbose, "");
     
-    bool ok = pimpl_->config_.authenticate_fnc_(
+    const bool ok = pimpl_->config_.authenticate_fnc_(
         pimpl_->home_form_.userEdit->text().toStdString(),
         pimpl_->home_form_.passwordEdit->text().toStdString(),
         pimpl_->home_form_.codeEdit->text().toStdString()
@@ -474,7 +478,7 @@ void MainWindow::onCreateClick()
 {
     solid_log(logger, Verbose, "");
     
-    bool ok = pimpl_->config_.create_fnc_(
+    const bool ok = pimpl_->config_.create_fnc_(
         pimpl_->create_form_.userEdit->text().toStdString(),
         pimpl_->create_form_.email1Edit->text().toStdString(),
         pimpl_->create_form_.password1Edit->text().toStdString(),
@@ -486,7 +490,7 @@ void MainWindow::onCreateClick()
 
 void MainWindow::onValidateClick()
 {
-    bool ok = pimpl_->config_.validate_fnc_(pimpl_->home_form_.validateEmailEdit->text().toStdString());
+    const bool ok = pimpl_->config_.validate_fnc_(pimpl_->home_form_.validateEmailEdit->text().toStdString());
     if (ok) {
         pimpl_->home_form_.validateEmailButton->setEnabled(false);
     }
@@ -569,12 +573,12 @@ void MainWindow::onOnline(bool _b)
     }
 }
 
-void MainWindow::onAuthSlot(bool _authenticated)
+void MainWindow::onAuthSlot(const QString& _error)
 {
-    solid_log(logger, Verbose, "" << _authenticated);
+    solid_log(logger, Verbose, "" << _error.toStdString());
 
-    pimpl_->authenticated_ = _authenticated;
-    if (_authenticated) {
+    pimpl_->authenticated_ = _error.isEmpty();
+    if (_error.isEmpty()) {
         if (pimpl_->validate_email_) {
             pimpl_->validate_email_ = false;
             pimpl_->home_form_.userEdit->setText(pimpl_->create_form_.userEdit->text());
@@ -596,6 +600,11 @@ void MainWindow::onAuthSlot(bool _authenticated)
             return;
         }
         else {
+            {
+                QMessageBox msgBox;
+                msgBox.setText(_error);
+                msgBox.exec();
+            }
             pimpl_->validate_email_ = false;
             pimpl_->main_form_.label->setText("Authentication failed");
             pimpl_->home_form_.passwordEdit->setText("");
@@ -823,7 +832,22 @@ void MainWindow::amendFetchSlot(AmendFetchPointerT _amend_fetch_ptr)
 
 void MainWindow::authTextEdited(const QString& text)
 {
-    pimpl_->home_form_.authButton->setEnabled(!(pimpl_->home_form_.passwordEdit->text().isEmpty() || pimpl_->home_form_.userEdit->text().isEmpty() || pimpl_->home_form_.codeEdit->text().isEmpty()));
+    //const bool is_login = !(pimpl_->home_form_.passwordEdit->text().isEmpty() || pimpl_->home_form_.userEdit->text().isEmpty() || pimpl_->home_form_.codeEdit->text().isEmpty());
+    //const bool isDemo = !isLogin && (pimpl_->home_form_.passwordEdit->text().isEmpty() && pimpl_->home_form_.userEdit->text().isEmpty() && !pimpl_->home_form_.codeEdit->text().isEmpty());
+    const bool has_password = !pimpl_->home_form_.passwordEdit->text().isEmpty();
+    const bool has_user     = !pimpl_->home_form_.userEdit->text().isEmpty();
+    const bool has_code     = !pimpl_->home_form_.codeEdit->text().isEmpty();
+    const bool is_demo      = !has_user && !has_password;
+    const bool is_enabled   = (is_demo && has_code) || (has_code && has_user && has_password);
+
+    if (is_demo) {
+        pimpl_->home_form_.authButton->setText(pimpl_->demo_login_str_);        
+    } else {
+        pimpl_->home_form_.authButton->setText(pimpl_->login_str_);
+    }
+
+    pimpl_->home_form_.authButton->setEnabled(is_enabled);
+    
     pimpl_->home_form_.forgotButton->setEnabled(!(pimpl_->home_form_.userEdit->text().isEmpty() || pimpl_->home_form_.codeEdit->text().isEmpty()));
 }
 

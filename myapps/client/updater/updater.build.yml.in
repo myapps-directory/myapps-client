@@ -2,18 +2,18 @@ name: windows
 tag: r1.3
 dictionary:
   - language: en-US
-    name: MyApps.space Updater
+    name: MyApps.directory Updater
     description: |
-        Updater for MyApps.space.
-    brief: Updater for MyApps.space.
-    company: "MyApps.space"
+        Updater for MyApps.directory.
+    brief: Updater for MyApps.directory.
+    company: "MyApps.directory"
   - language: ro-RO
-    name: Updater MyApps.space
+    name: Updater MyApps.directory
     description: |
-        Updater MyApps.space.
+        Updater MyApps.directory.
     brief: |
-        Updater MyApps.space.
-    company: "MyApps.space"
+        Updater MyApps.directory.
+    company: "MyApps.directory"
 properties:
   name: ${name}
   description: ${description}
