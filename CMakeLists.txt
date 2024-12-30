@@ -212,8 +212,8 @@ set(CPACK_RELEASE_VER                   ${YMDHM})
 set(CPACK_PACKAGE_EXECUTABLES           "myapps_cli" "MyApps.directory CLI" "myapps_auth" "MyApps.directory Login" "myapps_service_filesystem" "MyApps.directory Applications Virtual FileSystem Service")
 set(CPACK_PACKAGE_CONTACT               "office@myapps.directory")
 set(CPACK_PACKAGING_INSTALL_PREFIX      ${PACKAGING_INSTALL_PREFIX})
-SET(CPACK_PACKAGE_INSTALL_DIRECTORY     "MyApps.directory")
-set(CPACK_PACKAGE_DESCRIPTION_SUMMARY   "MyApps.directory - Applications Virtual FileSystem Service")
+SET(CPACK_PACKAGE_INSTALL_DIRECTORY     "MyApps.dir")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY   "MyApps.dir - Applications Virtual FileSystem Service")
 
 set(CPACK_WIX_TEMPLATE                  "${CMAKE_CURRENT_SOURCE_DIR}/cpack/wix/myapps.wxs")
 #set(CPACK_WIX_PRODUCT_GUID              "80D72FCC-5083-406C-B592-BE442CEA4708")
@@ -289,11 +289,11 @@ if(CMAKE_BUILD_TYPE MATCHES "debug")
     endif()
 endif()
 
-#set(CMAKE_INSTALL_SYSTEM_RUNTIME_DESTINATION "bin")
-#set(CMAKE_INSTALL_UCRT_LIBRARIES TRUE)
-#set(CMAKE_INSTALL_DEBUG_LIBRARIES TRUE)
+set(CMAKE_INSTALL_SYSTEM_RUNTIME_DESTINATION "bin")
+set(CMAKE_INSTALL_UCRT_LIBRARIES TRUE)
+set(CMAKE_INSTALL_DEBUG_LIBRARIES TRUE)
 
-#include(InstallRequiredSystemLibraries)
+include(InstallRequiredSystemLibraries)
 
 include(CPack)
 

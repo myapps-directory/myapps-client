@@ -614,6 +614,9 @@ void front_configure_service(Engine& _rengine, const Parameters& _params, frame:
     cfg.pool_max_active_connection_count  = 1;
     cfg.pool_max_pending_connection_count = 1;
     cfg.client.connection_timeout_keepalive = 30s;
+    cfg.connection_recv_buffer_start_capacity_kb = myapps::utility::client_connection_recv_buffer_start_capacity_kb;
+    cfg.connection_send_buffer_start_capacity_kb = myapps::utility::client_connection_send_buffer_start_capacity_kb;
+
 
     {
         auto connection_stop_lambda = [&_rengine](frame::mprpc::ConnectionContext& _rctx) {

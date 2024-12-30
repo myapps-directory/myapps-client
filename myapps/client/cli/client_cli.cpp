@@ -644,6 +644,9 @@ void configure_service(Engine &_reng, AioSchedulerT &_rsch, frame::aio::Resolver
     cfg.client.connection_timeout_keepalive = std::chrono::seconds(10);
     cfg.pool_max_active_connection_count  = 1;
     cfg.pool_max_pending_connection_count = 1;
+    cfg.connection_recv_buffer_start_capacity_kb = myapps::utility::client_connection_recv_buffer_start_capacity_kb;
+    cfg.connection_send_buffer_start_capacity_kb = myapps::utility::client_connection_send_buffer_start_capacity_kb;
+
     {
 //         auto connection_stop_lambda = [&_rctx](frame::mpipc::ConnectionContext &_ctx){
 //             engine_ptr->onConnectionStop(_ctx);

@@ -864,9 +864,11 @@ void Engine::start(const Configuration& _rcfg)
 
         cfg.client.name_resolve_fnc = frame::mprpc::InternetResolverF(pimpl_->resolver_, myapps::front::default_port());
 
-        cfg.client.connection_start_state     = frame::mprpc::ConnectionState::Passive;
-        cfg.pool_max_active_connection_count  = 4;
-        cfg.pool_max_pending_connection_count = 4;
+        cfg.client.connection_start_state            = frame::mprpc::ConnectionState::Passive;
+        cfg.pool_max_active_connection_count         = 4;
+        cfg.pool_max_pending_connection_count        = 4;
+        cfg.connection_recv_buffer_start_capacity_kb = myapps::utility::client_connection_recv_buffer_start_capacity_kb;
+        cfg.connection_send_buffer_start_capacity_kb = myapps::utility::client_connection_send_buffer_start_capacity_kb;
 
         {
             auto connection_start_lambda = [this](frame::mprpc::ConnectionContext& _rctx) {
