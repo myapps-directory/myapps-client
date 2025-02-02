@@ -1,23 +1,41 @@
+// myapps/client/auth/main_window.cpp
+
+// This file is part of MyApps.directory project
+// Copyright (C) 2020, 2021, 2022, 2023, 2024, 2025 Valentin Palade (vipalade @ gmail . com)
+
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// at your option any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
 #include "main_window.hpp"
+#include "ui_about_form.h"
+#include "ui_amend_form.h"
+#include "ui_create_form.h"
 #include "ui_home_form.h"
 #include "ui_main_form.h"
-#include "ui_create_form.h"
-#include "ui_amend_form.h"
-#include "ui_about_form.h"
 #include "ui_reset_form.h"
 #include <QKeyEvent>
-#include <QToolBar>
-#include <QToolButton>
 #include <QMessageBox>
 #include <QStyleHints>
+#include <QToolBar>
+#include <QToolButton>
 
-#include <string>
-#include <sstream>
-#include <stack>
-#include <regex>
 #include <chrono>
 #include <iomanip>
+#include <regex>
+#include <sstream>
+#include <stack>
 #include <stdio.h>
+#include <string>
 #include <windows.h>
 #pragma comment(lib, "user32.lib")
 
@@ -31,7 +49,6 @@ namespace auth {
 namespace {
 const solid::LoggerT logger("myapps::client::auth::widget");
 
-
 enum struct ActionE {
     Home = 0,
     Create,
@@ -43,55 +60,57 @@ enum struct ActionE {
 using HistoryFunctionT = std::function<void()>;
 struct HistoryStub {
     HistoryFunctionT func_;
-    ActionE   action_;
+    ActionE          action_;
 
     template <class F>
     HistoryStub(
         const ActionE _action,
-        F _f
-     )  : func_(_f)
-        , action_(_action) {}
+        F             _f)
+        : func_(_f)
+        , action_(_action)
+    {
+    }
 };
-using HistoryStackT    = std::stack<HistoryStub>;
+using HistoryStackT = std::stack<HistoryStub>;
 
-}//namespace
+} // namespace
 struct MainWindow::Data {
-    Ui::MainWindow           main_form_;
-    Ui::HomeForm             home_form_;
-    Ui::CreateForm           create_form_;
-    Ui::AboutForm            about_form_;
-    Ui::AmendForm            amend_form_;
-    Ui::ResetForm            reset_form_;
-    Configuration            config_;
-    QToolBar                 tool_bar_;
-    QAction                  back_action_;
-    QAction                  home_action_;
-    QAction                  create_action_;
-    QAction                  about_action_;
-    QAction                  amend_action_;
-    HistoryStackT            history_;
-    ActionE                  current_action_;
-    bool                     authenticated_ = false;
-    bool                     validate_email_ = false;
-    int                      dpi_x_          = QApplication::primaryScreen()->logicalDotsPerInchX();
-    int                      dpi_y_          = QApplication::primaryScreen()->logicalDotsPerInchY();
-    double                   scale_x_        = double(dpi_x_) / 120.0; //173.0 / double(dpi_x_);
-    double                   scale_y_        = double(dpi_y_) / 120.0; //166.0 / double(dpi_y_);
-    const QString            login_str_{"Login"};
-    const QString            demo_login_str_{"Demo Login"};
-    
-    
-    static bool               isColorSchemeDark(){
+    Ui::MainWindow main_form_;
+    Ui::HomeForm   home_form_;
+    Ui::CreateForm create_form_;
+    Ui::AboutForm  about_form_;
+    Ui::AmendForm  amend_form_;
+    Ui::ResetForm  reset_form_;
+    Configuration  config_;
+    QToolBar       tool_bar_;
+    QAction        back_action_;
+    QAction        home_action_;
+    QAction        create_action_;
+    QAction        about_action_;
+    QAction        amend_action_;
+    HistoryStackT  history_;
+    ActionE        current_action_;
+    bool           authenticated_  = false;
+    bool           validate_email_ = false;
+    int            dpi_x_          = QApplication::primaryScreen()->logicalDotsPerInchX();
+    int            dpi_y_          = QApplication::primaryScreen()->logicalDotsPerInchY();
+    double         scale_x_        = double(dpi_x_) / 120.0; // 173.0 / double(dpi_x_);
+    double         scale_y_        = double(dpi_y_) / 120.0; // 166.0 / double(dpi_y_);
+    const QString  login_str_{"Login"};
+    const QString  demo_login_str_{"Demo Login"};
+
+    static bool isColorSchemeDark()
+    {
         return QGuiApplication::styleHints()->colorScheme() == Qt::ColorScheme::Dark;
     }
-    
+
     Data(QMainWindow* _pw)
         : tool_bar_(_pw)
         , back_action_(QIcon(isColorSchemeDark() ? ":/images/back_d.png" : ":/images/back.png"), tr("&Back"), _pw)
-        , home_action_(QIcon(isColorSchemeDark() ? ":/images/home_d.png":":/images/home.png"), tr("&Home"), _pw) 
-        , create_action_(QIcon(isColorSchemeDark() ? ":/images/create_d.png":":/images/create.png"), tr("&Create"), _pw) 
-        , about_action_(QIcon(isColorSchemeDark() ? ":/images/about_d.png" :":/images/about.png"), tr("&About"), _pw)
-        , amend_action_(QIcon(isColorSchemeDark() ? ":/images/amend_d.png" : ":/images/amend.png"), tr("&Edit"), _pw) 
+        , home_action_(QIcon(isColorSchemeDark() ? ":/images/home_d.png" : ":/images/home.png"), tr("&Home"), _pw)
+        , create_action_(QIcon(isColorSchemeDark() ? ":/images/create_d.png" : ":/images/create.png"), tr("&Create"), _pw)
+        , about_action_(QIcon(isColorSchemeDark() ? ":/images/about_d.png" : ":/images/about.png"), tr("&About"), _pw)
+        , amend_action_(QIcon(isColorSchemeDark() ? ":/images/amend_d.png" : ":/images/amend.png"), tr("&Edit"), _pw)
     {
     }
 
@@ -114,8 +133,8 @@ struct MainWindow::Data {
                 home_form_.resetButton->hide();
                 amend_action_.setEnabled(true);
                 create_action_.setEnabled(false);
-            }else if (authenticated_) {
-                //hide everything but logoutButton
+            } else if (authenticated_) {
+                // hide everything but logoutButton
                 home_form_.logoutButton->show();
                 home_form_.authButton->hide();
                 home_form_.userEdit->hide();
@@ -131,7 +150,7 @@ struct MainWindow::Data {
                 amend_action_.setEnabled(true);
                 create_action_.setEnabled(false);
             } else {
-                //show everything but logoutButton
+                // show everything but logoutButton
                 home_form_.logoutButton->hide();
                 home_form_.authButton->show();
                 home_form_.userEdit->show();
@@ -184,8 +203,9 @@ struct MainWindow::Data {
 #endif
         _pw->show();
     }
-    
-    QSize computeMaxSize() const {
+
+    QSize computeMaxSize() const
+    {
         int maxh = 0;
         int maxw = 0;
 
@@ -228,7 +248,8 @@ struct MainWindow::Data {
     }
 
     template <class F>
-    HistoryFunctionT& historyPush(const ActionE _action, F _f) {
+    HistoryFunctionT& historyPush(const ActionE _action, F _f)
+    {
         if (history_.empty() || history_.top().action_ != _action) {
             history_.emplace(_action, _f);
         } else {
@@ -262,14 +283,13 @@ MainWindow::MainWindow(QWidget* parent)
     pimpl_->create_form_.label->setFixedSize(QSize(pimpl_->create_form_.label->width() * pimpl_->scale_x_, pimpl_->create_form_.label->height() * pimpl_->scale_y_));
     pimpl_->reset_form_.label->setFixedSize(QSize(pimpl_->reset_form_.label->width() * pimpl_->scale_x_, pimpl_->reset_form_.label->height() * pimpl_->scale_y_));
 
-
-    if(false){
+    if (false) {
         int   aElements[2] = {COLOR_WINDOW, COLOR_ACTIVECAPTION};
         DWORD aOldColors[2];
 
-        aOldColors[0] = GetSysColor(aElements[0]); 
+        aOldColors[0] = GetSysColor(aElements[0]);
 
-        QPalette pal = palette();
+        QPalette     pal = palette();
         const QColor win_color(GetRValue(aOldColors[0]), GetGValue(aOldColors[0]), GetBValue(aOldColors[0]));
         // set black background
         pal.setColor(QPalette::Window, win_color);
@@ -338,11 +358,11 @@ MainWindow::MainWindow(QWidget* parent)
 
     pimpl_->tool_bar_.setMovable(false);
     pimpl_->tool_bar_.setFixedHeight(38 * pimpl_->scale_y_);
-    //pimpl_->tool_bar_.setContentsMargins(QMargins(0, 0, 0, 0));
+    // pimpl_->tool_bar_.setContentsMargins(QMargins(0, 0, 0, 0));
     pimpl_->tool_bar_.setIconSize(QSize(32 * pimpl_->scale_x_, 32 * pimpl_->scale_y_));
-    
+
     pimpl_->tool_bar_.setStyleSheet("QToolBar { border: 0px }");
-    //pimpl_->tool_bar_.setStyleSheet("QToolBar { icon-size: 32px 32px}");
+    // pimpl_->tool_bar_.setStyleSheet("QToolBar { icon-size: 32px 32px}");
     //
 
     pimpl_->amend_action_.setEnabled(false);
@@ -373,22 +393,22 @@ MainWindow::MainWindow(QWidget* parent)
         [this]() {
             pimpl_->showWidget(this, pimpl_->main_form_.homeWidget);
         });
-    
-    pimpl_->about_form_.tabWidget->setCurrentIndex(0);//About
+
+    pimpl_->about_form_.tabWidget->setCurrentIndex(0); // About
     {
         using namespace std;
         ostringstream oss;
 
         oss << utility::VERSION_MAJOR << '.' << utility::VERSION_MINOR;
-        //oss << " - " << client::utility::version_vcs_branch();
-        oss << " - <a href=https://github.com/myapps-space/myapps-client/tree/" << utility::version_vcs_commit()<<">"<< utility::version_vcs_commit() << "</a>";
+        // oss << " - " << client::utility::version_vcs_branch();
+        oss << " - <a href=https://github.com/myapps-space/myapps-client/tree/" << utility::version_vcs_commit() << ">" << utility::version_vcs_commit() << "</a>";
 
         pimpl_->about_form_.label_version->setText(QString::fromStdString(oss.str()));
     }
     {
         using namespace std;
         using namespace std::chrono;
-        auto now_c = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+        auto    now_c = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
         std::tm ptm;
         localtime_s(&ptm, &now_c);
 
@@ -445,39 +465,39 @@ void MainWindow::setUser(const std::string& _user)
 }
 
 void MainWindow::start(
-    Configuration &&_config)
+    Configuration&& _config)
 {
     pimpl_->config_ = std::move(_config);
 
     pimpl_->home_form_.userEdit->setText(pimpl_->config_.login_);
     this->show();
     this->setWindowState((windowState() & ~Qt::WindowMinimized) | Qt::WindowActive);
-    this->raise();  // for MacOS
+    this->raise(); // for MacOS
     this->activateWindow(); // for Windows
 }
 
 void MainWindow::onAuthClick()
 {
     solid_log(logger, Verbose, "");
-    
+
     const bool ok = pimpl_->config_.authenticate_fnc_(
         pimpl_->home_form_.userEdit->text().toStdString(),
         pimpl_->home_form_.passwordEdit->text().toStdString(),
-        pimpl_->home_form_.codeEdit->text().toStdString()
-    );
+        pimpl_->home_form_.codeEdit->text().toStdString());
     if (ok) {
         pimpl_->home_form_.authButton->setEnabled(false);
     }
 }
 
-void MainWindow::onLogoutClick() {
+void MainWindow::onLogoutClick()
+{
     pimpl_->config_.logout_fnc_();
 }
 
 void MainWindow::onCreateClick()
 {
     solid_log(logger, Verbose, "");
-    
+
     const bool ok = pimpl_->config_.create_fnc_(
         pimpl_->create_form_.userEdit->text().toStdString(),
         pimpl_->create_form_.email1Edit->text().toStdString(),
@@ -553,7 +573,7 @@ void MainWindow::onForgotClick()
 void MainWindow::onResetPasswordClick()
 {
     const auto token = pimpl_->reset_form_.tokenEdit->text().toStdString();
-    const auto pass = pimpl_->reset_form_.newPassword1Edit->text().toStdString();
+    const auto pass  = pimpl_->reset_form_.newPassword1Edit->text().toStdString();
     const auto code  = pimpl_->reset_form_.codeEdit->text().toStdString();
 
     const bool ok = pimpl_->config_.reset_fnc_(token, pass, code);
@@ -561,7 +581,6 @@ void MainWindow::onResetPasswordClick()
         pimpl_->reset_form_.resetButton->setEnabled(false);
     }
 }
-
 
 void MainWindow::onOnline(bool _b)
 {
@@ -598,8 +617,7 @@ void MainWindow::onAuthSlot(const QString& _error)
             msgBox.exec();
             pimpl_->create_form_.userEdit->setFocus();
             return;
-        }
-        else {
+        } else {
             {
                 QMessageBox msgBox;
                 msgBox.setText(_error);
@@ -612,7 +630,7 @@ void MainWindow::onAuthSlot(const QString& _error)
             this->setEnabled(true);
         }
     }
-    
+
     pimpl_->historyPush(ActionE::Home, [this]() {
         pimpl_->showWidget(this, pimpl_->main_form_.homeWidget);
     })();
@@ -633,7 +651,7 @@ void MainWindow::closeEvent(QCloseEvent*)
 void MainWindow::editAccountOptionChanged(bool checked)
 {
     if (!checked) {
-        return;//ignore unchecked events
+        return; // ignore unchecked events
     }
 
     if (pimpl_->amend_form_.editRadioButton->isChecked()) {
@@ -678,7 +696,7 @@ bool MainWindow::eventFilter(QObject* obj, QEvent* event)
                 }
                 break;
             case ActionE::Create:
-                if (pimpl_->create_form_.createButton->isEnabled()){
+                if (pimpl_->create_form_.createButton->isEnabled()) {
                     onCreateClick();
                 }
                 break;
@@ -705,7 +723,8 @@ bool MainWindow::eventFilter(QObject* obj, QEvent* event)
     return false;
 }
 
-void MainWindow::goAuthSlot(bool) {
+void MainWindow::goAuthSlot(bool)
+{
     pimpl_->historyPush(ActionE::Home, [this]() {
         pimpl_->showWidget(this, pimpl_->main_form_.homeWidget);
     })();
@@ -723,13 +742,15 @@ void MainWindow::goAmendSlot(bool)
     })();
 }
 
-void MainWindow::goCreateSlot(bool) {
+void MainWindow::goCreateSlot(bool)
+{
     pimpl_->historyPush(ActionE::Create, [this]() {
         pimpl_->showWidget(this, pimpl_->main_form_.createWidget);
     })();
 }
 
-void MainWindow::goBackSlot(bool) {
+void MainWindow::goBackSlot(bool)
+{
     if (!pimpl_->history_.empty()) {
         if (pimpl_->history_.size() > 1) {
             pimpl_->history_.pop();
@@ -740,7 +761,8 @@ void MainWindow::goBackSlot(bool) {
     }
 }
 
-void MainWindow::goAboutSlot(bool) {
+void MainWindow::goAboutSlot(bool)
+{
     pimpl_->historyPush(ActionE::About, [this]() {
         pimpl_->showWidget(this, pimpl_->main_form_.aboutWidget);
     })();
@@ -756,7 +778,7 @@ void MainWindow::onCaptcha(Uint8VectorT&& _captcha_image)
 void MainWindow::onAmendFetch(const std::string& _user, const std::string& _email)
 {
     AmendFetchPointerT ptr(new AmendFetch);
-    ptr->user_ = QString::fromStdString(_user);
+    ptr->user_  = QString::fromStdString(_user);
     ptr->email_ = QString::fromStdString(_email);
     emit amendFetchSignal(ptr);
 }
@@ -774,8 +796,8 @@ void MainWindow::onDeleteAccountResponse(const std::string& _error)
 void MainWindow::deleteAccountSlot(const QString& error)
 {
     if (error.isEmpty()) {
-        //success
-        goAuthSlot(true);//wait for disconnect from server
+        // success
+        goAuthSlot(true); // wait for disconnect from server
     } else {
         QMessageBox msgBox;
         msgBox.setText("Delete Account Failed. Please retry later.");
@@ -792,7 +814,7 @@ void MainWindow::onColorSchemeChanged(Qt::ColorScheme scheme)
     pimpl_->create_action_.setIcon(QIcon(Data::isColorSchemeDark() ? ":/images/create_d.png" : ":/images/create.png"));
     pimpl_->amend_action_.setIcon(QIcon(Data::isColorSchemeDark() ? ":/images/amend_d.png" : ":/images/amend.png"));
     pimpl_->back_action_.setIcon(QIcon(Data::isColorSchemeDark() ? ":/images/back_d.png" : ":/images/back.png"));
-    
+
     QImage img = pimpl_->home_form_.label->pixmap().toImage();
     img.invertPixels(QImage::InvertRgba);
 
@@ -807,11 +829,11 @@ void MainWindow::captchaSlot(CaptchaPointerT _captcha_ptr)
     solid_log(logger, Info, "size = " << _captcha_ptr->size());
     QImage img;
     if (img.loadFromData(reinterpret_cast<const uchar*>(_captcha_ptr->data()), _captcha_ptr->size())) {
-        //if (Data::isColorSchemeDark()) {
-        //    img.invertPixels(QImage::InvertRgba); 
-        //}
+        // if (Data::isColorSchemeDark()) {
+        //     img.invertPixels(QImage::InvertRgba);
+        // }
         auto pixmap = QPixmap::fromImage(img, Qt::AutoColor);
-        
+
         pimpl_->home_form_.label->setPixmap(pixmap);
         pimpl_->create_form_.label->setPixmap(pixmap);
         pimpl_->reset_form_.label->setPixmap(pixmap);
@@ -832,8 +854,8 @@ void MainWindow::amendFetchSlot(AmendFetchPointerT _amend_fetch_ptr)
 
 void MainWindow::authTextEdited(const QString& text)
 {
-    //const bool is_login = !(pimpl_->home_form_.passwordEdit->text().isEmpty() || pimpl_->home_form_.userEdit->text().isEmpty() || pimpl_->home_form_.codeEdit->text().isEmpty());
-    //const bool isDemo = !isLogin && (pimpl_->home_form_.passwordEdit->text().isEmpty() && pimpl_->home_form_.userEdit->text().isEmpty() && !pimpl_->home_form_.codeEdit->text().isEmpty());
+    // const bool is_login = !(pimpl_->home_form_.passwordEdit->text().isEmpty() || pimpl_->home_form_.userEdit->text().isEmpty() || pimpl_->home_form_.codeEdit->text().isEmpty());
+    // const bool isDemo = !isLogin && (pimpl_->home_form_.passwordEdit->text().isEmpty() && pimpl_->home_form_.userEdit->text().isEmpty() && !pimpl_->home_form_.codeEdit->text().isEmpty());
     const bool has_password = !pimpl_->home_form_.passwordEdit->text().isEmpty();
     const bool has_user     = !pimpl_->home_form_.userEdit->text().isEmpty();
     const bool has_code     = !pimpl_->home_form_.codeEdit->text().isEmpty();
@@ -841,26 +863,27 @@ void MainWindow::authTextEdited(const QString& text)
     const bool is_enabled   = (is_demo && has_code) || (has_code && has_user && has_password);
 
     if (is_demo) {
-        pimpl_->home_form_.authButton->setText(pimpl_->demo_login_str_);        
+        pimpl_->home_form_.authButton->setText(pimpl_->demo_login_str_);
     } else {
         pimpl_->home_form_.authButton->setText(pimpl_->login_str_);
     }
 
     pimpl_->home_form_.authButton->setEnabled(is_enabled);
-    
+
     pimpl_->home_form_.forgotButton->setEnabled(!(pimpl_->home_form_.userEdit->text().isEmpty() || pimpl_->home_form_.codeEdit->text().isEmpty()));
 }
 
 namespace {
-bool email_check(const std::string &_email)
+bool email_check(const std::string& _email)
 {
     const std::regex pattern("(\\w+)(\\.|_)?(\\w*)@(\\w+)(\\.(\\w+))+");
     return std::regex_match(_email, pattern);
 }
 
-}//namespace
+} // namespace
 
-void MainWindow::createTextEdited(const QString& text) {
+void MainWindow::createTextEdited(const QString& text)
+{
     bool enable = true;
 
     enable = enable && !pimpl_->create_form_.userEdit->text().isEmpty();
@@ -875,7 +898,8 @@ void MainWindow::createTextEdited(const QString& text) {
     pimpl_->create_form_.createButton->setEnabled(enable);
 }
 
-void MainWindow::validateTextEdited(const QString& text) {
+void MainWindow::validateTextEdited(const QString& text)
+{
     bool enable = true;
 
     enable = enable && !pimpl_->home_form_.validateEmailEdit->text().isEmpty();
@@ -887,7 +911,8 @@ void MainWindow::emailValidationResentSlot()
     pimpl_->home_form_.validateEmailResendButton->setEnabled(true);
 }
 
-void MainWindow::amendLineEdited(const QString& text) {
+void MainWindow::amendLineEdited(const QString& text)
+{
     amendTextEdited();
 }
 
@@ -920,6 +945,6 @@ void MainWindow::resetTextEdited(const QString& text)
     pimpl_->reset_form_.resetButton->setEnabled(enable);
 }
 
-} //namespace auth
-} //namespace client
-} //namespace myapps
+} // namespace auth
+} // namespace client
+} // namespace myapps

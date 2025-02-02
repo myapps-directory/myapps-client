@@ -1,3 +1,21 @@
+// myapps/client/service/file_cache.hpp
+
+// This file is part of MyApps.directory project
+// Copyright (C) 2020, 2021, 2022, 2023, 2024, 2025 Valentin Palade (vipalade @ gmail . com)
+
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// at your option any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
 #pragma once
 #include "boost/filesystem.hpp"
 #include "solid/frame/common.hpp"
@@ -38,8 +56,9 @@ class File {
             _a(offset_, size_);
         }
 
-        bool operator<(const Range& _r)const {
-            return (offset_ + size_) <= _r.offset_ || ( offset_ < _r.offset_ && ((offset_ + size_) < (_r.offset_ + _r.size_)));
+        bool operator<(const Range& _r) const
+        {
+            return (offset_ + size_) <= _r.offset_ || (offset_ < _r.offset_ && ((offset_ + size_) < (_r.offset_ + _r.size_)));
         }
     };
     using RangeVectorT = std::vector<Range>;
@@ -58,9 +77,9 @@ public:
     void close();
 
     uint64_t write(const uint64_t _offset, std::istream& _ris);
-    bool read(char* _pbuf, uint64_t _offset, size_t _length, size_t& _rbytes_transfered_front, size_t& _rbytes_transfered_back);
+    bool     read(char* _pbuf, uint64_t _offset, size_t _length, size_t& _rbytes_transfered_front, size_t& _rbytes_transfered_back);
 
-    void write(const uint64_t _offset, const char *_pbuf, size_t _size);
+    void write(const uint64_t _offset, const char* _pbuf, size_t _size);
 
     void flush();
 
@@ -87,14 +106,15 @@ public:
         return size_;
     }
 
-    bool isComplete()const {
+    bool isComplete() const
+    {
         return range_vec_.size() == 1 && range_vec_.front().size_ == size_;
     }
 
 private:
     void addRange(const uint64_t _offset, const uint64_t _size);
     bool findRangeFront(const uint64_t _offset, size_t& _rsize) const;
-    bool findRangeBack(const uint64_t _offset, uint64_t &_rstart_offset, size_t& _rsize) const;
+    bool findRangeBack(const uint64_t _offset, uint64_t& _rstart_offset, size_t& _rsize) const;
 
     bool loadRanges();
     bool storeRanges();
@@ -110,14 +130,15 @@ struct FileData {
     virtual ~FileData() = default;
 
     uint64_t writeToCache(const uint64_t _offset, std::istream& _ris);
-    void writeToCache(const uint64_t _offset, const char *_pdata, size_t _size);
-    bool readFromCache(char* _pbuf, uint64_t _offset, size_t _length, size_t& _rbytes_transfered_front, size_t& _rbytes_transfered_back);
+    void     writeToCache(const uint64_t _offset, const char* _pdata, size_t _size);
+    bool     readFromCache(char* _pbuf, uint64_t _offset, size_t _length, size_t& _rbytes_transfered_front, size_t& _rbytes_transfered_back);
 
     size_t rageCount() const
     {
         return file_.rangeCount();
     }
-    bool isComplete()const {
+    bool isComplete() const
+    {
         return file_.isComplete();
     }
 };
@@ -163,4 +184,4 @@ public:
 } // namespace file_cache
 } // namespace service
 } // namespace client
-} //namespace myapps
+} // namespace myapps

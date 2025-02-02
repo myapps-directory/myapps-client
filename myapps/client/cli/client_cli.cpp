@@ -1,3 +1,21 @@
+// myapps/client/cli/client_cli.cpp
+
+// This file is part of MyApps.directory project
+// Copyright (C) 2020, 2021, 2022, 2023, 2024, 2025 Valentin Palade (vipalade @ gmail . com)
+
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// at your option any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
 #include "solid/frame/manager.hpp"
 #include "solid/frame/scheduler.hpp"
 #include "solid/frame/service.hpp"
@@ -668,7 +686,7 @@ void configure_service(Engine &_reng, AioSchedulerT &_rsch, frame::aio::Resolver
                 //_rctx.loadPrivateKeyFile(_reng.params().securePath("ola-client-front-key.pem").c_str());
                 return ErrorCodeT();
             },
-            frame::mprpc::openssl::NameCheckSecureStart{"front.myapps.directory"});
+            frame::mprpc::openssl::NameCheckSecureStart{"front.myapps.space"});
     }
     
     if(_reng.params().compress){
@@ -1643,7 +1661,7 @@ void on_upload_receive_response(
     promise<void> &prom,
     const string &zip_path)
 {
-    //cout<<"on_upload_receive_response"<<endl;
+    cout<<"on_upload_receive_response "<<_rerror.message()<<endl;
     if (!_rsent_msg_ptr->ifs_.eof()) {
         auto lambda = [&prom, &zip_path](
             frame::mprpc::ConnectionContext&        _rctx,

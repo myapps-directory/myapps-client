@@ -1,7 +1,25 @@
+// myapps/client/service/file_data.cpp
+
+// This file is part of MyApps.directory project
+// Copyright (C) 2020, 2021, 2022, 2023, 2024, 2025 Valentin Palade (vipalade @ gmail . com)
+
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// at your option any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
 #include "file_data.hpp"
-#include "solid/system/exception.hpp"
-#include "snappy.h"
 #include "lz4.h"
+#include "snappy.h"
+#include "solid/system/exception.hpp"
 #include <istream>
 
 using namespace std;
@@ -10,42 +28,44 @@ namespace myapps {
 namespace client {
 namespace service {
 namespace {
-    uint64_t stream_copy(std::ostream& _ros, std::istream& _ris) {
-        constexpr size_t buffer_size = 1024 * 32;
-        char buffer[buffer_size];
-        uint64_t size = 0;
+uint64_t stream_copy(std::ostream& _ros, std::istream& _ris)
+{
+    constexpr size_t buffer_size = 1024 * 32;
+    char             buffer[buffer_size];
+    uint64_t         size = 0;
 
-        do {
-            _ris.read(buffer, buffer_size);
-            auto read_count = _ris.gcount();
-            if (read_count) {
-                _ros.write(buffer, read_count);
-                size += read_count;
-            }
-        } while (!_ris.eof());
-        return size;
-    }
-
-
-    uint64_t stream_copy(string& _str, std::istream& _ris) {
-        constexpr size_t buffer_size = 1024 * 32;
-        char buffer[buffer_size];
-        uint64_t size = 0;
-
-        do {
-            _ris.read(buffer, buffer_size);
-            auto read_count = _ris.gcount();
-            if (read_count) {
-                _str.append(buffer, read_count);
-                size += read_count;
-            }
-        } while (!_ris.eof());
-        return size;
-    }
+    do {
+        _ris.read(buffer, buffer_size);
+        auto read_count = _ris.gcount();
+        if (read_count) {
+            _ros.write(buffer, read_count);
+            size += read_count;
+        }
+    } while (!_ris.eof());
+    return size;
 }
-uint32_t FileData::copy(std::istream& _ris, const uint64_t _chunk_size, const bool _is_compressed, bool &_rshould_wake_readers) {
-    uint32_t size = 0;
-    auto& rstub = *fetch_stub_ptr_;
+
+uint64_t stream_copy(string& _str, std::istream& _ris)
+{
+    constexpr size_t buffer_size = 1024 * 32;
+    char             buffer[buffer_size];
+    uint64_t         size = 0;
+
+    do {
+        _ris.read(buffer, buffer_size);
+        auto read_count = _ris.gcount();
+        if (read_count) {
+            _str.append(buffer, read_count);
+            size += read_count;
+        }
+    } while (!_ris.eof());
+    return size;
+}
+} // namespace
+uint32_t FileData::copy(std::istream& _ris, const uint64_t _chunk_size, const bool _is_compressed, bool& _rshould_wake_readers)
+{
+    uint32_t size  = 0;
+    auto&    rstub = *fetch_stub_ptr_;
     if (_is_compressed) {
         size = stream_copy(rstub.compressed_chunk_, _ris);
         rstub.current_chunk_offset_ += size;
@@ -59,17 +79,15 @@ uint32_t FileData::copy(std::istream& _ris, const uint64_t _chunk_size, const bo
                 const auto rv = LZ4_decompress_safe(rstub.compressed_chunk_.data(), uncompressed_data.data(), rstub.compressed_chunk_.size(), rstub.compress_chunk_capacity_);
                 solid_check(rv > 0);
                 uncompressed_size = rv;
-            }
-            else if (rstub.compress_algorithm_type_ == 0) {
+            } else if (rstub.compress_algorithm_type_ == 0) {
                 solid_check(snappy::Uncompress(rstub.compressed_chunk_.data(), rstub.compressed_chunk_.size(), &uncompressed_data));
                 uncompressed_size = uncompressed_data.size();
-            }
-            else {
+            } else {
                 solid_throw("Unkown compress algorithm type: " << (int)rstub.compress_algorithm_type_);
             }
-            
+
             this->writeToCache(rstub.chunkIndexToOffset(rstub.current_chunk_index_), uncompressed_data.data(), uncompressed_size);
-            
+
             _rshould_wake_readers = tryFillReads(uncompressed_data, rstub.chunkIndexToOffset(rstub.current_chunk_index_), uncompressed_size);
 
             rstub.decompressed_size_ += uncompressed_size;
@@ -78,8 +96,7 @@ uint32_t FileData::copy(std::istream& _ris, const uint64_t _chunk_size, const bo
             rstub.nextChunk();
             solid_check(rstub.empty() == rstub.chunk_dq_.empty());
         }
-    }
-    else {
+    } else {
         size = stream_copy(rstub.compressed_chunk_, _ris);
         rstub.current_chunk_offset_ += size;
         solid_check(rstub.current_chunk_offset_ <= _chunk_size);
@@ -101,9 +118,9 @@ uint32_t FileData::copy(std::istream& _ris, const uint64_t _chunk_size, const bo
 
 bool FileData::readFromCache(ReadData& _rdata)
 {
-    size_t bytes_transfered_front = 0;
-    size_t bytes_transfered_back = 0;
-    const bool   b = file_cache::FileData::readFromCache(_rdata.pbuffer_, _rdata.offset_, _rdata.size_, bytes_transfered_front, bytes_transfered_back);
+    size_t     bytes_transfered_front = 0;
+    size_t     bytes_transfered_back  = 0;
+    const bool b                      = file_cache::FileData::readFromCache(_rdata.pbuffer_, _rdata.offset_, _rdata.size_, bytes_transfered_front, bytes_transfered_back);
     _rdata.bytes_transfered_ += (bytes_transfered_front + bytes_transfered_back);
     _rdata.pbuffer_ += bytes_transfered_front;
     _rdata.offset_ += bytes_transfered_front;
@@ -112,18 +129,19 @@ bool FileData::readFromCache(ReadData& _rdata)
     return b;
 }
 
-bool FileData::readFromMemory(ReadData& _rdata, const std::string& _data, const uint64_t _offset, const size_t _size) {
+bool FileData::readFromMemory(ReadData& _rdata, const std::string& _data, const uint64_t _offset, const size_t _size)
+{
     if (_size) {
         uint64_t end_offset = _offset + _size;
         if (_rdata.offset_ >= _offset && _rdata.offset_ < end_offset) {
-            //we can copy the front part
+            // we can copy the front part
             size_t to_copy = _size - (_rdata.offset_ - _offset);
             if (to_copy > _rdata.size_) {
                 to_copy = _rdata.size_;
             }
-            
+
             memcpy(_rdata.pbuffer_, _data.data() + _rdata.offset_ - _offset, to_copy);
-            
+
             _rdata.bytes_transfered_ += to_copy;
             _rdata.offset_ += to_copy;
             _rdata.pbuffer_ += to_copy;
@@ -137,7 +155,7 @@ bool FileData::readFromMemory(ReadData& _rdata, const std::string& _data, const 
             }
 
             memcpy(_rdata.pbuffer_ + _rdata.size_ - to_copy, _data.data(), to_copy);
-            
+
             _rdata.bytes_transfered_ += to_copy;
             _rdata.size_ -= to_copy;
         }
@@ -147,23 +165,21 @@ bool FileData::readFromMemory(ReadData& _rdata, const std::string& _data, const 
 
 bool FileData::tryFillReads(const std::string& _data, const uint64_t _offset, const size_t _size)
 {
-    bool ret_val = false;
-    auto& rstub = *fetch_stub_ptr_;
+    bool  ret_val = false;
+    auto& rstub   = *fetch_stub_ptr_;
     for (auto* prd = rstub.pfront_; prd != nullptr;) {
 
         if (readFromMemory(*prd, _data, _offset, _size)) {
-        }
-        else {
+        } else {
             readFromCache(*prd);
         }
         if (prd->size_ == 0) {
             auto tmp = prd;
-            prd = prd->pprev_;
+            prd      = prd->pprev_;
             rstub.erase(*tmp);
             tmp->done_ = true;
-            ret_val = true;
-        }
-        else {
+            ret_val    = true;
+        } else {
             prd = prd->pprev_;
         }
     }
@@ -172,4 +188,4 @@ bool FileData::tryFillReads(const std::string& _data, const uint64_t _offset, co
 
 } // namespace service
 } // namespace client
-} //namespace myapps
+} // namespace myapps

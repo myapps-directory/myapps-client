@@ -1,3 +1,21 @@
+// myapps/client/auth/main_window.hpp
+
+// This file is part of MyApps.directory project
+// Copyright (C) 2020, 2021, 2022, 2023, 2024, 2025 Valentin Palade (vipalade @ gmail . com)
+
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// at your option any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
 #pragma once
 
 #include "solid/system/pimpl.hpp"
@@ -15,27 +33,27 @@ struct AmendFetch {
     QString email_;
 };
 
-using Uint8VectorT = std::vector<uint8_t>;
-using CaptchaPointerT = QSharedPointer<Uint8VectorT>;
+using Uint8VectorT       = std::vector<uint8_t>;
+using CaptchaPointerT    = QSharedPointer<Uint8VectorT>;
 using AmendFetchPointerT = QSharedPointer<AmendFetch>;
 
 struct Configuration {
-    using AuthenticateFunctionT = std::function<bool(const std::string&, const std::string&, const std::string &)>;
-    using CreateFunctionT = std::function<bool(const std::string&, const std::string &, const std::string &, const std::string &)>;
-    using AmendFunctionT = std::function<bool(const std::string&, const std::string &, const std::string &, const std::string &)>;
-    using ValidateFunctionT = std::function<bool(const std::string&)>;
-    using ResendValidateFunctionT     = std::function<bool()>;
-    using AuthFetchFunctionT = std::function<bool()>;
-    using LogoutFunctionT = std::function<bool()>;
-    using ForgotFunctionT = std::function<bool(const std::string&, const std::string&)>;
-    using ResetFunctionT = std::function<bool(const std::string&, const std::string&, const std::string&)>;
-    using DeleteAccountFunctionT = std::function<bool(const std::string&, const std::string&)>;
+    using AuthenticateFunctionT   = std::function<bool(const std::string&, const std::string&, const std::string&)>;
+    using CreateFunctionT         = std::function<bool(const std::string&, const std::string&, const std::string&, const std::string&)>;
+    using AmendFunctionT          = std::function<bool(const std::string&, const std::string&, const std::string&, const std::string&)>;
+    using ValidateFunctionT       = std::function<bool(const std::string&)>;
+    using ResendValidateFunctionT = std::function<bool()>;
+    using AuthFetchFunctionT      = std::function<bool()>;
+    using LogoutFunctionT         = std::function<bool()>;
+    using ForgotFunctionT         = std::function<bool(const std::string&, const std::string&)>;
+    using ResetFunctionT          = std::function<bool(const std::string&, const std::string&, const std::string&)>;
+    using DeleteAccountFunctionT  = std::function<bool(const std::string&, const std::string&)>;
 
     QString                 login_;
-    AuthenticateFunctionT authenticate_fnc_;
-    CreateFunctionT       create_fnc_;
-    AmendFunctionT        amend_fnc_;
-    ValidateFunctionT     validate_fnc_;
+    AuthenticateFunctionT   authenticate_fnc_;
+    CreateFunctionT         create_fnc_;
+    AmendFunctionT          amend_fnc_;
+    ValidateFunctionT       validate_fnc_;
     ResendValidateFunctionT resend_validate_fnc_;
     AuthFetchFunctionT      auth_fetch_fnc_;
     LogoutFunctionT         logout_fnc_;
@@ -46,28 +64,25 @@ struct Configuration {
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
-    
-public:
-    
 
+public:
     MainWindow(QWidget* parent = 0);
     ~MainWindow();
 
     void setUser(const std::string& _user);
 
     void start(
-        Configuration &&_config
-    );
+        Configuration&& _config);
 
     void onCaptcha(std::vector<uint8_t>&& _captcha_image);
     void onAmendFetch(const std::string& _user, const std::string& _email);
     void onEmailValidationResent();
     void onDeleteAccountResponse(const std::string& _error);
- 
+
 signals:
     void closeSignal();
     void onlineSignal(bool);
-    //void authSignal(bool);
+    // void authSignal(bool);
     void authSignal(const QString&);
     void authValidateSignal();
 
@@ -120,9 +135,9 @@ private:
     struct Data;
     solid::PimplT<Data> pimpl_;
 };
-} //namespace auth
-} //namespace client
-} //namespace myapps
+} // namespace auth
+} // namespace client
+} // namespace myapps
 
 Q_DECLARE_METATYPE(myapps::client::auth::CaptchaPointerT);
 Q_DECLARE_METATYPE(myapps::client::auth::AmendFetchPointerT);

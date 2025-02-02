@@ -1,3 +1,21 @@
+// myapps/client/service/file_cache.cpp
+
+// This file is part of MyApps.directory project
+// Copyright (C) 2020, 2021, 2022, 2023, 2024, 2025 Valentin Palade (vipalade @ gmail . com)
+
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// at your option any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
 #include "file_cache.hpp"
 #include "myapps/common/utility/encode.hpp"
 #include "solid/system/cassert.hpp"
@@ -101,13 +119,13 @@ struct FileStubLess {
 
 using FileMapT        = std::map<FileStub*, size_t, FileStubLess>;
 using ApplicationMapT = std::unordered_map<std::reference_wrapper<const string>, ApplicationStub*, Hash, Equal>;
-//using ApplicationMapT = std::map<std::reference_wrapper<const string>, ApplicationStub*, Less>;
+// using ApplicationMapT = std::map<std::reference_wrapper<const string>, ApplicationStub*, Less>;
 using ApplicationDqT    = std::deque<ApplicationStub>;
 using FileDqT           = std::deque<FileStub>;
 using ApplicationStackT = std::stack<ApplicationStub*>;
 using IndexStackT       = std::stack<size_t>;
 
-} //namespace
+} // namespace
 //-----------------------------------------------------------------------------
 
 struct Engine::Implementation {
@@ -479,13 +497,13 @@ void Engine::Implementation::doneUsingFile(FileData& _rfd)
 
     FileStub& rfs = file_dq_[_rfd.cache_index_];
 
-    //file_map_.erase(&rfs);
+    // file_map_.erase(&rfs);
 
     rfs.in_use_ = false;
-    //rfs.usage_  = computeUsage();
+    // rfs.usage_  = computeUsage();
     _rfd.file_.usage(rfs.usage_);
 
-    //file_map_[&rfs] = _rfd.cache_index_;
+    // file_map_[&rfs] = _rfd.cache_index_;
 
     _rfd.cache_index_ = solid::InvalidIndex();
 }
@@ -517,8 +535,8 @@ void Engine::Implementation::flush(FileData& _rfd)
 
     FileStub& rfs = file_dq_[_rfd.cache_index_];
     file_map_.erase(&rfs);
-    //TODO: find a better way to keep file usage
-    //rfs.usage_      = computeUsage();
+    // TODO: find a better way to keep file usage
+    // rfs.usage_      = computeUsage();
     file_map_[&rfs] = _rfd.cache_index_;
     solid_log(logger, Info, _rfd.cache_index_ << ' ' << rfs.usage_);
 
@@ -531,10 +549,10 @@ void Engine::Implementation::removeApplication(ApplicationStub& _rapp)
     solid_log(logger, Info, _rapp.name_ << ' ' << _rapp.build_);
     for (const auto& p : _rapp.file_map_) {
         FileStub& rfs = file_dq_[p.second];
-        //auto      path = computeFilePath(_rapp.name_, _rapp.build_, rfs.name_);
+        // auto      path = computeFilePath(_rapp.name_, _rapp.build_, rfs.name_);
 
-        //boost::system::error_code err;
-        //fs::remove(path, err);
+        // boost::system::error_code err;
+        // fs::remove(path, err);
         file_map_.erase(&rfs);
         rfs.clear();
         file_free_index_stack_.push(p.second);
@@ -624,8 +642,7 @@ bool File::open(const fs::path& _path, const uint64_t _size)
                     fs::remove(_path, err);
                     return false;
                 }
-            }
-            else {
+            } else {
                 size_ = h.data().size_;
             }
             if (!loadRanges()) {
@@ -634,19 +651,17 @@ bool File::open(const fs::path& _path, const uint64_t _size)
                 fs::remove(_path, err);
                 return false;
             }
-        }
-        else {
+        } else {
             stream_.clear();
             BufferWrapper<Header> h;
             h.data().size_ = _size;
             stream_.seekp(0);
             stream_.write(h.buffer(), h.size);
             modified_range_ = true;
-            modified_head_ = true;
+            modified_head_  = true;
         }
         return true;
-    }
-    else {
+    } else {
         solid_log(logger, Error, this << " could not open file " << _path.generic_string() << ": " << strerror(errno));
         return false;
     }
@@ -655,14 +670,14 @@ bool File::open(const fs::path& _path, const uint64_t _size)
 bool File::loadRanges()
 {
     stream_.seekg(sizeof(Header) + size_);
-    size_t s = -1; //dummy value
+    size_t s = -1; // dummy value
 
     try {
         cereal::BinaryInputArchive a(stream_);
 
         a(range_vec_, s);
     } catch (...) {
-        //solid_assert(false);
+        // solid_assert(false);
         return false;
     }
     solid_log(logger, Info, this << " " << range_vec_.size() << " " << s);
@@ -740,26 +755,25 @@ bool File::read(char* _pbuf, uint64_t _offset, size_t _length, size_t& _rbytes_t
         stream_.read(_pbuf, len);
         solid_assert(len == stream_.gcount());
         _rbytes_transfered_front = len;
-        
-        if (len == _length) return true;
+
+        if (len == _length)
+            return true;
 
         _offset += len;
         _length -= len;
         _pbuf += len;
-    }
-    else {
+    } else {
         _rbytes_transfered_front = 0;
     }
-    
+
     uint64_t read_offset = 0;
-    len = _length;
+    len                  = _length;
     if (findRangeBack(_offset, read_offset, len)) {
         stream_.seekg(sizeof(Header) + read_offset);
         stream_.read(_pbuf + (_length - len), len);
         solid_assert(len == stream_.gcount());
         _rbytes_transfered_back = len;
-    }
-    else {
+    } else {
         _rbytes_transfered_back = 0;
     }
     return false;
@@ -768,9 +782,9 @@ bool File::read(char* _pbuf, uint64_t _offset, size_t _length, size_t& _rbytes_t
 uint64_t File::write(const uint64_t _offset, std::istream& _ris)
 {
     constexpr size_t buffer_capacity = 4096;
-    uint64_t read_count = 0;
+    uint64_t         read_count      = 0;
     if (stream_.is_open()) {
-        char     buffer[buffer_capacity];
+        char buffer[buffer_capacity];
 
         stream_.seekp(sizeof(Header) + _offset);
 
@@ -786,8 +800,7 @@ uint64_t File::write(const uint64_t _offset, std::istream& _ris)
         modified_range_ = true;
         flush();
         solid_log(logger, Info, this << " " << range_vec_.size());
-    }
-    else {
+    } else {
         solid_log(logger, Warning, this << " stream not open!");
     }
     return read_count;
@@ -843,7 +856,7 @@ bool File::findRangeBack(const uint64_t _offset, uint64_t& _rstart_offset, size_
         return _rr.offset_ < _o;
     };
 
-    const auto end_offset = _offset + _rsize;
+    const auto end_offset  = _offset + _rsize;
     const auto last_offset = _offset + _rsize - 1;
 
     const auto it = lower_bound(range_vec_.begin(), range_vec_.end(), last_offset, less_cmp);
@@ -852,7 +865,7 @@ bool File::findRangeBack(const uint64_t _offset, uint64_t& _rstart_offset, size_
         auto prev_it = it - 1;
         solid_assert(last_offset > prev_it->offset_);
         if (last_offset < (prev_it->offset_ + prev_it->size_)) {
-            _rstart_offset = prev_it->offset_;
+            _rstart_offset     = prev_it->offset_;
             const auto remsize = end_offset - prev_it->offset_;
             if (remsize < _rsize) {
                 _rsize = remsize;
@@ -864,7 +877,7 @@ bool File::findRangeBack(const uint64_t _offset, uint64_t& _rstart_offset, size_
         solid_assert(last_offset <= it->offset_);
         if (last_offset == it->offset_) {
             _rstart_offset = it->offset_;
-            _rsize = 1;
+            _rsize         = 1;
             return true;
         }
     }
@@ -888,7 +901,7 @@ void File::addRange(const uint64_t _offset, const uint64_t _size)
                 it             = prev_it;
                 goto Optimize;
             } else {
-                //range already contained
+                // range already contained
                 return;
             }
         }
@@ -913,7 +926,7 @@ Optimize:
     auto nextit = it + 1;
     while (nextit != range_vec_.end()) {
         if (nextit->offset_ <= (it->offset_ + it->size_)) {
-            //overlapping
+            // overlapping
             if ((it->offset_ + it->size_) < (nextit->offset_ + nextit->size_)) {
                 it->size_ = (nextit->offset_ + nextit->size_) - it->offset_;
             }
@@ -991,7 +1004,7 @@ bool FileData::readFromCache(char* _pbuf, uint64_t _offset, size_t _length, size
     return file_.read(_pbuf, _offset, _length, _rbytes_transfered_front, _rbytes_transfered_back);
 }
 
-} //namespace file_cache
-} //namespace service
-} //namespace client
-} //namespace myapps
+} // namespace file_cache
+} // namespace service
+} // namespace client
+} // namespace myapps

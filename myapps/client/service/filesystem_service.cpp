@@ -1,3 +1,21 @@
+// myapps/client/service/filesystem_service.cpp
+
+// This file is part of MyApps.directory project
+// Copyright (C) 2020, 2021, 2022, 2023, 2024, 2025 Valentin Palade (vipalade @ gmail . com)
+
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// at your option any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
 #undef UNICODE
 #define UNICODE
 #undef _WINSOCKAPI_
@@ -380,12 +398,13 @@ string env_temp_prefix()
     return v;
 }
 
-string env_mount_point(){
+string env_mount_point()
+{
     const char* home_drive = getenv("HOMEDRIVE");
     const char* home_path  = getenv("HOMEPATH");
     if (home_drive) {
         if (home_path) {
-            return string(home_drive)+ "\\" + string(home_path) + "\\MyApps.dir";
+            return string(home_drive) + "\\" + string(home_path) + "\\MyApps.dir";
         } else {
             return string(home_drive) + "\\MyApps.dir";
         }
@@ -475,7 +494,7 @@ bool Parameters::parse(ULONG argc, PWSTR* argv)
         options_description config(string(service_name) + " configuration options");
         // clang-format off
         config.add_options()
-            ("debug-modules,M", value<std::vector<std::string>>(&this->debug_modules_)->default_value(std::vector<std::string>{"myapps::.*:VIEW", ".*:EWX", "\\*:VIEWX"}), "Debug logging modules")
+            ("debug-modules,M", value<std::vector<std::string>>(&this->debug_modules_)->default_value(std::vector<std::string>{"myapps::.*:EWX", ".*:EWX", "\\*:EWX"}), "Debug logging modules")
             ("debug-address,A", value<string>(&debug_addr_)->default_value(""), "Debug server address (e.g. on linux use: nc -l 9999)")
             ("debug-port,P", value<string>(&debug_port_)->default_value("9999"), "Debug server port (e.g. on linux use: nc -l 9999)")
             ("debug-console,C", value<bool>(&debug_console_)->implicit_value(true)->default_value(false), "Debug console")
