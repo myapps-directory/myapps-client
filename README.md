@@ -14,9 +14,7 @@ All rights reserved.
 
 # What to expect
 
- * Use the MyApps.Directory Client application at your own risk!
- 
- Currently it is in early preview version and one might experience crashes and different scenarios not running as expected. Please bare with it and if possible, report bugs.
+ * __Use the MyApps.Directory Client application at your own risk! Currently it is in early preview version and one might experience crashes and different scenarios not running as expected. Please bare with it and if possible, report bugs__.
  * For now, the server side runs on a development cluster of RaspberryPis with no guaranteed outbound bandwidth - expect low download speeds and high latencies.
  * The communication with the server is SSL encrypted.
  * Currently only a limited number of one hour time long Demo accounts are available.
