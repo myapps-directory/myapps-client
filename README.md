@@ -1,6 +1,79 @@
-# myapps-client
+# MyApps.directory Client
 
-MyApps.directory - client side 
+Windows x86_64 Client preview application for accessing MyApps.Directory Applications.
+
+## Copyright
+
+Copyright &copy; 2020-present Valentin Palade (vipalade @ gmail.com).
+
+All rights reserved.
+
+## License
+
+[GPLv3](LICENSE)
+
+# What to expect
+
+ * Use the MyApps.Directory Client application at your own risk!
+ Currently it is in preview version and one might experience crashes and different scenarios not running as expected. Please bare with it and if possible, report bugs.
+ * For now, the server side runs on a development cluster of RaspberryPis with no guaranteed outbound bandwidth - expect low download speeds and high latencies.
+ * The communication with the server is SSL encrypted.
+
+# Install steps
+
+Download the latest release asset from [GitHub MyApps.Directory-Client releases page](https://github.com/myapps-directory/myapps-client/releases).
+
+The client application depends on [WinFsp](https://winfsp.dev/) to be installed.
+If you already have it installed download and install the msi package; otherwise choose for the bundle. Follow the steps from either one.
+
+
+# Configuration
+Once successfully installed, the MyApps.Directory Authentication window should appear on screen:
+
+![Authentication](media/p01.png)
+
+In order to start with an one hour time limited demo account just fill the Captha string and either hit enter or push the "Demo Login" button.
+There are only a limited number of available demo account slots. If you receive an authentication error, it can be either that the Captha is wrong or that there are no available slots.
+
+If everythig is ok, you should see:
+![Authentication Success](media/p02.png)
+
+You can now close the Authentication window, start Windows Explorer (`Win`+ E) and go to home folder - there you should see a new MyApps.dir folder as in the picture below.
+
+![MyApps.dir](media/p03.png)
+
+Double click the MyApps.dir to open the folder.
+So far there is only one application available - __MyApps.Directory Store__. It can be used to enable different other applications from the MyApps.Directory Store.
+
+![MyApps.Directory Store](media/p04.png)
+
+Launch __MyApps.Directory Store__.
+
+![MyApps.Directory Store](media/p05.png)
+
+Double click on an application from the Store (e.g. VLC):
+
+![MyApps.Directory Store - VLC](media/p06.png)
+
+To enable the Application locally, just click the green button:
+
+![MyApps.Directory Store - Enable](media/p07.png)
+
+Now, move back to the Windows Explorer MyApps.Dir window and wait for a few seconds (sometimes refreshing the content might be required) for the shortcut to the enabled application to appear.
+
+![Explorer - VLC](media/p08.png)
+
+Double click the shortcut to start the application - wait for a few seconds for the application data to be downloaded and for the application to start.
+
+![VLC](media/p09.png)
+
+At this point, the MyApps.Directory Client application will only download the strictly necessary files for the application to run and cache them locally so that subsequent runs will start faster.
+
+## Server side
+
+![RaspberryPI](media/rpi.png)
+
+The server side runs on a small development cluster of RaspberryPIs.
 
 ## Configure build
 
