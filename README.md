@@ -1,6 +1,7 @@
 # MyApps.directory Client
 
-Windows x86_64 Client preview application for accessing MyApps.Directory Applications.
+The Application Repository Filesystem - Run any available applications from the repository without installing it on the local machine.
+For now the MyApps.directory Client is only available for Windows 10/11 x86_64
 
 ## Copyright
 
@@ -14,10 +15,10 @@ All rights reserved.
 
 # What to expect
 
- * __Use the MyApps.Directory Client application at your own risk! Currently it is in early preview version and one might experience crashes and different scenarios not running as expected. Please bare with it and if possible, report bugs__.
+ * __Use the MyApps.Directory Client application at your own risk! Currently it is in early preview stage thus one might experience crashes and different scenarios not running as expected. Please bare with it and if possible, report bugs__.
  * For now, the server side runs on a development cluster of RaspberryPis with no guaranteed outbound bandwidth - expect low download speeds and high latencies.
  * The communication with the server is SSL encrypted.
- * Currently only a limited number of one hour time long Demo accounts are available.
+ * Currently only a limited number of one hour time limited Demo accounts are available.
 
 # Install steps
 
