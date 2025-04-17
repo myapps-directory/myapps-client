@@ -1336,6 +1336,12 @@ bool Engine::read(Descriptor* _pdesc, void* _pbuf, uint64_t _offset, unsigned lo
     return false;
 }
 
+void Engine::clearCache(){
+    solid_log(logger, Info, "clearCache()");
+    unique_lock<mutex> lock(pimpl_->root_mutex_);
+    pimpl_->updateApplications({});
+}
+
 // -- Implementation --------------------------------------------------------------------
 
 void Engine::Implementation::releaseApplication(Entry& _rapp_entry)
@@ -1363,6 +1369,7 @@ void Engine::Implementation::releaseApplication(Entry& _rapp_entry)
                     new_app_id_vec.emplace_back(std::move(rad.app_id_), std::move(rad.app_unique_));
                     solid_log(logger, Info, "app " << rad.app_unique_ << " to be updated");
                 }
+
                 config_.folder_update_fnc_("");
             }
         }

@@ -549,10 +549,10 @@ void Engine::Implementation::removeApplication(ApplicationStub& _rapp)
     solid_log(logger, Info, _rapp.name_ << ' ' << _rapp.build_);
     for (const auto& p : _rapp.file_map_) {
         FileStub& rfs = file_dq_[p.second];
-        // auto      path = computeFilePath(_rapp.name_, _rapp.build_, rfs.name_);
+        auto      path = computeFilePath(_rapp.name_, _rapp.build_, rfs.name_);
 
-        // boost::system::error_code err;
-        // fs::remove(path, err);
+        boost::system::error_code err;
+        fs::remove(path, err);
         file_map_.erase(&rfs);
         rfs.clear();
         file_free_index_stack_.push(p.second);

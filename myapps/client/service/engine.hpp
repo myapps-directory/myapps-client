@@ -114,6 +114,8 @@ public:
     bool read(Descriptor* _pdesc, void* _pbuf, uint64_t _offset, unsigned long _length, unsigned long& _rbytes_transfered);
 
     void post(std::function<void(Engine&)>&&);
+
+    void clearCache();
 };
 
 } // namespace service

@@ -3,7 +3,7 @@ cmake_policy(SET CMP0091 NEW)
 cmake_policy(SET CMP0115 NEW)
 cmake_policy(SET CMP0135 NEW)
 
-project(MyAppsClient VERSION 0.16)
+project(MyAppsClient VERSION 0.17)
 
 set(EXTERNAL_DIR "" CACHE PATH "External dependencies folder")
 
@@ -57,8 +57,7 @@ set(QTPREFIX_DIR "" CACHE PATH "QT Prefix directory")
 
 message("project build type: ${CMAKE_BUILD_TYPE}")
 
-#set(MYAPPS_FRONT_URL "front.myapps.directory:443" CACHE STRING "MyApps.directory Front Default URL")
-set(MYAPPS_FRONT_URL "viphost.go.ro:4443" CACHE STRING "MyApps.directory Front Default URL")
+set(MYAPPS_FRONT_URL "front.myapps.directory:443" CACHE STRING "MyApps.directory Front Default URL")
 set(EXTRA_DEFINITIONS "${EXTRA_DEFINITIONS}" CACHE STRING "Extra compiler definitions")
 add_definitions(${EXTRA_DEFINITIONS})
 

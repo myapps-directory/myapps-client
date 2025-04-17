@@ -978,14 +978,21 @@ void FileSystemService::onAuthFileChange(const chrono::system_clock::time_point&
             }
             return;
         }else{
-            auth_token_ = token;
             if(wait_status_ == WaitStatusE::Wait){
+                auth_token_ = token;
                 wait_status_ = WaitStatusE::Done;
                 condition_.notify_one();
             }
             else {
-                lock.unlock();
-                engine_.relogin();
+                if(user.empty() and not auth_token_.empty()){
+                    wait_status_ = WaitStatusE::Restart;
+                    //engine_.clearCache();
+                    Stop(); 
+                }else{
+                    auth_token_ = token;
+                    lock.unlock();
+                    engine_.relogin();
+                }
             }
         }
     }else{
@@ -995,6 +1002,7 @@ void FileSystemService::onAuthFileChange(const chrono::system_clock::time_point&
             condition_.notify_one();
         }else{
             wait_status_ = WaitStatusE::Restart;
+            //engine_.clearCache();
             Stop();
         }
         return;
@@ -1148,6 +1156,7 @@ NTSTATUS FileSystemService::OnStart(ULONG argc, PWSTR *argv)
             auth_token_ = _message;
             myapps::client::utility::auth_update(authDataFilePath(), auth_file_time_point_, auth_endpoint_, auth_user_, auth_token_);
         }else if(_error != 0){
+            solid_log(solid::generic_logger, Warning, "Authentication error: "<<_error<<" ["<<_message<<"");
             lock_guard<mutex> lock(mutex_);
             guiStart();
         }
@@ -1162,7 +1171,10 @@ NTSTATUS FileSystemService::OnStart(ULONG argc, PWSTR *argv)
 	};
 #endif
     cfg.folder_update_fnc_ = [this](const std::string &_folder){
-        SHChangeNotify(SHCNE_UPDATEDIR, SHCNF_PATH | SHCNF_FLUSHNOWAIT, params_.mount_point_.c_str(), NULL);
+        
+        solid_log(solid::generic_logger, Warning, "Folder update: "<<_folder<<" - SHCNE_UPDATEDIR "<< utility::narrow(params_.mount_point_));
+        
+        SHChangeNotify(SHCNE_UPDATEDIR, SHCNF_PATH | SHCNF_FLUSHNOWAIT, params_.mount_point_.c_str(), params_.mount_point_.c_str());
     };
 
     cfg.invalidate_cache_fnc_ = [this](const std::string &_app){
