@@ -16,6 +16,9 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+
+#include "yaml-cpp/yaml.h"
+
 #include "solid/frame/manager.hpp"
 #include "solid/frame/scheduler.hpp"
 #include "solid/frame/service.hpp"
@@ -50,8 +53,6 @@
 
 #define REPLXX_STATIC
 #include "replxx.hxx"
-
-#include "yaml-cpp/yaml.h"
 
 #include "lz4.h"
 

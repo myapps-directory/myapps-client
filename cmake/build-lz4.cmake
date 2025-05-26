@@ -4,7 +4,7 @@ ExternalProject_Add(
     build-lz4
     EXCLUDE_FROM_ALL 1
     PREFIX ${lz4_PREFIX}
-    URL https://github.com/lz4/lz4/archive/refs/tags/v1.9.3.tar.gz
+    URL https://github.com/lz4/lz4/releases/download/v1.10.0/lz4-1.10.0.tar.gz
     DOWNLOAD_NO_PROGRESS ON
     SOURCE_SUBDIR build/cmake/
     CMAKE_ARGS

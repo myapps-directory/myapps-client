@@ -20,7 +20,7 @@ target_link_libraries (myapps_cli
     ${SYSTEM_BASIC_LIBRARIES}
     ${SYSTEM_DYNAMIC_LOAD_LIBRARY}
     ${LIBREPLXX_LIBRARIES}
-    ${LIBYAML_LIBRARIES}
+    yaml-cpp::yaml-cpp
     Threads::Threads
 )
 
@@ -28,7 +28,7 @@ set_target_properties(
     myapps_cli PROPERTIES
         VS_DEBUGGER_WORKING_DIRECTORY $<TARGET_FILE_DIR:myapps_cli>)
 
-add_dependencies(myapps_cli build-snappy build-lz4 build-yaml build-replxx build-cereal)
+add_dependencies(myapps_cli build-snappy build-lz4 yaml-cpp build-replxx build-cereal)
 
 install(TARGETS myapps_cli RUNTIME DESTINATION bin)
 install(DIRECTORY $<TARGET_FILE_DIR:myapps_cli>/certs DESTINATION "bin")
