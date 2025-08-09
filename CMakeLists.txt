@@ -3,7 +3,7 @@ cmake_policy(SET CMP0091 NEW)
 cmake_policy(SET CMP0115 NEW)
 cmake_policy(SET CMP0135 NEW)
 
-project(MyAppsClient VERSION 0.18)
+project(MyAppsClient VERSION 0.19)
 
 set(EXTERNAL_DIR "" CACHE PATH "External dependencies folder")
 
@@ -233,8 +233,8 @@ set(CPACK_WIX_EXTRA_SOURCES             "${CMAKE_BINARY_DIR}/cpack/wix/custom_ac
 
 if(WIN32)
     set(WIX_BUNDLE_ICON "${CMAKE_SOURCE_DIR}/myapps/client/auth/auth.ico")
-    set(WIX_BUNDLE_WINFSP_MSI src/winfsp-2.0.23075.msi)
-    set(WIX_BUNDLE_WINFSP_URL https://github.com/winfsp/winfsp/releases/download/v2.0/winfsp-2.0.23075.msi)
+    set(WIX_BUNDLE_WINFSP_MSI src/winfsp-2.1.25156.msi)
+    set(WIX_BUNDLE_WINFSP_URL https://github.com/winfsp/winfsp/releases/download/v2.1/winfsp-2.1.25156.msi)
 
     ExternalProject_Add(
         WinFSP_Download
